@@ -61,6 +61,12 @@ header p,
   font-size: 1rem;
 }
 
+.tree-panel > h2,
+.tree-panel > .muted,
+.tree-panel > .warnings {
+  flex-shrink: 0;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -140,25 +146,57 @@ button:disabled {
 
 .tree-panel {
   min-height: 70vh;
+  height: calc(100vh - 96px);
+  max-height: calc(100vh - 96px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-.tree,
-.tree ul {
-  list-style: none;
+.tree-viewport {
+  overflow: auto;
+  flex: 1;
+  min-height: 200px;
+  margin-top: 12px;
+  border: 1px solid #d5dbe3;
+  border-radius: 8px;
+}
+
+.tree-spacer {
   margin: 0;
-  padding-left: 16px;
+  padding: 0;
+  pointer-events: none;
 }
 
 .tree {
-  padding-left: 0;
-  margin-top: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tree > li {
+  height: 28px;
+  margin: 0;
+  padding: 0;
 }
 
 .tree-row {
   display: flex;
   align-items: center;
   gap: 6px;
+  height: 28px;
   min-height: 28px;
+  max-height: 28px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.tree-row .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
 }
 
 .twist {
