@@ -64,6 +64,7 @@ export interface ScanWarning {
 export type ScanStatus = "running" | "completed" | "cancelled" | "failed";
 
 export interface ScanProgress {
+  scanId: number;
   processedCount: number;
   currentPath: string;
   status: ScanStatus;

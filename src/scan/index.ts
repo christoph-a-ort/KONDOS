@@ -6,4 +6,4 @@ export {
   startScan,
   subscribeScanProgress,
 } from "./api";
-export { toUserError } from "./errors";
+export { toUserError, isCancelledError, isProgressForScan } from "./errors";

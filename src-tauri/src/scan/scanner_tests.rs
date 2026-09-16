@@ -55,7 +55,7 @@ impl TempTree {
     fn scan(&self, adjust: impl FnOnce(&mut ScanConfig)) -> ScanResult {
         let mut config = self.base_config();
         adjust(&mut config);
-        run(config, &AtomicBool::new(false), |_| {}).expect("scan")
+        run(config, &AtomicBool::new(false), 1, |_| {}).expect("scan")
     }
 }
 
@@ -386,7 +386,7 @@ fn invalid_roots_are_rejected() {
         include_created_at: false,
         include_modified_at: false,
     };
-    let err = run(missing, &AtomicBool::new(false), |_| {}).unwrap_err();
+    let err = run(missing, &AtomicBool::new(false), 1, |_| {}).unwrap_err();
     assert_eq!(err.kind, AppErrorKind::InvalidPath);
 
     let file_root = TempTree::new("file-root");
@@ -397,7 +397,7 @@ fn invalid_roots_are_rejected() {
         .join("not-a-dir.txt")
         .to_string_lossy()
         .into_owned();
-    let err = run(as_file, &AtomicBool::new(false), |_| {}).unwrap_err();
+    let err = run(as_file, &AtomicBool::new(false), 1, |_| {}).unwrap_err();
     assert_eq!(err.kind, AppErrorKind::InvalidPath);
 }
 
@@ -433,7 +433,7 @@ fn cancel_before_walk_does_not_panic() {
     let tree = TempTree::new("cancel");
     tree.write_file("a.txt", b"a");
     let cancel = AtomicBool::new(true);
-    let err = run(tree.base_config(), &cancel, |_| {}).unwrap_err();
+    let err = run(tree.base_config(), &cancel, 1, |_| {}).unwrap_err();
     assert_eq!(err.kind, AppErrorKind::Cancelled);
 }
 
@@ -442,13 +442,13 @@ fn cancel_before_walk_does_not_panic() {
 fn rescan_after_success_and_cancel_works() {
     let tree = TempTree::new("rescan");
     tree.write_file("a.txt", b"a");
-    let first = run(tree.base_config(), &AtomicBool::new(false), |_| {}).expect("first");
+    let first = run(tree.base_config(), &AtomicBool::new(false), 1, |_| {}).expect("first");
     assert_eq!(first.stats.file_count, 1);
 
-    let cancelled = run(tree.base_config(), &AtomicBool::new(true), |_| {}).unwrap_err();
+    let cancelled = run(tree.base_config(), &AtomicBool::new(true), 1, |_| {}).unwrap_err();
     assert_eq!(cancelled.kind, AppErrorKind::Cancelled);
 
-    let second = run(tree.base_config(), &AtomicBool::new(false), |_| {}).expect("second");
+    let second = run(tree.base_config(), &AtomicBool::new(false), 1, |_| {}).expect("second");
     assert_eq!(second.stats.file_count, 1);
 }
 
@@ -464,6 +464,7 @@ fn progress_is_throttled_and_has_no_percentage() {
     let result = run(
         tree.base_config(),
         &AtomicBool::new(false),
+        1,
         |progress: ScanProgress| {
             emissions.fetch_add(1, Ordering::SeqCst);
             match progress.status {
@@ -472,6 +473,7 @@ fn progress_is_throttled_and_has_no_percentage() {
             if progress.current_path.contains('%') {
                 saw_percent_like.store(true, Ordering::SeqCst);
             }
+            assert_eq!(progress.scan_id, 1);
         },
     )
     .expect("scan");
@@ -485,30 +487,26 @@ fn progress_is_throttled_and_has_no_percentage() {
     assert!(last_statuses_ok);
 }
 
-/// S.14, S.15, S.32
+/// S.14, S.15 — Datei-Symlink. Benötigt unter Windows das Recht SeCreateSymbolicLinkPrivilege.
 #[test]
-fn symlinks_are_skipped_and_scan_continues() {
+#[ignore = "Windows-Symlink-Erzeugung benötigt SeCreateSymbolicLinkPrivilege (os error 1314)"]
+fn file_symlink_is_observed_but_not_followed() {
     let tree = TempTree::new("symlink");
     tree.write_file("real.txt", b"ok");
-    tree.write_file("target.txt", b"t");
+    tree.write_file("target.txt", b"secret-target");
     let link = tree.root.join("link.txt");
-    let created = create_symlink_file(&tree.root.join("target.txt"), &link);
-    if created.is_err() {
-        eprintln!(
-            "S.14/S.15: Symlink konnte auf dieser Plattform nicht erzeugt werden ({created:?})."
-        );
-        return;
-    }
+    create_symlink_file(&tree.root.join("target.txt"), &link)
+        .unwrap_or_else(|err| panic!("Symlink-Setup fehlgeschlagen, Test wird nicht still übersprungen: {err}"));
 
     let result = tree.scan(|_| {});
     let names: Vec<String> = flatten(&result.root).into_iter().map(|n| n.name).collect();
     assert!(names.contains(&"real.txt".to_string()));
     assert!(names.contains(&"target.txt".to_string()));
-    assert!(!names.contains(&"link.txt".to_string()));
+    assert!(names.contains(&"link.txt".to_string()));
     assert!(result
         .warnings
         .iter()
-        .any(|warning| warning.code == WarningCode::Skipped));
+        .any(|warning| warning.code == WarningCode::Skipped && warning.path.ends_with("link.txt")));
 }
 
 fn create_symlink_file(target: &Path, link: &Path) -> std::io::Result<()> {
@@ -522,6 +520,68 @@ fn create_symlink_file(target: &Path, link: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Junctions dürfen denselben Baum nicht bis max_depth vervielfachen.
+#[cfg(windows)]
+#[test]
+fn windows_junction_is_not_traversed() {
+    let tree = TempTree::new("junction");
+    tree.write_file("keep.txt", b"ok");
+    tree.mkdir("A/B");
+    tree.write_file("A/nested.txt", b"n");
+    let junction = tree.root.join("A").join("B").join("loop");
+    create_junction(&junction, &tree.root)
+        .unwrap_or_else(|err| panic!("Junction-Setup fehlgeschlagen, Test wird nicht still übersprungen: {err}"));
+
+    let result = tree.scan(|_| {});
+    let nodes = flatten(&result.root);
+    let keep_count = nodes.iter().filter(|node| node.name == "keep.txt").count();
+    assert_eq!(keep_count, 1, "Junction darf keep.txt nicht duplizieren");
+    assert!(nodes.iter().any(|node| node.name == "loop" && node.kind == "directory"));
+    let loop_node = as_dir(&result.root)
+        .iter()
+        .find(|node| matches!(node, FsNode::Directory { name, .. } if name == "A"))
+        .map(as_dir)
+        .and_then(|children| {
+            children.iter().find(|node| matches!(node, FsNode::Directory { name, .. } if name == "B"))
+        })
+        .map(as_dir)
+        .and_then(|children| {
+            children.iter().find(|node| matches!(node, FsNode::Directory { name, .. } if name == "loop"))
+        })
+        .expect("junction leaf");
+    match loop_node {
+        FsNode::Directory { children, .. } => {
+            assert!(children.is_empty(), "Junction darf nicht rekursiv gelesen werden");
+        }
+        FsNode::File { .. } => panic!("expected directory leaf"),
+    }
+    assert!(result
+        .warnings
+        .iter()
+        .any(|warning| warning.code == WarningCode::Skipped));
+}
+
+#[cfg(windows)]
+fn create_junction(link: &Path, target: &Path) -> std::io::Result<()> {
+    let command = format!("mklink /J {} {}", link.display(), target.display());
+    let output = std::process::Command::new("cmd")
+        .arg("/c")
+        .arg(&command)
+        .output()?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!(
+                "mklink /J failed: {} {}",
+                String::from_utf8_lossy(&output.stderr),
+                String::from_utf8_lossy(&output.stdout)
+            ),
+        ))
+    }
+}
+
 /// S.32, S.33 — Windows ACL, falls icacls verfügbar.
 #[cfg(windows)]
 #[test]
@@ -531,16 +591,25 @@ fn unreadable_child_is_warned_and_scan_continues() {
     tree.mkdir("locked");
     tree.write_file("locked/secret.txt", b"s");
     let locked = tree.root.join("locked");
-    let denied = deny_list(&locked);
-    if !denied {
-        eprintln!("S.33: icacls deny war auf dieser Maschine nicht anwendbar.");
-        return;
-    }
+    assert!(
+        deny_list(&locked),
+        "icacls /deny fehlgeschlagen; Test wird nicht still übersprungen"
+    );
     let _restore = RestoreAcl(locked.clone());
     let result = tree.scan(|_| {});
     let names: Vec<String> = flatten(&result.root).into_iter().map(|n| n.name).collect();
     assert!(names.contains(&"ok.txt".to_string()));
-    assert!(names.contains(&"locked".to_string()) || !result.warnings.is_empty());
+    assert!(names.contains(&"locked".to_string()));
+    assert!(
+        result.warnings.iter().any(|warning| {
+            matches!(
+                warning.code,
+                WarningCode::PermissionDenied | WarningCode::IoError | WarningCode::NotReadable
+            )
+        }),
+        "unlesbarer Ordner muss eine Warnung erzeugen"
+    );
+    assert!(!names.contains(&"secret.txt".to_string()));
 }
 
 fn child_names(node: &FsNode) -> Vec<String> {
@@ -591,6 +660,49 @@ fn unicode_child_order_is_stable_across_scans() {
     assert_eq!(first[0], "Österreich");
     assert!(first.iter().any(|name| name == "äpfel.txt"));
     assert!(first.iter().any(|name| name == "文件.txt"));
+}
+
+#[test]
+fn cancel_during_walk_returns_cancelled_without_result() {
+    let tree = TempTree::new("mid-cancel");
+    for index in 0..400 {
+        tree.write_file(&format!("f{index:03}.txt"), b"x");
+    }
+    let cancel = AtomicBool::new(false);
+    let err = run(
+        tree.base_config(),
+        &cancel,
+        9,
+        |progress: ScanProgress| {
+            assert_eq!(progress.scan_id, 9);
+            if progress.processed_count >= 250 && progress.status == ScanStatus::Running {
+                cancel.store(true, Ordering::SeqCst);
+            }
+        },
+    )
+    .unwrap_err();
+    assert_eq!(err.kind, AppErrorKind::Cancelled);
+
+    let again = run(tree.base_config(), &AtomicBool::new(false), 10, |_| {}).expect("rescan");
+    assert!(again.stats.file_count >= 400);
+}
+
+#[test]
+fn warning_codes_from_io_are_structured() {
+    use std::io::{Error, ErrorKind};
+
+    assert_eq!(
+        crate::error::warning_code_from_io(&Error::from(ErrorKind::PermissionDenied)),
+        WarningCode::PermissionDenied
+    );
+    assert_eq!(
+        crate::error::warning_code_from_io(&Error::from(ErrorKind::NotFound)),
+        WarningCode::NotFound
+    );
+    assert_eq!(
+        crate::error::warning_code_from_metadata_io(&Error::from(ErrorKind::Other)),
+        WarningCode::NotReadable
+    );
 }
 
 #[cfg(windows)]

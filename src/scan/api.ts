@@ -24,12 +24,12 @@ export async function pickDirectory(): Promise<string | null> {
   return null;
 }
 
-export function startScan(config: ScanConfig): Promise<ScanResult> {
-  return invoke<ScanResult>("start_scan", { config });
+export function startScan(config: ScanConfig, scanId: number): Promise<ScanResult> {
+  return invoke<ScanResult>("start_scan", { config, scanId });
 }
 
-export function cancelScan(): Promise<void> {
-  return invoke("cancel_scan");
+export function cancelScan(scanId: number): Promise<void> {
+  return invoke("cancel_scan", { scanId });
 }
 
 export function saveExport(path: string, contents: string): Promise<void> {

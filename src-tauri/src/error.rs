@@ -77,6 +77,13 @@ pub fn warning_code_from_io(err: &io::Error) -> WarningCode {
     }
 }
 
+pub fn warning_code_from_metadata_io(err: &io::Error) -> WarningCode {
+    match warning_code_from_io(err) {
+        WarningCode::IoError => WarningCode::NotReadable,
+        other => other,
+    }
+}
+
 pub fn warning_message_from_io(err: &io::Error) -> String {
     match err.kind() {
         io::ErrorKind::PermissionDenied => "Keine Leseberechtigung.".to_string(),

@@ -87,6 +87,7 @@ pub enum ScanStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanProgress {
+    pub scan_id: u64,
     pub processed_count: u64,
     pub current_path: String,
     pub status: ScanStatus,

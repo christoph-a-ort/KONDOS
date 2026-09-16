@@ -3,20 +3,25 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use crate::error::{warning_code_from_io, warning_message_from_io, AppError};
+use crate::error::{
+    warning_code_from_io, warning_code_from_metadata_io, warning_message_from_io, AppError,
+};
 use crate::filter::file_matches_extensions;
 use crate::model::{
     FsNode, ScanConfig, ScanProgress, ScanResult, ScanStats, ScanStatus, ScanWarning, WarningCode,
 };
 
 use super::hidden::is_hidden;
+use super::reparse::{must_not_follow, refuse_unverified_windows_directory};
 
 const PROGRESS_MIN_INTERVAL_MS: u128 = 100;
 const PROGRESS_EVERY_N_ENTRIES: u64 = 250;
+const LINK_SKIP_MESSAGE: &str = "Dateisystemverweis wird nicht gefolgt.";
 
 struct WalkContext<'a, F> {
     config: &'a ScanConfig,
     cancel: &'a AtomicBool,
+    scan_id: u64,
     warnings: Vec<ScanWarning>,
     stats: ScanStats,
     processed: u64,
@@ -32,14 +37,18 @@ where
         self.cancel.load(Ordering::Relaxed)
     }
 
-    fn note_skip(&mut self, path: &Path, code: WarningCode, message: impl Into<String>) {
-        self.stats.skipped_count += 1;
-        self.processed += 1;
+    fn note_warning(&mut self, path: &Path, code: WarningCode, message: impl Into<String>) {
         self.warnings.push(ScanWarning {
             path: path_to_string(path),
             code,
             message: message.into(),
         });
+    }
+
+    fn note_skip(&mut self, path: &Path, code: WarningCode, message: impl Into<String>) {
+        self.stats.skipped_count += 1;
+        self.processed += 1;
+        self.note_warning(path, code, message);
     }
 
     fn note_io_skip(&mut self, path: &Path, err: &std::io::Error) {
@@ -55,6 +64,7 @@ where
             return;
         }
         (self.on_progress)(ScanProgress {
+            scan_id: self.scan_id,
             processed_count: self.processed,
             current_path: path_to_string(path),
             status,
@@ -63,7 +73,12 @@ where
     }
 }
 
-pub fn run<F>(config: ScanConfig, cancel: &AtomicBool, on_progress: F) -> Result<ScanResult, AppError>
+pub fn run<F>(
+    config: ScanConfig,
+    cancel: &AtomicBool,
+    scan_id: u64,
+    on_progress: F,
+) -> Result<ScanResult, AppError>
 where
     F: Fn(ScanProgress),
 {
@@ -90,6 +105,7 @@ where
     let mut ctx = WalkContext {
         config: &config,
         cancel,
+        scan_id,
         warnings: Vec::new(),
         stats: ScanStats::default(),
         processed: 0,
@@ -208,28 +224,29 @@ where
         }
     };
 
-    if file_type.is_symlink() {
-        ctx.note_skip(
-            &path,
-            WarningCode::Skipped,
-            "Symbolische Verknüpfung wird nicht gefolgt.",
-        );
-        ctx.emit(&path, ScanStatus::Running, false);
-        return None;
+    let metadata = match entry.metadata() {
+        Ok(metadata) => Some(metadata),
+        Err(err) => {
+            ctx.note_warning(
+                &path,
+                warning_code_from_metadata_io(&err),
+                "Metadaten konnten nicht gelesen werden.",
+            );
+            None
+        }
+    };
+
+    if must_not_follow(file_type, metadata.as_ref()) {
+        let is_file = metadata
+            .as_ref()
+            .map(Metadata::is_file)
+            .unwrap_or_else(|| file_type.is_file());
+        return link_leaf(&path, depth, !is_file, metadata, ctx);
     }
 
-    let metadata = if need_full_metadata(ctx.config, file_type.is_file()) {
-        match entry.metadata() {
-            Ok(metadata) => Some(metadata),
-            Err(err) => {
-                ctx.note_io_skip(&path, &err);
-                ctx.emit(&path, ScanStatus::Running, false);
-                return None;
-            }
-        }
-    } else {
-        None
-    };
+    if refuse_unverified_windows_directory(file_type, metadata.as_ref()) {
+        return Some(directory_leaf(&path, depth, None, ctx));
+    }
 
     if ctx.config.exclude_hidden && is_hidden(&path, metadata.as_ref()) {
         ctx.processed += 1;
@@ -252,6 +269,56 @@ where
     );
     ctx.emit(&path, ScanStatus::Running, false);
     None
+}
+
+fn link_leaf<F>(
+    path: &Path,
+    depth: u8,
+    is_directory: bool,
+    metadata: Option<Metadata>,
+    ctx: &mut WalkContext<'_, F>,
+) -> Option<FsNode>
+where
+    F: Fn(ScanProgress),
+{
+    ctx.stats.skipped_count += 1;
+    ctx.note_warning(path, WarningCode::Skipped, LINK_SKIP_MESSAGE);
+
+    if is_directory {
+        if ctx.config.exclude_hidden && is_hidden(path, metadata.as_ref()) {
+            ctx.processed += 1;
+            ctx.emit(path, ScanStatus::Running, false);
+            return None;
+        }
+        return Some(directory_leaf(path, depth, metadata, ctx));
+    }
+
+    walk_file(path, depth, metadata, ctx)
+}
+
+fn directory_leaf<F>(
+    path: &Path,
+    depth: u8,
+    metadata: Option<Metadata>,
+    ctx: &mut WalkContext<'_, F>,
+) -> FsNode
+where
+    F: Fn(ScanProgress),
+{
+    let extra = optional_node_times_and_size(metadata.as_ref(), ctx.config);
+    ctx.stats.directory_count += 1;
+    ctx.processed += 1;
+    ctx.emit(path, ScanStatus::Running, false);
+    FsNode::Directory {
+        id: path_to_string(path),
+        name: node_name(path),
+        path: path_to_string(path),
+        depth,
+        children: Vec::new(),
+        size_bytes: None,
+        created_at_ms: extra.created_at_ms,
+        modified_at_ms: extra.modified_at_ms,
+    }
 }
 
 fn walk_file<F>(
@@ -284,16 +351,6 @@ where
         created_at_ms: extra.created_at_ms,
         modified_at_ms: extra.modified_at_ms,
     })
-}
-
-fn need_full_metadata(config: &ScanConfig, is_file: bool) -> bool {
-    if config.exclude_hidden && (cfg!(windows) || cfg!(target_os = "macos")) {
-        return true;
-    }
-    if config.include_created_at || config.include_modified_at {
-        return true;
-    }
-    is_file && config.include_size
 }
 
 struct OptionalMeta {
@@ -379,7 +436,7 @@ mod tests {
         };
 
         let cancel = AtomicBool::new(false);
-        let result = run(config, &cancel, |_| {}).expect("scan");
+        let result = run(config, &cancel, 1, |_| {}).expect("scan");
         let _ = fs::remove_dir_all(&root);
 
         assert_eq!(result.stats.directory_count, 3);

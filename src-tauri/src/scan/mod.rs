@@ -1,5 +1,6 @@
 mod config;
 mod hidden;
+mod reparse;
 mod sort;
 mod walker;
 

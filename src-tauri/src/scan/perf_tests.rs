@@ -45,7 +45,7 @@ fn perf_scan_approximately_100k_entries() {
     };
 
     let started = Instant::now();
-    let result = run(config, &AtomicBool::new(false), |_| {});
+    let result = run(config, &AtomicBool::new(false), 1, |_| {});
     let scan_ms = started.elapsed().as_millis();
     let _ = fs::remove_dir_all(&root);
 
