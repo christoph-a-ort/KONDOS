@@ -125,10 +125,36 @@ assertEqual(
 
 const tree = buildSynthetic100kTree();
 const nodeCount = 1 + 100 + 100 * 999;
-const defaultVisibleRows = deriveVisibleRows(tree, new Set(["/"])).length;
+const rootExpandedIds = new Set(["/"]);
+const fullyExpandedIds = collectDirectoryIds(tree);
+const TIMED_RUNS = 7;
+
+function median(values) {
+  const sorted = [...values].sort((left, right) => left - right);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+  return sorted[mid];
+}
+
+function timeRuns(fn, runs) {
+  const timesMs = [];
+  let last;
+  for (let index = 0; index < runs; index += 1) {
+    const started = performance.now();
+    last = fn();
+    timesMs.push(performance.now() - started);
+  }
+  return { timesMs, last };
+}
+
+const rootTimed = timeRuns(() => deriveVisibleRows(tree, rootExpandedIds), TIMED_RUNS);
+const defaultVisibleRows = rootTimed.last.length;
 assertEqual(defaultVisibleRows, 101, "default 100k visible rows");
 
-const fullyExpandedVisibleRows = deriveVisibleRows(tree, collectDirectoryIds(tree)).length;
+const fullTimed = timeRuns(() => deriveVisibleRows(tree, fullyExpandedIds), TIMED_RUNS);
+const fullyExpandedVisibleRows = fullTimed.last.length;
 assertEqual(fullyExpandedVisibleRows, nodeCount, "fully expanded 100k visible rows");
 
 const viewportHeight = 560;
@@ -145,7 +171,15 @@ assertEqual(
 );
 
 const middleScrollTop = 40_000 * ROW_HEIGHT;
-const middleWindow = computeTreeWindow(fullyExpandedVisibleRows, middleScrollTop, viewportHeight);
+const topWindowTimed = timeRuns(
+  () => computeTreeWindow(fullyExpandedVisibleRows, 0, viewportHeight),
+  TIMED_RUNS,
+);
+const middleWindowTimed = timeRuns(
+  () => computeTreeWindow(fullyExpandedVisibleRows, middleScrollTop, viewportHeight),
+  TIMED_RUNS,
+);
+const middleWindow = middleWindowTimed.last;
 const renderedAtMiddle = middleWindow.end - middleWindow.start;
 assertEqual(middleWindow.start, 40_000 - OVERSCAN, "middle start");
 assertEqual(middleWindow.end, 40_000 + visibleCount + OVERSCAN, "middle end");
@@ -168,6 +202,19 @@ console.log(
       renderedAtTop,
       renderedAtMiddle,
       fullTreeDom: false,
+      timing: {
+        runs: TIMED_RUNS,
+        treeBuildOutsideTimer: true,
+        expandedIdSetOutsideTimer: true,
+        rootExpandedMs: rootTimed.timesMs,
+        rootExpandedMedianMs: median(rootTimed.timesMs),
+        fullyExpandedMs: fullTimed.timesMs,
+        fullyExpandedMedianMs: median(fullTimed.timesMs),
+        windowTopMs: topWindowTimed.timesMs,
+        windowTopMedianMs: median(topWindowTimed.timesMs),
+        windowMiddleMs: middleWindowTimed.timesMs,
+        windowMiddleMedianMs: median(middleWindowTimed.timesMs),
+      },
     },
     null,
     2,
