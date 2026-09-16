@@ -36,6 +36,23 @@ header p,
   background: #fde7e7;
   color: #8a1f1f;
   border-radius: 6px;
+  white-space: pre-wrap;
+}
+
+.success {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  background: #e7f6ea;
+  color: #1f6b32;
+  border-radius: 6px;
+  white-space: pre-wrap;
+}
+
+.status-line {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  color: #1f4b99;
+  font-weight: 600;
 }
 
 .layout {

@@ -94,6 +94,8 @@ export type AppErrorKind =
 export interface AppError {
   kind: AppErrorKind;
   message: string;
+  targetPath?: string;
+  cause?: string;
 }
 
 export type ExportFormat = "txt" | "json" | "csv";

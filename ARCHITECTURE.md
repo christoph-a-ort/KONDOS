@@ -10,7 +10,7 @@ Leichtgewichtiges Desktop-Werkzeug zur Erfassung, Visualisierung und zum Export 
 | Zustand | `src/state` | Scan-Konfiguration, Fortschritt, Ergebnis, Fehlermeldung |
 | Filterung (Eingabe) | `src/filter` | Parsen und Normalisieren von Dateiendungen |
 | Scan-API | `src/scan` | Tauri-Invoke, Fortschritts-Events, benutzerfreundliche Fehler |
-| Exportformatierung | `src/export` | Reine Transformation `ScanResult` → TXT / JSON / CSV |
+| Exportformatierung | `src-tauri/src/export` | READ-ONLY-Projektion `ScanResult` → TXT / JSON / CSV |
 | Datenmodell | `src/model` und `src-tauri/src/model.rs` | Gemeinsamer IPC-Vertrag |
 | Dateisystemanalyse | `src-tauri/src/scan` | Traversierung, Hidden-Erkennung, Metadaten, Warnungen |
 | Filterung (Scan) | `src-tauri/src/filter.rs` | Dateiendungsabgleich während der Traversierung |
@@ -56,7 +56,9 @@ Intern getaggte Unterscheidung `kind: "file" | "directory"`.
 | --- | --- | --- |
 | Command | `start_scan(config)` | Validieren, Scan im Blocking-Pool, Ergebnis |
 | Command | `cancel_scan()` | Kooperativer Abbruch über `AtomicBool` |
-| Command | `save_export(path, contents)` | Schreibzugriff nur für Export |
+| Command | `save_export(path, format, scanId)` | Schreibzugriff nur für Export |
+| Command | `copy_export(format, scanId)` | Exporttext für die Zwischenablage |
+| Command | `suggest_export_filename(format, scanId)` | Dateinamensvorschlag |
 | Event | `scan://progress` | `processedCount`, `currentPath`, `status` |
 
 Ordnerauswahl und „Speichern unter“ laufen über `tauri-plugin-dialog` im Frontend (keine Analyse).
@@ -86,17 +88,19 @@ Spätere Ausbaustufe ohne Modelländerung: sichtbare Knoten flach linearisieren 
 
 ## Exportarchitektur
 
-Formatierer sind reine Funktionen über das bereits vorhandene `ScanResult`. Sie lesen das Dateisystem nicht erneut.
+Formatierung, Serialisierung und Schreiben liegen im Rust-Backend (`src-tauri/src/export`). Das Frontend wählt Format und Zielpfad; es transportiert nicht das vollständige Exportartefakt.
+
+Exportiert wird ausschließlich ein flüchtiger Backend-Snapshot des letzten erfolgreichen `ScanResult` (gleiche `scanId`). Kein erneutes Einlesen des Dateisystems.
 
 | Format | Inhalt |
 | --- | --- |
-| TXT | Unicode-Baum, Root mit `[Root]`, Ordner mit `/` |
-| JSON | Dieselbe Hierarchie, `kind` unterscheidet Datei/Ordner; optionale Metadaten als ISO-8601 |
-| CSV | Flache Liste aller Knoten, Schema in `src/export/csv.ts` |
+| TXT | Unicode-Baum, Root mit `[Root]`, Ordner mit `/`, UTF-8 ohne BOM, LF |
+| JSON | `exportVersion: 1`, Hierarchie mit `children` (auch `[]` bei Dateien), portable `/`-Pfade, UTF-8 ohne BOM, Pretty-Print |
+| CSV | Flache Liste, UTF-8 mit BOM, LF, RFC-4180-Quoting |
 
-Metadatenspalten bzw. -felder erscheinen nur, wenn sie im Scan erfasst wurden.
+Pfade im Artefakt sind portabel (Root-Name + Relativpfad, Separator `/`), keine absoluten lokalen Pfade. Warnungen sind im JSON enthalten; TXT/CSV listen Knoten ohne Warning-Block.
 
-Ausgabewege: Formatierer → Zwischenablage **oder** `save_export`.
+Ausgabewege: Zwischenablage (`copy_export`) oder Datei (`save_export` über Temp-Datei/Replace).
 
 ## Hidden-Dateien (plattformspezifisch)
 

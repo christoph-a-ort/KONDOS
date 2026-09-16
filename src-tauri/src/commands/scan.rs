@@ -39,7 +39,9 @@ pub async fn start_scan(
         AppError::internal()
     })?;
 
-    result
+    let result = result?;
+    state.store_snapshot(running_id, result.clone());
+    Ok(result)
 }
 
 #[tauri::command]

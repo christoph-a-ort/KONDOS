@@ -6,6 +6,7 @@ interface ConfigPanelProps {
   config: ScanConfig;
   extensionInput: string;
   scanning: boolean;
+  locked: boolean;
   onConfigChange: Dispatch<SetStateAction<ScanConfig>>;
   onExtensionInputChange: (value: string) => void;
   onPickDirectory: () => void;
@@ -17,12 +18,14 @@ export function ConfigPanel({
   config,
   extensionInput,
   scanning,
+  locked,
   onConfigChange,
   onExtensionInputChange,
   onPickDirectory,
   onStartScan,
   onCancelScan,
 }: ConfigPanelProps) {
+  const inputsLocked = scanning || locked;
   return (
     <section className="panel">
       <h2>Konfiguration</h2>
@@ -35,7 +38,7 @@ export function ConfigPanel({
             value={config.rootPath}
             placeholder="Kein Ordner gewählt"
           />
-          <button type="button" onClick={onPickDirectory} disabled={scanning}>
+          <button type="button" onClick={onPickDirectory} disabled={inputsLocked}>
             Ordner wählen
           </button>
         </div>
@@ -48,7 +51,7 @@ export function ConfigPanel({
           min={MIN_DEPTH}
           max={MAX_DEPTH}
           value={config.maxDepth}
-          disabled={scanning}
+          disabled={inputsLocked}
           onChange={(event) => {
             onConfigChange((current) => ({
               ...current,
@@ -62,7 +65,7 @@ export function ConfigPanel({
         <input
           type="checkbox"
           checked={config.excludeHidden}
-          disabled={scanning}
+          disabled={inputsLocked}
           onChange={(event) => {
             onConfigChange((current) => ({
               ...current,
@@ -77,7 +80,7 @@ export function ConfigPanel({
         <span>Dateiendungen (optional)</span>
         <input
           value={extensionInput}
-          disabled={scanning}
+          disabled={inputsLocked}
           placeholder=".pdf, .png, .docx"
           onChange={(event) => onExtensionInputChange(event.target.value)}
         />
@@ -89,7 +92,7 @@ export function ConfigPanel({
           <input
             type="checkbox"
             checked={config.includeSize}
-            disabled={scanning}
+            disabled={inputsLocked}
             onChange={(event) => {
               onConfigChange((current) => ({
                 ...current,
@@ -103,7 +106,7 @@ export function ConfigPanel({
           <input
             type="checkbox"
             checked={config.includeCreatedAt}
-            disabled={scanning}
+            disabled={inputsLocked}
             onChange={(event) => {
               onConfigChange((current) => ({
                 ...current,
@@ -117,7 +120,7 @@ export function ConfigPanel({
           <input
             type="checkbox"
             checked={config.includeModifiedAt}
-            disabled={scanning}
+            disabled={inputsLocked}
             onChange={(event) => {
               onConfigChange((current) => ({
                 ...current,
@@ -134,7 +137,7 @@ export function ConfigPanel({
           type="button"
           className="primary"
           onClick={onStartScan}
-          disabled={scanning || config.rootPath.trim() === ""}
+          disabled={inputsLocked || config.rootPath.trim() === ""}
         >
           Analyse starten
         </button>

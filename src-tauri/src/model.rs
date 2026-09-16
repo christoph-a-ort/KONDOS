@@ -57,7 +57,7 @@ pub struct ScanConfig {
     pub include_modified_at: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum WarningCode {
     PermissionDenied,
@@ -108,4 +108,30 @@ pub struct ScanResult {
     pub root: FsNode,
     pub warnings: Vec<ScanWarning>,
     pub stats: ScanStats,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportFormat {
+    Txt,
+    Csv,
+    Json,
+}
+
+impl ExportFormat {
+    pub fn as_label(self) -> &'static str {
+        match self {
+            Self::Txt => "TXT",
+            Self::Csv => "CSV",
+            Self::Json => "JSON",
+        }
+    }
+
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Txt => "txt",
+            Self::Csv => "csv",
+            Self::Json => "json",
+        }
+    }
 }

@@ -32,8 +32,20 @@ export function cancelScan(scanId: number): Promise<void> {
   return invoke("cancel_scan", { scanId });
 }
 
-export function saveExport(path: string, contents: string): Promise<void> {
-  return invoke("save_export", { path, contents });
+export function saveExport(
+  path: string,
+  format: ExportFormat,
+  scanId: number,
+): Promise<{ path: string }> {
+  return invoke("save_export", { path, format, scanId });
+}
+
+export function copyExport(format: ExportFormat, scanId: number): Promise<string> {
+  return invoke<string>("copy_export", { format, scanId });
+}
+
+export function suggestExportFilename(format: ExportFormat, scanId: number): Promise<string> {
+  return invoke<string>("suggest_export_filename", { format, scanId });
 }
 
 export function subscribeScanProgress(
@@ -44,10 +56,13 @@ export function subscribeScanProgress(
   });
 }
 
-export async function pickExportPath(format: ExportFormat): Promise<string | null> {
+export async function pickExportPath(
+  format: ExportFormat,
+  defaultPath: string,
+): Promise<string | null> {
   const selected = await save({
     title: "Export speichern",
-    defaultPath: `KONDOS.${format}`,
+    defaultPath,
     filters: [
       {
         name: format.toUpperCase(),

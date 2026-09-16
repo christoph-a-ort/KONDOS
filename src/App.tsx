@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
-import { renderExport } from "./export";
 import { parseExtensionInput } from "./filter";
 import {
   createDefaultScanConfig,
@@ -12,13 +11,16 @@ import {
 } from "./model";
 import {
   cancelScan,
+  copyExport,
   isCancelledError,
   isProgressForScan,
   pickDirectory,
   pickExportPath,
   saveExport,
+  shouldClearScanResultOnError,
   startScan,
   subscribeScanProgress,
+  suggestExportFilename,
   toUserError,
 } from "./scan";
 import { ConfigPanel } from "./ui/ConfigPanel";
@@ -27,13 +29,22 @@ import { ProgressPanel } from "./ui/ProgressPanel";
 import { TreeView } from "./ui/TreeView";
 import "./App.css";
 
+function formatLabel(format: ExportFormat): string {
+  return format.toUpperCase();
+}
+
 function App() {
   const [config, setConfig] = useState<ScanConfig>(createDefaultScanConfig);
   const [extensionInput, setExtensionInput] = useState("");
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState<ScanProgress | null>(null);
   const [result, setResult] = useState<ScanResult | null>(null);
+  const [resultScanId, setResultScanId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
+  const [exportNoticeKind, setExportNoticeKind] = useState<"progress" | "saved" | "failed" | null>(
+    null,
+  );
   const [exportFormat, setExportFormat] = useState<ExportFormat>("txt");
   const [exportBusy, setExportBusy] = useState(false);
   const scanLockRef = useRef(false);
@@ -59,6 +70,11 @@ function App() {
     };
   }, []);
 
+  function clearExportNotice() {
+    setExportNotice(null);
+    setExportNoticeKind(null);
+  }
+
   async function handlePickDirectory() {
     setError(null);
     try {
@@ -72,7 +88,7 @@ function App() {
   }
 
   async function handleStartScan() {
-    if (scanLockRef.current) {
+    if (scanLockRef.current || exportBusy) {
       return;
     }
     scanLockRef.current = true;
@@ -81,7 +97,7 @@ function App() {
     activeScanIdRef.current = scanId;
 
     setError(null);
-    setResult(null);
+    clearExportNotice();
     setScanning(true);
     setProgress({
       scanId,
@@ -101,6 +117,7 @@ function App() {
         return;
       }
       setResult(next);
+      setResultScanId(scanId);
       setProgress({
         scanId,
         processedCount: next.stats.directoryCount + next.stats.fileCount,
@@ -111,7 +128,10 @@ function App() {
       if (activeScanIdRef.current !== scanId) {
         return;
       }
-      setResult(null);
+      if (shouldClearScanResultOnError(cause)) {
+        setResult(null);
+        setResultScanId(null);
+      }
       if (isCancelledError(cause)) {
         setError(null);
         setProgress((current) => ({
@@ -150,34 +170,48 @@ function App() {
   }
 
   async function handleCopy() {
-    if (result === null) {
+    if (result === null || resultScanId === null) {
       return;
     }
     setExportBusy(true);
     setError(null);
+    clearExportNotice();
     try {
-      await writeText(renderExport(result, exportFormat));
+      const contents = await copyExport(exportFormat, resultScanId);
+      await writeText(contents);
+      setExportNotice(`${formatLabel(exportFormat)}-Inhalt in die Zwischenablage kopiert.`);
+      setExportNoticeKind("saved");
     } catch (cause) {
-      setError(toUserError(cause));
+      setExportNotice(toUserError(cause));
+      setExportNoticeKind("failed");
     } finally {
       setExportBusy(false);
     }
   }
 
   async function handleSave() {
-    if (result === null) {
+    if (result === null || resultScanId === null) {
       return;
     }
     setExportBusy(true);
     setError(null);
+    clearExportNotice();
     try {
-      const path = await pickExportPath(exportFormat);
+      const defaultName = await suggestExportFilename(exportFormat, resultScanId);
+      const path = await pickExportPath(exportFormat, defaultName);
       if (path === null) {
         return;
       }
-      await saveExport(path, renderExport(result, exportFormat));
+      setExportNotice(`${formatLabel(exportFormat)} wird gespeichert …`);
+      setExportNoticeKind("progress");
+      const saved = await saveExport(path, exportFormat, resultScanId);
+      setExportNotice(
+        `${formatLabel(exportFormat)}-Datei erfolgreich gespeichert:\n${saved.path}`,
+      );
+      setExportNoticeKind("saved");
     } catch (cause) {
-      setError(toUserError(cause));
+      setExportNotice(toUserError(cause));
+      setExportNoticeKind("failed");
     } finally {
       setExportBusy(false);
     }
@@ -190,12 +224,26 @@ function App() {
         <p>Ordner- und Dateistrukturen erfassen, anzeigen und exportieren.</p>
       </header>
       {error !== null ? <p className="error">{error}</p> : null}
+      {exportNotice !== null ? (
+        <p
+          className={
+            exportNoticeKind === "failed"
+              ? "error"
+              : exportNoticeKind === "saved"
+                ? "success"
+                : "status-line"
+          }
+        >
+          {exportNotice}
+        </p>
+      ) : null}
       <div className="layout">
         <aside>
           <ConfigPanel
             config={config}
             extensionInput={extensionInput}
             scanning={scanning}
+            locked={exportBusy}
             onConfigChange={setConfig}
             onExtensionInputChange={setExtensionInput}
             onPickDirectory={() => {
@@ -211,7 +259,7 @@ function App() {
           <ProgressPanel scanning={scanning} progress={progress} />
           <ExportPanel
             format={exportFormat}
-            disabled={result === null}
+            disabled={result === null || resultScanId === null || scanning}
             busy={exportBusy}
             onFormatChange={setExportFormat}
             onCopy={() => {

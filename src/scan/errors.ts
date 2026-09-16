@@ -16,6 +16,18 @@ export function isCancelledError(error: unknown): boolean {
   return findErrorKind(error) === "cancelled";
 }
 
+export function isRejectedBeginError(error: unknown): boolean {
+  const kind = findErrorKind(error);
+  return kind === "invalidConfig" || kind === "invalidPath";
+}
+
+export function shouldClearScanResultOnError(error: unknown): boolean {
+  if (isRejectedBeginError(error)) {
+    return false;
+  }
+  return true;
+}
+
 export function isProgressForScan(
   activeScanId: number | null,
   incoming: ScanProgress,

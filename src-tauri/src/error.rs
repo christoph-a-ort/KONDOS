@@ -20,6 +20,10 @@ pub enum AppErrorKind {
 pub struct AppError {
     pub kind: AppErrorKind,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cause: Option<String>,
 }
 
 impl AppError {
@@ -27,6 +31,8 @@ impl AppError {
         Self {
             kind,
             message: message.into(),
+            target_path: None,
+            cause: None,
         }
     }
 
@@ -51,6 +57,24 @@ impl AppError {
 
     pub fn export_failed(message: impl Into<String>) -> Self {
         Self::new(AppErrorKind::ExportFailed, message)
+    }
+
+    pub fn export_write_failed(
+        format: crate::model::ExportFormat,
+        path: impl AsRef<std::path::Path>,
+        cause: impl Into<String>,
+    ) -> Self {
+        let target = path.as_ref().display().to_string();
+        let cause = cause.into();
+        let label = format.as_label();
+        Self {
+            kind: AppErrorKind::ExportFailed,
+            message: format!(
+                "Die {label}-Datei konnte nicht gespeichert werden.\nZiel:\n{target}\nUrsache:\n{cause}"
+            ),
+            target_path: Some(target),
+            cause: Some(cause),
+        }
     }
 
     pub fn internal() -> Self {
