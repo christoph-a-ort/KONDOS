@@ -13,7 +13,7 @@ export interface JsonExportNode {
 }
 
 export interface JsonExportDocument {
-  format: "dateiliste-tree";
+  format: "kondos-tree";
   version: 1;
   stats: ScanResult["stats"];
   warnings: ScanResult["warnings"];
@@ -23,7 +23,7 @@ export interface JsonExportDocument {
 export function exportJson(result: ScanResult): string {
   const flags = metaFlagsFromRoot(result);
   const document: JsonExportDocument = {
-    format: "dateiliste-tree",
+    format: "kondos-tree",
     version: 1,
     stats: result.stats,
     warnings: result.warnings,

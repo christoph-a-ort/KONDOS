@@ -142,7 +142,7 @@ function App() {
   return (
     <div className="app">
       <header>
-        <h1>Dateiliste</h1>
+        <h1>KONDOS</h1>
         <p>Ordner- und Dateistrukturen erfassen, anzeigen und exportieren.</p>
       </header>
       {error !== null ? <p className="error">{error}</p> : null}

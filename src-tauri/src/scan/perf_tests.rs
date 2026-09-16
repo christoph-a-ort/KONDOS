@@ -24,7 +24,7 @@ const FILES_PER_DIR: u32 = 999;
 #[ignore]
 fn perf_scan_approximately_100k_entries() {
     let root = std::env::temp_dir().join(format!(
-        "dateiliste-perf-{}-{}",
+        "kondos-perf-{}-{}",
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -51,7 +51,7 @@ fn perf_scan_approximately_100k_entries() {
 
     let result = result.expect("scan");
     let scanned = result.stats.directory_count + result.stats.file_count;
-    println!("dateiliste performance");
+    println!("kondos performance");
     println!("os={}", std::env::consts::OS);
     println!("arch={}", std::env::consts::ARCH);
     println!("created_entries={created}");

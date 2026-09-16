@@ -16,7 +16,7 @@ struct TempTree {
 impl TempTree {
     fn new(label: &str) -> Self {
         let root = std::env::temp_dir().join(format!(
-            "dateiliste-{}-{}-{}",
+            "kondos-{}-{}-{}",
             label,
             std::process::id(),
             SystemTime::now()
@@ -376,7 +376,7 @@ fn optional_metadata_is_omitted_unless_enabled() {
 fn invalid_roots_are_rejected() {
     let missing = ScanConfig {
         root_path: std::env::temp_dir()
-            .join("dateiliste-missing-root-xyz")
+            .join("kondos-missing-root-xyz")
             .to_string_lossy()
             .into_owned(),
         max_depth: 8,

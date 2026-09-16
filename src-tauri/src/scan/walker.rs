@@ -355,7 +355,7 @@ mod tests {
     #[test]
     fn respects_depth_extension_filter_and_skips_dotfiles() {
         let root = std::env::temp_dir().join(format!(
-            "dateiliste-walk-{}-{}",
+            "kondos-walk-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)

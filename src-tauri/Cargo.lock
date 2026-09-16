@@ -546,7 +546,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dateiliste"
+name = "kondos"
 version = "0.1.0"
 dependencies = [
  "serde",

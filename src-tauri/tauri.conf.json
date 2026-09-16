@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Dateiliste",
+  "productName": "KONDOS",
   "version": "0.1.0",
-  "identifier": "com.dateiliste.app",
+  "identifier": "com.kondos.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Dateiliste",
+        "title": "KONDOS",
         "width": 1200,
         "height": 800,
         "minWidth": 880,

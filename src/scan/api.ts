@@ -47,7 +47,7 @@ export function subscribeScanProgress(
 export async function pickExportPath(format: ExportFormat): Promise<string | null> {
   const selected = await save({
     title: "Export speichern",
-    defaultPath: `dateiliste.${format}`,
+    defaultPath: `KONDOS.${format}`,
     filters: [
       {
         name: format.toUpperCase(),

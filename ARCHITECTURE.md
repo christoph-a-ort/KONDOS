@@ -1,4 +1,4 @@
-# Architektur — Dateiliste
+# Architektur — KONDOS
 
 Leichtgewichtiges Desktop-Werkzeug zur Erfassung, Visualisierung und zum Export von Ordner- und Dateistrukturen (max. Tiefe 8).
 

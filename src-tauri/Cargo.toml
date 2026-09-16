@@ -1,12 +1,12 @@
 [package]
-name = "dateiliste"
+name = "kondos"
 version = "0.1.0"
 description = "Erfassung, Visualisierung und Export von Ordner- und Dateistrukturen"
 authors = ["Christoph"]
 edition = "2021"
 
 [lib]
-name = "dateiliste_lib"
+name = "kondos_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
