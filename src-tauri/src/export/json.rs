@@ -139,15 +139,20 @@ impl Serialize for JsonChildren<'_> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct JsonWarning {
-    path: String,
+    path: Option<String>,
     code: WarningCode,
     message: String,
 }
 
 impl JsonWarning {
     fn from_warning(warning: &ScanWarning, ctx: &PathCtx<'_>) -> Self {
+        let portable = to_portable_path(ctx.root_abs, ctx.root_name, &warning.path);
         Self {
-            path: to_portable_path(ctx.root_abs, ctx.root_name, &warning.path),
+            path: if portable.is_empty() {
+                None
+            } else {
+                Some(portable)
+            },
             code: warning.code,
             message: warning.message.clone(),
         }

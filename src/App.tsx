@@ -98,6 +98,10 @@ function App() {
 
     setError(null);
     clearExportNotice();
+    const previousResult = result;
+    const previousScanId = resultScanId;
+    setResult(null);
+    setResultScanId(null);
     setScanning(true);
     setProgress({
       scanId,
@@ -131,6 +135,9 @@ function App() {
       if (shouldClearScanResultOnError(cause)) {
         setResult(null);
         setResultScanId(null);
+      } else {
+        setResult(previousResult);
+        setResultScanId(previousScanId);
       }
       if (isCancelledError(cause)) {
         setError(null);

@@ -173,11 +173,33 @@ fn json_contract_version_order_children_and_warnings() {
     assert!(json.contains("\"children\": []"));
     assert!(json.contains("\"name\": \"empty\""));
     assert!(json.contains("\"code\": \"permissionDenied\""));
-    let warning_secret = json.find("Mustermann/secret").expect("portable warning");
-    let warning_empty = json.find("\"path\": \"\"").expect("unrelated warning empty");
-    assert!(warning_secret < warning_empty);
+    let warning_secret = json
+        .find("\"path\": \"Mustermann/secret\"")
+        .expect("portable warning");
+    let warning_null = json.find("\"path\": null").expect("unrelated warning null");
+    assert!(warning_secret < warning_null);
+    assert!(!json.contains("\"path\": \"\""));
     assert!(!contains_absolute(&json));
     assert!(json.contains("\"directoryCount\": 3"));
+}
+
+#[test]
+fn json_warning_path_is_portable_or_explicit_null() {
+    let result = fixture();
+    let json = render_export(ExportFormat::Json, &result).expect("json");
+    assert!(json.contains("\"path\": \"Mustermann/secret\""));
+    assert!(json.contains("\"path\": null"));
+    assert!(!json.contains("\"path\": \"\""));
+    assert!(!json.contains(r"C:\\Users"));
+    assert!(!json.contains(r"D:\\other"));
+    let skipped = json
+        .find("\"code\": \"skipped\"")
+        .expect("skipped warning");
+    let window = &json[skipped.saturating_sub(80)..skipped];
+    assert!(
+        window.contains("\"path\": null"),
+        "path field must remain present as null next to skipped warning"
+    );
 }
 
 #[test]
