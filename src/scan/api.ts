@@ -24,6 +24,10 @@ export async function pickDirectory(): Promise<string | null> {
   return null;
 }
 
+export function classifyScanRoot(path: string): Promise<"directory" | "file"> {
+  return invoke<"directory" | "file">("classify_scan_root", { path });
+}
+
 export function startScan(config: ScanConfig, scanId: number): Promise<ScanResult> {
   return invoke<ScanResult>("start_scan", { config, scanId });
 }

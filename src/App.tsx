@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 import { parseExtensionInput } from "./filter";
@@ -11,7 +12,11 @@ import {
 } from "./model";
 import {
   cancelScan,
+  classifyScanRoot,
   copyExport,
+  decideDroppedPaths,
+  DROP_FILE_MESSAGE,
+  DROP_MULTIPLE_MESSAGE,
   isCancelledError,
   isProgressForScan,
   pickDirectory,
@@ -47,13 +52,29 @@ function App() {
   );
   const [exportFormat, setExportFormat] = useState<ExportFormat>("txt");
   const [exportBusy, setExportBusy] = useState(false);
+  const [dropActive, setDropActive] = useState(false);
   const scanLockRef = useRef(false);
   const scanIdRef = useRef(0);
   const activeScanIdRef = useRef<number | null>(null);
+  const scanningRef = useRef(false);
+  const exportBusyRef = useRef(false);
+  const configRef = useRef(config);
+  const extensionInputRef = useRef(extensionInput);
+  const resultRef = useRef(result);
+  const resultScanIdRef = useRef(resultScanId);
+  const handleDroppedPathsRef = useRef<(paths: string[]) => void>(() => {});
+
+  scanningRef.current = scanning;
+  exportBusyRef.current = exportBusy;
+  configRef.current = config;
+  extensionInputRef.current = extensionInput;
+  resultRef.current = result;
+  resultScanIdRef.current = resultScanId;
 
   useEffect(() => {
     let disposed = false;
-    let unlisten: (() => void) | undefined;
+    let unlistenProgress: (() => void) | undefined;
+    let unlistenDragDrop: (() => void) | undefined;
 
     void subscribeScanProgress((next) => {
       if (disposed || !isProgressForScan(activeScanIdRef.current, next)) {
@@ -61,14 +82,44 @@ function App() {
       }
       setProgress(next);
     }).then((fn) => {
-      unlisten = fn;
+      unlistenProgress = fn;
     });
+
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (disposed) {
+          return;
+        }
+
+        const busy = scanningRef.current || exportBusyRef.current || scanLockRef.current;
+        if (event.payload.type === "enter" || event.payload.type === "over") {
+          setDropActive(!busy);
+          return;
+        }
+
+        setDropActive(false);
+        if (event.payload.type === "leave" || busy) {
+          return;
+        }
+
+        handleDroppedPathsRef.current(event.payload.paths);
+      })
+      .then((fn) => {
+        unlistenDragDrop = fn;
+      });
 
     return () => {
       disposed = true;
-      unlisten?.();
+      unlistenProgress?.();
+      unlistenDragDrop?.();
     };
   }, []);
+
+  useEffect(() => {
+    if (scanning || exportBusy) {
+      setDropActive(false);
+    }
+  }, [scanning, exportBusy]);
 
   function clearExportNotice() {
     setExportNotice(null);
@@ -87,32 +138,44 @@ function App() {
     }
   }
 
-  async function handleStartScan() {
-    if (scanLockRef.current || exportBusy) {
+  async function handleStartScan(rootPathOverride?: string) {
+    if (scanLockRef.current || exportBusyRef.current || scanningRef.current) {
       return;
     }
+    const rootPath = rootPathOverride ?? configRef.current.rootPath;
+    if (rootPath.length === 0) {
+      return;
+    }
+
     scanLockRef.current = true;
     const scanId = scanIdRef.current + 1;
     scanIdRef.current = scanId;
     activeScanIdRef.current = scanId;
 
+    if (rootPathOverride !== undefined) {
+      setConfig((current) =>
+        current.rootPath === rootPathOverride ? current : { ...current, rootPath: rootPathOverride },
+      );
+    }
+
     setError(null);
     clearExportNotice();
-    const previousResult = result;
-    const previousScanId = resultScanId;
+    const previousResult = resultRef.current;
+    const previousScanId = resultScanIdRef.current;
     setResult(null);
     setResultScanId(null);
     setScanning(true);
     setProgress({
       scanId,
       processedCount: 0,
-      currentPath: config.rootPath,
+      currentPath: rootPath,
       status: "running",
     });
 
     const scanConfig: ScanConfig = {
-      ...config,
-      extensions: parseExtensionInput(extensionInput),
+      ...configRef.current,
+      rootPath,
+      extensions: parseExtensionInput(extensionInputRef.current),
     };
 
     try {
@@ -125,7 +188,7 @@ function App() {
       setProgress({
         scanId,
         processedCount: next.stats.directoryCount + next.stats.fileCount,
-        currentPath: config.rootPath,
+        currentPath: rootPath,
         status: "completed",
       });
     } catch (cause) {
@@ -144,7 +207,7 @@ function App() {
         setProgress((current) => ({
           scanId,
           processedCount: current?.processedCount ?? 0,
-          currentPath: current?.currentPath ?? config.rootPath,
+          currentPath: current?.currentPath ?? rootPath,
           status: "cancelled",
         }));
       } else {
@@ -152,7 +215,7 @@ function App() {
         setProgress((current) => ({
           scanId,
           processedCount: current?.processedCount ?? 0,
-          currentPath: current?.currentPath ?? config.rootPath,
+          currentPath: current?.currentPath ?? rootPath,
           status: "failed",
         }));
       }
@@ -163,6 +226,39 @@ function App() {
       }
     }
   }
+
+  async function handleDroppedPaths(paths: string[]) {
+    if (scanningRef.current || exportBusyRef.current || scanLockRef.current) {
+      return;
+    }
+
+    const decision = decideDroppedPaths(paths);
+    if (decision.action !== "accept") {
+      setError(DROP_MULTIPLE_MESSAGE);
+      return;
+    }
+
+    try {
+      const kind = await classifyScanRoot(decision.path);
+      if (scanningRef.current || exportBusyRef.current || scanLockRef.current) {
+        return;
+      }
+      if (kind !== "directory") {
+        setError(DROP_FILE_MESSAGE);
+        return;
+      }
+      await handleStartScan(decision.path);
+    } catch (cause) {
+      if (scanningRef.current || exportBusyRef.current || scanLockRef.current) {
+        return;
+      }
+      setError(toUserError(cause));
+    }
+  }
+
+  handleDroppedPathsRef.current = (paths) => {
+    void handleDroppedPaths(paths);
+  };
 
   async function handleCancelScan() {
     const scanId = activeScanIdRef.current;
@@ -225,11 +321,12 @@ function App() {
   }
 
   return (
-    <div className="app">
+    <div className={dropActive ? "app drop-active" : "app"}>
       <header>
         <h1>KONDOS</h1>
         <p>Ordner- und Dateistrukturen erfassen, anzeigen und exportieren.</p>
       </header>
+      {dropActive ? <p className="drop-hint">Ordner hier ablegen</p> : null}
       {error !== null ? <p className="error">{error}</p> : null}
       {exportNotice !== null ? (
         <p

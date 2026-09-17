@@ -6,7 +6,9 @@ mod model;
 mod scan;
 mod state;
 
-use commands::{cancel_scan, copy_export, save_export, start_scan, suggest_export_filename};
+use commands::{
+    cancel_scan, classify_scan_root, copy_export, save_export, start_scan, suggest_export_filename,
+};
 use state::AppState;
 use tauri::{Manager, WindowEvent};
 
@@ -26,6 +28,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_scan,
             cancel_scan,
+            classify_scan_root,
             save_export,
             copy_export,
             suggest_export_filename

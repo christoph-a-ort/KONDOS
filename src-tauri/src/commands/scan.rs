@@ -2,10 +2,15 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::error::AppError;
 use crate::model::{ScanConfig, ScanProgress, ScanResult, ScanStatus};
-use crate::scan;
+use crate::scan::{self, RootKind};
 use crate::state::AppState;
 
 pub const SCAN_PROGRESS_EVENT: &str = "scan://progress";
+
+#[tauri::command]
+pub fn classify_scan_root(path: String) -> Result<RootKind, AppError> {
+    scan::classify_root(&path)
+}
 
 #[tauri::command]
 pub async fn start_scan(
