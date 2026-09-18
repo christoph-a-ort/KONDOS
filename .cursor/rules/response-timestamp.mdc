@@ -1,0 +1,30 @@
+---
+description: Jede KONDOS-Antwort endet mit der tatsächlichen lokalen Windows-Systemzeit
+alwaysApply: true
+---
+
+# Antwortzeit unter jeder Cursor-Antwort
+
+Jede fertige Antwort in diesem Projekt endet mit genau einer letzten Zeile:
+
+`Antwortzeit: TT.MM.JJJJ, HH:MM:SS`
+
+Beispiel: `Antwortzeit: 18.09.2026, 20:03:17`
+
+## Zeitquelle
+
+Unmittelbar vor der Ausgabe die aktuelle lokale Windows-Systemzeit ermitteln (z. B. `Get-Date`).
+
+Nicht schätzen, nicht aus dem Chatverlauf, nicht vom Bearbeitungsbeginn, nicht eine frühere Tool-Ausgabe wiederverwenden. Keine UTC-Umrechnung. Sommer-/Winterzeit folgt der lokalen Windows-Zeit.
+
+## Format
+
+- Tag, Monat, Stunde, Minute, Sekunde zweistellig
+- Jahr vierstellig
+- 24-Stunden-Format
+
+## Geltung
+
+Gilt für jede Antwort: kurz, PASS, STOP, Diagnose, Code, Tests, Git, Rückfragen, reine Analyse.
+
+Keine anderen Projektregeln ersetzen.

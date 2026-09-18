@@ -7,7 +7,7 @@ alwaysApply: true
 
 Der Workspace und der Produktname heißen **KONDOS**.
 
-Pfad: `C:\Users\COrt\OneDrive\Entwicklung\KONDOS`
+Das geöffnete Repository bzw. der aktuelle KONDOS-Projektordner ist die maßgebliche Projektwurzel.
 
 Der Ordner hieß zuvor `Dateiliste`. Das ist derselbe lokale Windows-IST-Scanner (Tauri/Rust/React).
 

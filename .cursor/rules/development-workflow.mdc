@@ -1,0 +1,52 @@
+---
+description: Dauerhafte KONDOS-Arbeitsregeln für Git, Kontowechsel, Cargo.lock, Verträge und Tests
+alwaysApply: true
+---
+
+# KONDOS-Arbeitsweise
+
+Schlanke Dauerregel. Kein Phasenstatus, keine Commit-ID, kein Benutzerpfad.
+
+## Git
+
+- Cursor darf **nicht** selbst pushen. Push nur manuell durch den Benutzer per TortoiseGit, sofern nichts anderes ausdrücklich angeordnet ist.
+- Cursor darf nicht ungefragt committen oder stagen.
+- Vor einem geplanten Commit Git-Status und vorgesehene Dateien prüfen.
+- Keine zufälligen oder fachfremden Dateien in Produkt-Commits aufnehmen.
+
+## Zwei Windows-Benutzerkonten / OneDrive
+
+- Dasselbe Projekt kann von zwei Windows-Benutzerkonten genutzt werden.
+- Nicht davon ausgehen, dass uncommittete Änderungen über OneDrive bereits vollständig auf dem anderen Konto angekommen sind.
+- Vor einem Kontowechsel wichtige Produktarbeit möglichst committen und anschließend manuell pushen.
+- Nach einem Kontowechsel Git-/Remote-Stand prüfen, bevor weitergearbeitet wird.
+- Niemals einen vermuteten neueren OneDrive-Stand blind über einen vorhandenen Git-Stand schreiben.
+
+## Cargo.lock
+
+- Reine automatische Umsortierungen oder sonstige inhaltsneutrale Änderungen an `src-tauri/Cargo.lock` nicht ungeprüft übernehmen.
+- Ohne echte Abhängigkeitsänderung `Cargo.lock` nicht nur wegen einer automatischen Umsortierung in einen Commit aufnehmen.
+
+## Architektur / bestehende Verträge
+
+- Bestehende KONDOS-Verträge und abgeschlossene Entwicklungsstände nicht ungefragt verändern. Nur im vereinbarten Scope arbeiten.
+- Scanner READ-ONLY. `FsNode`/`ScanResult` nicht nebenbei umbauen. Scanner-Natural-Sort nicht ändern.
+- Tree: `deriveVisibleRows` + Windowing. Keine Virtualisierungs-Library, keine Nested-`<ul>`-Hierarchie. `ROW_HEIGHT=28`, `OVERSCAN=12`.
+- Nach erfolgreichem Scan: flüchtiger Backend-Snapshot (`scanId` + `Arc<ScanResult>`). Export daraus.
+- Occupancy: Idle / Scanning / Exporting. Scan und Export schließen sich aus.
+- Bestehende Performance-, Virtualisierungs-, Export-, Drag-and-Drop- und TreeView-Verträge erhalten, sofern der aktuelle Auftrag sie nicht ausdrücklich ändert.
+- Keine neue Dependency, kein Job-Manager, keine DB, kein Streaming-IPC, kein Tree-Library-Wechsel, ohne Auftrag kein Scanner-Rewrite. Keine Capability-Erweiterung ohne STOP.
+
+## Tests
+
+- Ignorierte Tests nicht automatisch als Fehler behandeln.
+- Bekannte Windows-Sonderfälle bei ignored Tests berücksichtigen.
+- Vor Abschluss einer Entwicklungsstufe die für den Scope vereinbarten Prüfungen durchführen.
+- Keine UI-Prüfung behaupten, die nicht in der Tauri-App gelaufen ist.
+
+## Handoff
+
+- Eine temporäre HANDOFF-Datei nur anlegen, wenn sie für einen tatsächlichen Arbeits- oder Kontowechsel benötigt wird.
+- HANDOFF-Dateien sind keine dauerhafte Quelle für den Projektstatus.
+- Git-Commit und Remote-Stand sind für abgeschlossene Entwicklungsstände maßgeblich.
+- Nach erfolgreichem Abschluss eines Handoffs veraltete temporäre HANDOFF-Dateien wieder entfernen.
