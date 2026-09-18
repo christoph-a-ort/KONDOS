@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type UIEvent } from "react";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
-import { type FsNode, type ScanResult } from "../model";
+import { isDirectory, type FsNode, type ScanResult } from "../model";
+import { openInExplorer, toUserError } from "../scan";
 import {
   DEFAULT_COLUMN_WIDTHS,
   applyColumnResizeDelta,
@@ -22,6 +24,7 @@ import {
   collapseAllExpandedIds,
   collectExpandableDirectoryIds,
   computeTreeWindow,
+  defaultExpandedIds,
   deriveVisibleRows,
   findNodeById,
   listingHint,
@@ -30,6 +33,18 @@ import {
   selectedIdAfterCollapseAll,
   type VisibleTreeRow,
 } from "./treeRows";
+import {
+  ancestorDirectoryIds,
+  clipboardPath,
+  collectMatchIds,
+  createMatchIdSet,
+  emptySearchQuery,
+  matchIndexAfterReorder,
+  nextMatchIndex,
+  previousMatchIndex,
+  searchCountLabel,
+  withAncestorsExpanded,
+} from "./treeSearch";
 import { DEFAULT_TREE_SORT, sortAfterHidingColumn, type SortColumn, type TreeSort } from "./treeSort";
 
 interface TreeViewProps {
@@ -62,11 +77,27 @@ export function TreeView({
             Alles zuklappen
           </button>
         </div>
+        <TreeSearchBar
+          query=""
+          countLabel={null}
+          canNavigate={false}
+          disabled
+          onQueryChange={() => {}}
+          onPrevious={() => {}}
+          onNext={() => {}}
+          onKeyDown={() => {}}
+        />
         <p className="muted">Noch keine Analyse durchgeführt.</p>
         <div className="tree-viewport tree-viewport-empty" />
-        <p className="tree-path muted" title="">
-          Pfad: —
-        </p>
+        <TreePathBar
+          path={null}
+          hasSelection={false}
+          disabled
+          notice={null}
+          noticeKind={null}
+          onCopy={() => {}}
+          onOpen={() => {}}
+        />
       </section>
     );
   }
@@ -109,7 +140,7 @@ function PopulatedTreeView({
   onVisibilityChange,
   onWidthsChange,
 }: PopulatedTreeViewProps) {
-  const [expandedIds, setExpandedIds] = useState(() => collapseAllExpandedIds(result.root.id));
+  const [expandedIds, setExpandedIds] = useState(() => defaultExpandedIds(result.root.id));
   const [activeResult, setActiveResult] = useState(result);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -117,8 +148,15 @@ function PopulatedTreeView({
   const [viewportWidth, setViewportWidth] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [nameAutoFill, setNameAutoFill] = useState(true);
+  const [searchQuery, setSearchQuery] = useState(emptySearchQuery);
+  const [pinnedMatchId, setPinnedMatchId] = useState<string | null>(null);
+  const [searchJumped, setSearchJumped] = useState(false);
+  const [pathNotice, setPathNotice] = useState<string | null>(null);
+  const [pathNoticeKind, setPathNoticeKind] = useState<"ok" | "error" | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const skipSelectionRef = useRef(false);
+  const pendingRevealRef = useRef<string | null>(null);
+  const pathNoticeTimerRef = useRef<number | null>(null);
   const widthsRef = useRef(widths);
   const nameAutoFillRef = useRef(nameAutoFill);
   widthsRef.current = widths;
@@ -126,10 +164,15 @@ function PopulatedTreeView({
 
   if (result !== activeResult) {
     setActiveResult(result);
-    setExpandedIds(collapseAllExpandedIds(result.root.id));
+    setExpandedIds(defaultExpandedIds(result.root.id));
     setSelectedId(null);
     setScrollTop(0);
     setMenuOpen(false);
+    setSearchQuery(emptySearchQuery());
+    setPinnedMatchId(null);
+    setSearchJumped(false);
+    setPathNotice(null);
+    setPathNoticeKind(null);
   }
 
   const columns = visibleColumns(visibility);
@@ -142,6 +185,16 @@ function PopulatedTreeView({
     () => deriveVisibleRows(result.root, expandedIds, sort),
     [result.root, expandedIds, sort],
   );
+  const matchIds = useMemo(
+    () => collectMatchIds(result.root, searchQuery, sort),
+    [result.root, searchQuery, sort],
+  );
+  const matchIdSet = useMemo(() => createMatchIdSet(matchIds), [matchIds]);
+  const currentMatchIndex = matchIndexAfterReorder(matchIds, pinnedMatchId);
+  const currentMatchId =
+    searchJumped && currentMatchIndex >= 0 ? matchIds[currentMatchIndex] : undefined;
+  const searchLabel = searchCountLabel(searchQuery, matchIds.length, currentMatchIndex);
+  const canNavigateMatches = matchIds.length > 0;
 
   useEffect(() => {
     const element = viewportRef.current;
@@ -164,6 +217,27 @@ function PopulatedTreeView({
       element.scrollTop = 0;
     }
   }, [result]);
+
+  useEffect(() => {
+    if (matchIds.length === 0) {
+      setPinnedMatchId(null);
+      return;
+    }
+    setPinnedMatchId((current) => {
+      if (current !== null && matchIds.includes(current)) {
+        return current;
+      }
+      return matchIds[0];
+    });
+  }, [matchIds]);
+
+  useEffect(() => {
+    return () => {
+      if (pathNoticeTimerRef.current !== null) {
+        window.clearTimeout(pathNoticeTimerRef.current);
+      }
+    };
+  }, []);
 
   const treeWindow = computeTreeWindow(rows.length, scrollTop, viewportHeight);
   const visibleRows = rows.slice(treeWindow.start, treeWindow.end);
@@ -249,9 +323,97 @@ function PopulatedTreeView({
   }
 
   function handleCollapseAll() {
-    setExpandedIds(collapseAllExpandedIds(result.root.id));
+    setExpandedIds(collapseAllExpandedIds());
     setSelectedId(selectedIdAfterCollapseAll(result.root.id));
     queueMicrotask(() => scrollRowIntoView(result.root.id));
+  }
+
+  function handleSearchChange(value: string) {
+    setSearchQuery(value);
+    setPinnedMatchId(null);
+    setSearchJumped(false);
+  }
+
+  function revealMatchAt(index: number) {
+    const id = matchIds[index];
+    if (id === undefined) {
+      return;
+    }
+    setPinnedMatchId(id);
+    setSearchJumped(true);
+    setExpandedIds((current) =>
+      withAncestorsExpanded(current, ancestorDirectoryIds(result.root, id)),
+    );
+    setSelectedId(id);
+    pendingRevealRef.current = id;
+  }
+
+  function handleNextMatch() {
+    revealMatchAt(nextMatchIndex(currentMatchIndex, matchIds.length, searchJumped));
+  }
+
+  function handlePreviousMatch() {
+    revealMatchAt(previousMatchIndex(currentMatchIndex, matchIds.length, searchJumped));
+  }
+
+  function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    event.stopPropagation();
+    if (event.key === "Escape") {
+      if (searchQuery.length > 0) {
+        event.preventDefault();
+        handleSearchChange(emptySearchQuery());
+      }
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (event.shiftKey) {
+        handlePreviousMatch();
+      } else {
+        handleNextMatch();
+      }
+    }
+  }
+
+  function showPathNotice(message: string, kind: "ok" | "error") {
+    if (pathNoticeTimerRef.current !== null) {
+      window.clearTimeout(pathNoticeTimerRef.current);
+      pathNoticeTimerRef.current = null;
+    }
+    setPathNotice(message);
+    setPathNoticeKind(kind);
+    if (kind === "ok") {
+      pathNoticeTimerRef.current = window.setTimeout(() => {
+        setPathNotice(null);
+        setPathNoticeKind(null);
+        pathNoticeTimerRef.current = null;
+      }, 2500);
+    }
+  }
+
+  async function handleCopyPath() {
+    if (selectedNode === undefined) {
+      return;
+    }
+    try {
+      await writeText(clipboardPath(selectedNode));
+      showPathNotice("Pfad kopiert", "ok");
+    } catch (cause) {
+      showPathNotice(toUserError(cause), "error");
+    }
+  }
+
+  async function handleOpenExplorer() {
+    if (selectedNode === undefined) {
+      return;
+    }
+    try {
+      await openInExplorer(selectedNode.path, isDirectory(selectedNode));
+      setPathNotice(null);
+      setPathNoticeKind(null);
+    } catch (cause) {
+      showPathNotice(toUserError(cause), "error");
+    }
   }
 
   function handleViewportClick(event: MouseEvent<HTMLDivElement>) {
@@ -359,6 +521,17 @@ function PopulatedTreeView({
   const actionsDisabled = scanning;
 
   useEffect(() => {
+    const id = pendingRevealRef.current;
+    if (id === null) {
+      return;
+    }
+    if (rowIndexById(rows, id) >= 0) {
+      pendingRevealRef.current = null;
+      scrollRowIntoView(id, rows);
+    }
+  }, [rows]);
+
+  useEffect(() => {
     if (selectedId === null) {
       return;
     }
@@ -401,6 +574,16 @@ function PopulatedTreeView({
           Alles zuklappen
         </button>
       </div>
+      <TreeSearchBar
+        query={searchQuery}
+        countLabel={searchLabel}
+        canNavigate={canNavigateMatches}
+        disabled={false}
+        onQueryChange={handleSearchChange}
+        onPrevious={handlePreviousMatch}
+        onNext={handleNextMatch}
+        onKeyDown={handleSearchKeyDown}
+      />
       <div
         className="tree-viewport"
         ref={viewportRef}
@@ -517,6 +700,8 @@ function PopulatedTreeView({
                 gridTemplate={gridTemplate}
                 expanded={row.directory && expandedIds.has(row.id)}
                 selected={selectedId === row.id}
+                match={matchIdSet.has(row.id)}
+                currentMatch={row.id === currentMatchId}
                 onSelect={() => handleRowClick(row)}
                 onDoubleClick={() => handleRowDoubleClick(row)}
                 onTwist={(event) => handleTwistClick(event, row.id)}
@@ -533,9 +718,19 @@ function PopulatedTreeView({
           </div>
         </div>
       </div>
-      <p className="tree-path muted" title={selectedPath ?? ""}>
-        Pfad: {selectedPath ?? "—"}
-      </p>
+      <TreePathBar
+        path={selectedPath ?? null}
+        hasSelection={selectedNode !== undefined}
+        disabled={false}
+        notice={pathNotice}
+        noticeKind={pathNoticeKind}
+        onCopy={() => {
+          void handleCopyPath();
+        }}
+        onOpen={() => {
+          void handleOpenExplorer();
+        }}
+      />
       {result.warnings.length > 0 ? (
         <details className="warnings">
           <summary>Warnungen ({result.warnings.length})</summary>
@@ -565,6 +760,8 @@ interface VirtualTreeRowProps {
   gridTemplate: string;
   expanded: boolean;
   selected: boolean;
+  match: boolean;
+  currentMatch: boolean;
   onSelect: () => void;
   onDoubleClick: () => void;
   onTwist: (event: MouseEvent<HTMLButtonElement>) => void;
@@ -576,6 +773,8 @@ function VirtualTreeRow({
   gridTemplate,
   expanded,
   selected,
+  match,
+  currentMatch,
   onSelect,
   onDoubleClick,
   onTwist,
@@ -596,13 +795,23 @@ function VirtualTreeRow({
     icon = <span className="icon file" aria-hidden="true" />;
   }
 
+  const rowClass = [
+    "tree-data-row",
+    selected ? "selected" : "",
+    match ? "match" : "",
+    currentMatch ? "current-match" : "",
+    isRoot ? "root-node" : "",
+  ]
+    .filter((part) => part.length > 0)
+    .join(" ");
+
   return (
     <div
       role="treeitem"
       aria-level={depth + 1}
       aria-expanded={expandable ? expanded : undefined}
       aria-selected={selected}
-      className={`tree-data-row${selected ? " selected" : ""}${isRoot ? " root-node" : ""}`}
+      className={rowClass}
       style={{ gridTemplateColumns: gridTemplate, height: ROW_HEIGHT }}
       onClick={onSelect}
       onDoubleClick={onDoubleClick}
@@ -680,4 +889,104 @@ function cellValue(node: FsNode, column: ColumnId, directory: boolean): ReactNod
     return node.modifiedAtMs === undefined ? "—" : formatDateTime(node.modifiedAtMs);
   }
   return createdColumnText(node.createdAtMs, false);
+}
+
+interface TreeSearchBarProps {
+  query: string;
+  countLabel: string | null;
+  canNavigate: boolean;
+  disabled: boolean;
+  onQueryChange: (value: string) => void;
+  onPrevious: () => void;
+  onNext: () => void;
+  onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
+}
+
+function TreeSearchBar({
+  query,
+  countLabel,
+  canNavigate,
+  disabled,
+  onQueryChange,
+  onPrevious,
+  onNext,
+  onKeyDown,
+}: TreeSearchBarProps) {
+  return (
+    <div className="tree-search-row">
+      <input
+        type="search"
+        className="tree-search-input"
+        placeholder="Suchen …"
+        value={query}
+        disabled={disabled}
+        autoComplete="off"
+        spellCheck={false}
+        onChange={(event) => onQueryChange(event.target.value)}
+        onKeyDown={onKeyDown}
+        aria-label="Im Ergebnis suchen"
+      />
+      <button
+        type="button"
+        className="tree-search-nav"
+        disabled={disabled || !canNavigate}
+        onClick={onPrevious}
+        aria-label="Vorheriger Treffer"
+      >
+        ‹
+      </button>
+      <span className="tree-search-count">{countLabel ?? ""}</span>
+      <button
+        type="button"
+        className="tree-search-nav"
+        disabled={disabled || !canNavigate}
+        onClick={onNext}
+        aria-label="Nächster Treffer"
+      >
+        ›
+      </button>
+    </div>
+  );
+}
+
+interface TreePathBarProps {
+  path: string | null;
+  hasSelection: boolean;
+  disabled: boolean;
+  notice: string | null;
+  noticeKind: "ok" | "error" | null;
+  onCopy: () => void;
+  onOpen: () => void;
+}
+
+function TreePathBar({
+  path,
+  hasSelection,
+  disabled,
+  notice,
+  noticeKind,
+  onCopy,
+  onOpen,
+}: TreePathBarProps) {
+  const actionsOff = disabled || !hasSelection;
+  return (
+    <div className="tree-path-row">
+      <p className="tree-path muted" title={path ?? ""}>
+        Pfad: {path ?? "—"}
+      </p>
+      <div className="tree-path-actions">
+        <button type="button" disabled={actionsOff} onClick={onCopy}>
+          Pfad kopieren
+        </button>
+        <button type="button" disabled={actionsOff} onClick={onOpen}>
+          Im Explorer öffnen
+        </button>
+        {notice !== null ? (
+          <span className={noticeKind === "error" ? "tree-path-notice is-error" : "tree-path-notice is-ok"}>
+            {notice}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
 }

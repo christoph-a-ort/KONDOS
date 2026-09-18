@@ -49,8 +49,12 @@ export function selectedIdAfterCollapseAll(rootId: string): string {
   return rootId;
 }
 
-export function collapseAllExpandedIds(rootId: string): Set<string> {
+export function defaultExpandedIds(rootId: string): Set<string> {
   return new Set([rootId]);
+}
+
+export function collapseAllExpandedIds(): Set<string> {
+  return new Set();
 }
 
 export function collectExpandableDirectoryIds(

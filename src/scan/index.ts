@@ -2,6 +2,7 @@ export {
   cancelScan,
   classifyScanRoot,
   copyExport,
+  openInExplorer,
   pickDirectory,
   pickExportPath,
   saveExport,

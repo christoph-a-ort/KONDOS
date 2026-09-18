@@ -53,6 +53,10 @@ export function copyExport(
   return invoke<string>("copy_export", { format, scanId, txtColumns });
 }
 
+export function openInExplorer(path: string, directory: boolean): Promise<void> {
+  return invoke("open_in_explorer", { path, directory });
+}
+
 export function suggestExportFilename(format: ExportFormat, scanId: number): Promise<string> {
   return invoke<string>("suggest_export_filename", { format, scanId });
 }

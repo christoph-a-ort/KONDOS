@@ -7,7 +7,8 @@ mod scan;
 mod state;
 
 use commands::{
-    cancel_scan, classify_scan_root, copy_export, save_export, start_scan, suggest_export_filename,
+    cancel_scan, classify_scan_root, copy_export, open_in_explorer, save_export, start_scan,
+    suggest_export_filename,
 };
 use state::AppState;
 use tauri::{Manager, WindowEvent};
@@ -31,7 +32,8 @@ pub fn run() {
             classify_scan_root,
             save_export,
             copy_export,
-            suggest_export_filename
+            suggest_export_filename,
+            open_in_explorer
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -345,7 +345,8 @@ const tree = dir("root", "root", [filled, empty]);
 const all = collectExpandableDirectoryIds(tree);
 assert(all.has("root") && all.has("f") && !all.has("e"), "expand all only expandable");
 assert(selectedIdAfterCollapseAll("root") === "root", "collapse all selects root");
-assert(visibleIds(tree, ["root"]) === "root,e,f", "collapse all keeps root children");
+assert(visibleIds(tree, []) === "root", "collapse all shows only root");
+assert(findNodeById(tree, "root")?.path === "root", "root path remains after collapse all");
 assert(selectedIdAfterClick("root", "f", true) === "root", "twist keeps selection");
 assert(selectedIdAfterClick("root", "f", false) === "f", "row click selects");
 assert(!visibleIds(nested, ["root"]).includes("root/A/a1"), "collapsed child not in visible rows");
@@ -391,5 +392,195 @@ assert(createdColumnText(stamped, true) === "—", "E: directory created stays d
 assert(shouldClearScanResultOnError({ kind: "cancelled", message: "x" }), "cancel clears result");
 assert(shouldClearScanResultOnError({ kind: "rootInaccessible", message: "x" }), "failed scan clears");
 assert(!shouldClearScanResultOnError({ kind: "invalidPath", message: "x" }), "rejected begin");
+
+function normalizeSearchQuery(query) {
+  return query.trim().toLocaleLowerCase();
+}
+
+function nodeMatchesQuery(node, needle) {
+  if (needle.length === 0) return false;
+  return node.name.toLocaleLowerCase().includes(needle);
+}
+
+function collectMatchIds(root, query, sort) {
+  const needle = normalizeSearchQuery(query);
+  if (needle.length === 0) return [];
+  const matches = [];
+  function walk(node) {
+    if (nodeMatchesQuery(node, needle)) matches.push(node.id);
+    if (isDirectory(node) && node.children.length > 0) {
+      for (const child of sortedChildren(node.children, sort)) walk(child);
+    }
+  }
+  walk(root);
+  return matches;
+}
+
+function createMatchIdSet(matchIds) {
+  return new Set(matchIds);
+}
+
+function matchIndexAfterReorder(matchIds, previousId) {
+  if (matchIds.length === 0) return -1;
+  if (previousId !== null) {
+    const index = matchIds.indexOf(previousId);
+    if (index >= 0) return index;
+  }
+  return 0;
+}
+
+function matchIndexForNewQuery(matchIds) {
+  return matchIds.length === 0 ? -1 : 0;
+}
+
+function stepMatchIndex(currentIndex, matchCount, delta) {
+  if (matchCount <= 0) return -1;
+  const start = currentIndex < 0 ? 0 : currentIndex;
+  return (start + delta + matchCount * 8) % matchCount;
+}
+
+function nextMatchIndex(currentIndex, matchCount, jumped) {
+  if (matchCount <= 0) return -1;
+  if (!jumped) return currentIndex < 0 ? 0 : currentIndex;
+  return stepMatchIndex(currentIndex, matchCount, 1);
+}
+
+function previousMatchIndex(currentIndex, matchCount, jumped) {
+  if (matchCount <= 0) return -1;
+  if (!jumped) return currentIndex < 0 ? 0 : currentIndex;
+  return stepMatchIndex(currentIndex, matchCount, -1);
+}
+
+function ancestorDirectoryIds(root, targetId) {
+  const chain = [];
+  function walk(node, ancestors) {
+    if (node.id === targetId) {
+      chain.push(...ancestors);
+      return true;
+    }
+    if (!isDirectory(node)) return false;
+    const next = [...ancestors, node.id];
+    for (const child of node.children) {
+      if (walk(child, next)) return true;
+    }
+    return false;
+  }
+  walk(root, []);
+  return chain;
+}
+
+function withAncestorsExpanded(expandedIds, ancestorIds) {
+  const next = new Set(expandedIds);
+  for (const id of ancestorIds) next.add(id);
+  return next;
+}
+
+function searchCountLabel(query, matchCount, currentIndex) {
+  if (normalizeSearchQuery(query).length === 0) return null;
+  if (matchCount === 0) return "0 Treffer";
+  return `${currentIndex + 1} von ${matchCount}`;
+}
+
+function clipboardPath(node) {
+  return node.path;
+}
+
+function emptySearchQuery() {
+  return "";
+}
+
+const searchRoot = dir("C:/Hausverwaltung", "Hausverwaltung", [
+  dir("C:/Hausverwaltung/Herrsching", "Herrsching", [
+    file("C:/Hausverwaltung/Herrsching/Rechnung 2025.pdf", "Rechnung 2025.pdf"),
+    file("C:/Hausverwaltung/Herrsching/Notiz.txt", "Notiz.txt"),
+  ]),
+  dir("C:/Hausverwaltung/Weßling", "Weßling", [
+    file("C:/Hausverwaltung/Weßling/Schlussrechnung.docx", "Schlussrechnung.docx"),
+  ]),
+]);
+
+assert(normalizeSearchQuery("  ") === "", "whitespace-only is empty");
+assert(collectMatchIds(searchRoot, "   ", DEFAULT_TREE_SORT).length === 0, "whitespace-only has no matches");
+assert(searchCountLabel("   ", 0, -1) === null, "empty search hides count");
+const byName = collectMatchIds(searchRoot, "rechnung", DEFAULT_TREE_SORT);
+assert(
+  byName.join(",") ===
+    "C:/Hausverwaltung/Herrsching/Rechnung 2025.pdf,C:/Hausverwaltung/Weßling/Schlussrechnung.docx",
+  "substring in name is case-insensitive",
+);
+const byPath = collectMatchIds(searchRoot, "herrsching", DEFAULT_TREE_SORT);
+assert(byPath.join(",") === "C:/Hausverwaltung/Herrsching", "folder name itself is a match");
+assert(!byPath.includes("C:/Hausverwaltung/Herrsching/Notiz.txt"), "path-only child is not a match");
+assert(!byPath.includes("C:/Hausverwaltung/Herrsching/Rechnung 2025.pdf"), "other child in matching folder is not a match");
+
+const kuendigung = dir("C:/root/Kündigung", "Kündigung", [
+  file("C:/root/Kündigung/2023_Kündigung_EON.pdf", "2023_Kündigung_EON.pdf"),
+  file("C:/root/Kündigung/Start_Umbenennen.bat", "Start_Umbenennen.bat"),
+  file("C:/root/Kündigung/ZeichenEntfernen_PDF.ps1", "ZeichenEntfernen_PDF.ps1"),
+]);
+const kuendigungMatches = collectMatchIds(kuendigung, "Kündigung", DEFAULT_TREE_SORT);
+assert(kuendigungMatches.includes("C:/root/Kündigung"), "A/C: folder name match");
+assert(kuendigungMatches.includes("C:/root/Kündigung/2023_Kündigung_EON.pdf"), "A/F: substring in file name");
+assert(!kuendigungMatches.includes("C:/root/Kündigung/Start_Umbenennen.bat"), "B/D: path-only bat is not a match");
+assert(!kuendigungMatches.includes("C:/root/Kündigung/ZeichenEntfernen_PDF.ps1"), "B/D: path-only ps1 is not a match");
+assert(collectMatchIds(kuendigung, "kündigung", DEFAULT_TREE_SORT).join(",") === kuendigungMatches.join(","), "E: case-insensitive");
+assert(collectMatchIds(searchRoot, "xyz-none", DEFAULT_TREE_SORT).length === 0, "0 matches");
+assert(searchCountLabel("xyz-none", 0, -1) === "0 Treffer", "0 Treffer label");
+assert(searchCountLabel("rechnung", 2, 0) === "1 von 2", "1 von n label");
+const collapsedMatches = collectMatchIds(searchRoot, "notiz", DEFAULT_TREE_SORT);
+assert(collapsedMatches.join(",") === "C:/Hausverwaltung/Herrsching/Notiz.txt", "match in closed branch stays listed");
+assert(
+  !visibleIds(searchRoot, ["C:/Hausverwaltung"]).includes("C:/Hausverwaltung/Herrsching/Notiz.txt"),
+  "closed branch not in visible rows",
+);
+const nameDesc = collectMatchIds(searchRoot, "rechnung", { column: "name", direction: "desc" });
+assert(nameDesc[0] === "C:/Hausverwaltung/Weßling/Schlussrechnung.docx", "sibling sort changes match order");
+const fullyExpanded = deriveVisibleRows(
+  searchRoot,
+  new Set(["C:/Hausverwaltung", "C:/Hausverwaltung/Herrsching", "C:/Hausverwaltung/Weßling"]),
+);
+const preorder = fullyExpanded.filter((row) => byName.includes(row.id)).map((row) => row.id);
+assert(preorder.join(",") === byName.join(","), "match order is fully expanded preorder");
+const ancestors = ancestorDirectoryIds(searchRoot, "C:/Hausverwaltung/Herrsching/Notiz.txt");
+assert(ancestors.join(",") === "C:/Hausverwaltung,C:/Hausverwaltung/Herrsching", "ancestors of nested file");
+const expanded = withAncestorsExpanded(new Set(["C:/Hausverwaltung", "C:/Hausverwaltung/Weßling"]), ancestors);
+assert(expanded.has("C:/Hausverwaltung/Herrsching"), "needed ancestor added");
+assert(expanded.has("C:/Hausverwaltung/Weßling"), "other open branch kept");
+assert(expanded.size === 3, "only necessary ancestors added");
+assert(nextMatchIndex(0, 17, true) === 1, "next from first");
+assert(nextMatchIndex(16, 17, true) === 0, "wrap 17 → 1");
+assert(previousMatchIndex(0, 17, true) === 16, "wrap 1 → 17");
+assert(nextMatchIndex(0, 17, false) === 0, "first next reveals current");
+assert(previousMatchIndex(0, 17, false) === 0, "first previous reveals current");
+assert(matchIndexForNewQuery(byName) === 0, "new query starts at first");
+assert(matchIndexForNewQuery([]) === -1, "new query with 0 matches");
+const resorted = collectMatchIds(searchRoot, "rechnung", { column: "name", direction: "desc" });
+const kept = matchIndexAfterReorder(resorted, "C:/Hausverwaltung/Herrsching/Rechnung 2025.pdf");
+assert(resorted[kept] === "C:/Hausverwaltung/Herrsching/Rechnung 2025.pdf", "sort keeps current id");
+assert(matchIndexAfterReorder(resorted, "missing") === 0, "missing id falls back to first");
+const selectedBeforeQuery = "C:/Hausverwaltung/Weßling";
+collectMatchIds(searchRoot, "rechnung", DEFAULT_TREE_SORT);
+assert(selectedBeforeQuery === "C:/Hausverwaltung/Weßling", "query collection does not change selection");
+assert(emptySearchQuery() === "", "new scan resets query");
+assert(collectMatchIds(nested, emptySearchQuery(), DEFAULT_TREE_SORT).length === 0, "reset query has no matches");
+const matchSet = createMatchIdSet(byName);
+assert(matchSet.has(byName[0]) && !matchSet.has("missing"), "row lookup is set membership");
+assert(
+  clipboardPath(file("C:/Pfad mit Leerzeichen/Äpfel.txt", "Äpfel.txt")) ===
+    "C:/Pfad mit Leerzeichen/Äpfel.txt",
+  "clipboard uses node.path",
+);
+const matchesAfterCollapse = collectMatchIds(searchRoot, "notiz", DEFAULT_TREE_SORT);
+assert(visibleIds(searchRoot, []) === "C:/Hausverwaltung", "collapse all with search shows only root");
+assert(matchesAfterCollapse.join(",") === "C:/Hausverwaltung/Herrsching/Notiz.txt", "search hits remain after collapse all");
+const afterCollapseAncestors = ancestorDirectoryIds(searchRoot, "C:/Hausverwaltung/Herrsching/Notiz.txt");
+const revealed = withAncestorsExpanded(new Set(), afterCollapseAncestors);
+assert(revealed.has("C:/Hausverwaltung"), "navigation opens root");
+assert(revealed.has("C:/Hausverwaltung/Herrsching"), "navigation opens needed ancestors");
+assert(!revealed.has("C:/Hausverwaltung/Weßling"), "other branches stay closed");
+assert(
+  visibleIds(searchRoot, [...revealed]).includes("C:/Hausverwaltung/Herrsching/Notiz.txt"),
+  "revealed match becomes visible",
+);
 
 console.log("tree workbench checks passed");

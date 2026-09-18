@@ -97,7 +97,9 @@ header p,
 .tree-panel > .muted,
 .tree-panel > .tree-stats,
 .tree-panel > .tree-toolbar,
+.tree-panel > .tree-search-row,
 .tree-panel > .tree-path,
+.tree-panel > .tree-path-row,
 .tree-panel > .warnings {
   flex-shrink: 0;
 }
@@ -202,7 +204,9 @@ button:disabled {
 }
 
 .tree-panel > .tree-toolbar,
-.tree-panel > .tree-path {
+.tree-panel > .tree-search-row,
+.tree-panel > .tree-path,
+.tree-panel > .tree-path-row {
   flex-shrink: 0;
 }
 
@@ -216,6 +220,35 @@ button:disabled {
   flex-wrap: wrap;
   gap: 8px;
   margin: 0 0 8px;
+}
+
+.tree-search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+}
+
+.tree-search-input {
+  flex: 1;
+  min-width: 140px;
+  height: 28px;
+  padding: 0 8px;
+}
+
+.tree-search-nav {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  line-height: 1;
+}
+
+.tree-search-count {
+  min-width: 4.5rem;
+  color: #5c6570;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: center;
 }
 
 .tree-viewport {
@@ -366,11 +399,58 @@ button:disabled {
   background: #eef3f8;
 }
 
+.tree-data-row.match {
+  background: #e7f0e7;
+}
+
+.tree-data-row.match .tree-col-name.sticky-name {
+  background: #e7f0e7;
+}
+
+.tree-data-row.match:hover {
+  background: #dce8dc;
+}
+
+.tree-data-row.match:hover .tree-col-name.sticky-name {
+  background: #dce8dc;
+}
+
+.tree-data-row.current-match {
+  background: #d4e6d4;
+  box-shadow: inset 3px 0 0 #3d7a45;
+}
+
+.tree-data-row.current-match .tree-col-name.sticky-name {
+  background: #d4e6d4;
+}
+
+.tree-data-row.current-match:hover {
+  background: #c9ddc9;
+}
+
+.tree-data-row.current-match:hover .tree-col-name.sticky-name {
+  background: #c9ddc9;
+}
+
 .tree-data-row.selected {
   background: #d5e2f5;
 }
 
 .tree-data-row.selected .tree-col-name.sticky-name {
+  background: #d5e2f5;
+}
+
+.tree-data-row.selected.current-match {
+  box-shadow: inset 3px 0 0 #3d7a45;
+}
+
+.tree-data-row.selected:hover,
+.tree-data-row.selected.current-match:hover {
+  background: #d5e2f5;
+}
+
+.tree-data-row.selected:hover .tree-col-name.sticky-name,
+.tree-data-row.selected.current-match:hover .tree-col-name.sticky-name {
   background: #d5e2f5;
 }
 
@@ -449,6 +529,40 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tree-path-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+}
+
+.tree-path-row .tree-path {
+  flex: 1 1 220px;
+  margin: 0;
+  min-width: 0;
+}
+
+.tree-path-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.tree-path-notice {
+  font-size: 0.9em;
+  white-space: nowrap;
+}
+
+.tree-path-notice.is-ok {
+  color: #1f6b32;
+}
+
+.tree-path-notice.is-error {
+  color: #8a1f1f;
 }
 
 .tree-spacer {
