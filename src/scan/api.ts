@@ -40,12 +40,17 @@ export function saveExport(
   path: string,
   format: ExportFormat,
   scanId: number,
+  txtColumns?: { size: boolean; modified: boolean; created: boolean },
 ): Promise<{ path: string }> {
-  return invoke("save_export", { path, format, scanId });
+  return invoke("save_export", { path, format, scanId, txtColumns });
 }
 
-export function copyExport(format: ExportFormat, scanId: number): Promise<string> {
-  return invoke<string>("copy_export", { format, scanId });
+export function copyExport(
+  format: ExportFormat,
+  scanId: number,
+  txtColumns?: { size: boolean; modified: boolean; created: boolean },
+): Promise<string> {
+  return invoke<string>("copy_export", { format, scanId, txtColumns });
 }
 
 export function suggestExportFilename(format: ExportFormat, scanId: number): Promise<string> {

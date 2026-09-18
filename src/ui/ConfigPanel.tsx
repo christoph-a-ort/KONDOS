@@ -36,6 +36,7 @@ export function ConfigPanel({
           <input
             readOnly
             value={config.rootPath}
+            title={config.rootPath.length > 0 ? config.rootPath : undefined}
             placeholder="Kein Ordner gewählt"
           />
           <button type="button" onClick={onPickDirectory} disabled={inputsLocked}>

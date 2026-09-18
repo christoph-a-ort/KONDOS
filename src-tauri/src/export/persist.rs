@@ -8,11 +8,13 @@ use crate::model::{ExportFormat, ScanResult};
 
 use super::filename::apply_export_extension;
 use super::write_export;
+use super::ExportMetaFlags;
 
 pub fn write_export_file(
     path: &str,
     format: ExportFormat,
     result: &ScanResult,
+    txt_columns: Option<ExportMetaFlags>,
 ) -> Result<PathBuf, AppError> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -38,7 +40,7 @@ pub fn write_export_file(
     }
 
     let temp = temp_path_for(&target);
-    if let Err(err) = write_temp(&temp, format, result) {
+    if let Err(err) = write_temp(&temp, format, result, txt_columns) {
         let _ = fs::remove_file(&temp);
         return Err(AppError::export_write_failed(
             format,
@@ -59,10 +61,15 @@ pub fn write_export_file(
     Ok(target)
 }
 
-fn write_temp(temp: &Path, format: ExportFormat, result: &ScanResult) -> io::Result<()> {
+fn write_temp(
+    temp: &Path,
+    format: ExportFormat,
+    result: &ScanResult,
+    txt_columns: Option<ExportMetaFlags>,
+) -> io::Result<()> {
     let file = File::create(temp)?;
     let mut writer = BufWriter::with_capacity(64 * 1024, file);
-    write_export(&mut writer, format, result)?;
+    write_export(&mut writer, format, result, txt_columns)?;
     writer.flush()?;
     writer.get_ref().sync_all()?;
     Ok(())

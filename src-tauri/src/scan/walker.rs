@@ -8,7 +8,8 @@ use crate::error::{
 };
 use crate::filter::file_matches_extensions;
 use crate::model::{
-    FsNode, ScanConfig, ScanProgress, ScanResult, ScanStats, ScanStatus, ScanWarning, WarningCode,
+    DirectoryListing, FsNode, ScanConfig, ScanProgress, ScanResult, ScanStats, ScanStatus,
+    ScanWarning, WarningCode,
 };
 
 use super::hidden::is_hidden;
@@ -161,9 +162,10 @@ where
     ctx.emit(path, ScanStatus::Running, false);
 
     let mut children = Vec::new();
-    if depth < ctx.config.max_depth {
+    let listing = if depth < ctx.config.max_depth {
         match fs::read_dir(path) {
             Ok(entries) => {
+                let mut listing = DirectoryListing::Read;
                 for entry in entries {
                     if ctx.cancelled() {
                         break;
@@ -175,18 +177,23 @@ where
                             }
                         }
                         Err(err) => {
+                            listing = DirectoryListing::Incomplete;
                             ctx.note_io_skip(path, &err);
                             ctx.emit(path, ScanStatus::Running, false);
                         }
                     }
                 }
+                listing
             }
             Err(err) => {
                 ctx.note_io_skip(path, &err);
                 ctx.emit(path, ScanStatus::Running, false);
+                DirectoryListing::Incomplete
             }
         }
-    }
+    } else {
+        DirectoryListing::DepthLimited
+    };
 
     super::sort::sort_children(&mut children);
 
@@ -195,6 +202,7 @@ where
         name: node_name(path),
         path: path_to_string(path),
         depth,
+        listing,
         children,
         size_bytes: None,
         created_at_ms: extra.created_at_ms,
@@ -314,6 +322,7 @@ where
         name: node_name(path),
         path: path_to_string(path),
         depth,
+        listing: DirectoryListing::Read,
         children: Vec::new(),
         size_bytes: None,
         created_at_ms: extra.created_at_ms,
@@ -371,25 +380,53 @@ fn optional_node_times_and_size(metadata: Option<&Metadata>, config: &ScanConfig
     OptionalMeta {
         size_bytes: config.include_size.then_some(meta.len()),
         created_at_ms: if config.include_created_at {
-            system_time_to_ms(meta.created().ok())
+            created_at_ms(meta)
         } else {
             None
         },
         modified_at_ms: if config.include_modified_at {
-            system_time_to_ms(meta.modified().ok())
+            meta.modified().ok().and_then(system_time_to_ms)
         } else {
             None
         },
     }
 }
 
-fn system_time_to_ms(time: Option<SystemTime>) -> Option<u64> {
-    time.and_then(|value| {
-        value
-            .duration_since(UNIX_EPOCH)
-            .ok()
-            .map(|duration| duration.as_millis() as u64)
-    })
+fn created_at_ms(metadata: &Metadata) -> Option<u64> {
+    if let Ok(time) = metadata.created() {
+        if let Some(ms) = system_time_to_ms(time) {
+            return Some(ms);
+        }
+    }
+    windows_created_at_ms(metadata)
+}
+
+#[cfg(windows)]
+fn windows_created_at_ms(metadata: &Metadata) -> Option<u64> {
+    use std::os::windows::fs::MetadataExt;
+    windows_filetime_to_unix_ms(metadata.creation_time())
+}
+
+#[cfg(not(windows))]
+fn windows_created_at_ms(_metadata: &Metadata) -> Option<u64> {
+    None
+}
+
+/// Windows FILETIME: 100-Nanosekunden-Intervalle seit 1601-01-01 UTC.
+/// Unix-Epoche als FILETIME: 116_444_736_000_000_000.
+fn windows_filetime_to_unix_ms(filetime: u64) -> Option<u64> {
+    const FILETIME_UNIX_EPOCH: u64 = 116_444_736_000_000_000;
+    const HUNDRED_NS_PER_MS: u64 = 10_000;
+    if filetime == 0 || filetime < FILETIME_UNIX_EPOCH {
+        return None;
+    }
+    Some((filetime - FILETIME_UNIX_EPOCH) / HUNDRED_NS_PER_MS)
+}
+
+fn system_time_to_ms(time: SystemTime) -> Option<u64> {
+    time.duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| u64::try_from(duration.as_millis()).ok())
 }
 
 fn node_name(path: &Path) -> String {
@@ -477,5 +514,32 @@ mod tests {
             }
             FsNode::File { .. } => panic!("root must be a directory"),
         }
+    }
+
+    #[test]
+    fn windows_filetime_unix_epoch_is_zero_ms() {
+        assert_eq!(
+            windows_filetime_to_unix_ms(116_444_736_000_000_000),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn windows_filetime_known_2020_01_01_utc() {
+        // 2020-01-01T00:00:00Z = 1_577_836_800_000 ms since Unix epoch.
+        const UNIX_MS: u64 = 1_577_836_800_000;
+        const FILETIME: u64 = 132_223_104_000_000_000;
+        assert_eq!(windows_filetime_to_unix_ms(FILETIME), Some(UNIX_MS));
+    }
+
+    #[test]
+    fn windows_filetime_rejects_invalid_and_pre_epoch() {
+        assert_eq!(windows_filetime_to_unix_ms(0), None);
+        assert_eq!(windows_filetime_to_unix_ms(1), None);
+        assert_eq!(windows_filetime_to_unix_ms(116_444_735_999_999_999), None);
+        assert_eq!(
+            windows_filetime_to_unix_ms(u64::MAX),
+            Some((u64::MAX - 116_444_736_000_000_000) / 10_000)
+        );
     }
 }

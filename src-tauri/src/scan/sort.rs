@@ -124,6 +124,7 @@ mod tests {
                 name: name.to_string(),
                 path: format!("/tmp/{name}"),
                 depth: 1,
+                listing: crate::model::DirectoryListing::Read,
                 children: Vec::new(),
                 size_bytes: None,
                 created_at_ms: None,

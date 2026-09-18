@@ -221,6 +221,7 @@ mod tests {
                 name: "root".into(),
                 path: "/tmp/root".into(),
                 depth: 0,
+                listing: crate::model::DirectoryListing::Read,
                 children: Vec::new(),
                 size_bytes: None,
                 created_at_ms: None,

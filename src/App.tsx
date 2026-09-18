@@ -32,6 +32,7 @@ import { ConfigPanel } from "./ui/ConfigPanel";
 import { ExportPanel } from "./ui/ExportPanel";
 import { ProgressPanel } from "./ui/ProgressPanel";
 import { TreeView } from "./ui/TreeView";
+import { DEFAULT_COLUMN_VISIBILITY, txtExportColumns, type ColumnVisibility } from "./ui/treeColumns";
 import "./App.css";
 
 function formatLabel(format: ExportFormat): string {
@@ -51,8 +52,10 @@ function App() {
     null,
   );
   const [exportFormat, setExportFormat] = useState<ExportFormat>("txt");
+  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibility>(DEFAULT_COLUMN_VISIBILITY);
   const [exportBusy, setExportBusy] = useState(false);
   const [dropActive, setDropActive] = useState(false);
+  const [appliedExtensions, setAppliedExtensions] = useState<string[]>([]);
   const scanLockRef = useRef(false);
   const scanIdRef = useRef(0);
   const activeScanIdRef = useRef<number | null>(null);
@@ -185,6 +188,7 @@ function App() {
       }
       setResult(next);
       setResultScanId(scanId);
+      setAppliedExtensions(scanConfig.extensions);
       setProgress({
         scanId,
         processedCount: next.stats.directoryCount + next.stats.fileCount,
@@ -280,7 +284,11 @@ function App() {
     setError(null);
     clearExportNotice();
     try {
-      const contents = await copyExport(exportFormat, resultScanId);
+      const contents = await copyExport(
+        exportFormat,
+        resultScanId,
+        exportFormat === "txt" ? txtExportColumns(columnVisibility) : undefined,
+      );
       await writeText(contents);
       setExportNotice(`${formatLabel(exportFormat)}-Inhalt in die Zwischenablage kopiert.`);
       setExportNoticeKind("saved");
@@ -307,7 +315,12 @@ function App() {
       }
       setExportNotice(`${formatLabel(exportFormat)} wird gespeichert …`);
       setExportNoticeKind("progress");
-      const saved = await saveExport(path, exportFormat, resultScanId);
+      const saved = await saveExport(
+        path,
+        exportFormat,
+        resultScanId,
+        exportFormat === "txt" ? txtExportColumns(columnVisibility) : undefined,
+      );
       setExportNotice(
         `${formatLabel(exportFormat)}-Datei erfolgreich gespeichert:\n${saved.path}`,
       );
@@ -374,7 +387,13 @@ function App() {
             }}
           />
         </aside>
-        <TreeView result={result} />
+        <TreeView
+          result={result}
+          scanning={scanning}
+          appliedExtensions={appliedExtensions}
+          visibility={columnVisibility}
+          onVisibilityChange={setColumnVisibility}
+        />
       </div>
     </div>
   );

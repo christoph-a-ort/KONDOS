@@ -20,7 +20,7 @@ function deriveVisibleRows(root, expandedIds) {
       directory,
     });
     if (directory && expandedIds.has(node.id)) {
-      for (const child of node.children) {
+      for (const child of sortedChildren(node.children)) {
         walk(child, depth + 1);
       }
     }
@@ -28,6 +28,20 @@ function deriveVisibleRows(root, expandedIds) {
 
   walk(root, 0);
   return rows;
+}
+
+function sortedChildren(children) {
+  return children.slice().sort((left, right) => {
+    const leftDir = isDirectory(left);
+    const rightDir = isDirectory(right);
+    if (leftDir !== rightDir) {
+      return leftDir ? -1 : 1;
+    }
+    if (left.name !== right.name) {
+      return left.name < right.name ? -1 : 1;
+    }
+    return left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
+  });
 }
 
 function computeTreeWindow(rowCount, scrollTop, viewportHeight) {
@@ -61,7 +75,7 @@ function fileNode(id, name, depth) {
 }
 
 function directoryNode(id, name, depth, children) {
-  return { id, name, path: id, depth, kind: "directory", children };
+  return { id, name, path: id, depth, kind: "directory", listing: "read", children };
 }
 
 function collectDirectoryIds(root, into = new Set()) {
@@ -105,21 +119,21 @@ function buildSynthetic100kTree() {
 
 const fixture = buildOrderFixture();
 const defaultRows = deriveVisibleRows(fixture, new Set(["root"]));
-assertEqual(defaultRows.map((row) => row.id).join(","), "root,root/A,root/B,root/C", "default order");
+assertEqual(defaultRows.map((row) => row.id).join(","), "root,root/A,root/C,root/B", "default order");
 assertEqual(defaultRows[0]?.depth, 0, "root depth");
 assertEqual(defaultRows[1]?.depth, 1, "child depth");
 
 const expandedA = deriveVisibleRows(fixture, new Set(["root", "root/A"]));
 assertEqual(
   expandedA.map((row) => row.id).join(","),
-  "root,root/A,root/A/a1,root/A/a2,root/B,root/C",
+  "root,root/A,root/A/a1,root/A/a2,root/C,root/B",
   "expanded A order",
 );
 
 const fullySmall = deriveVisibleRows(fixture, collectDirectoryIds(fixture));
 assertEqual(
   fullySmall.map((row) => row.id).join(","),
-  "root,root/A,root/A/a1,root/A/a2,root/B,root/C,root/C/c1",
+  "root,root/A,root/A/a1,root/A/a2,root/C,root/C/c1,root/B",
   "fully expanded order",
 );
 

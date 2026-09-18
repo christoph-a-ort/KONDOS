@@ -5,7 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::AppErrorKind;
 use crate::model::{
-    FsNode, ScanConfig, ScanProgress, ScanResult, ScanStatus, WarningCode, DEFAULT_DEPTH,
+    DirectoryListing, FsNode, ScanConfig, ScanProgress, ScanResult, ScanStatus, WarningCode,
+    DEFAULT_DEPTH,
 };
 use crate::scan::run;
 
@@ -112,6 +113,13 @@ fn as_dir(node: &FsNode) -> &Vec<FsNode> {
     }
 }
 
+fn listing_of(node: &FsNode) -> DirectoryListing {
+    match node {
+        FsNode::Directory { listing, .. } => *listing,
+        FsNode::File { .. } => panic!("expected directory"),
+    }
+}
+
 fn json_of(node: &FsNode) -> serde_json::Value {
     serde_json::to_value(node).expect("json")
 }
@@ -137,10 +145,14 @@ fn root_is_depth_zero_and_empty_root_has_no_children() {
     let result = tree.scan(|_| {});
     match &result.root {
         FsNode::Directory {
-            depth, children, ..
+            depth,
+            children,
+            listing,
+            ..
         } => {
             assert_eq!(*depth, 0);
             assert!(children.is_empty());
+            assert_eq!(*listing, DirectoryListing::Read);
         }
         FsNode::File { .. } => panic!("root must be a directory"),
     }
@@ -162,6 +174,14 @@ fn depth_one_captures_only_level_one() {
     assert!(nodes.iter().any(|n| n.name == "nested" && n.depth == 1 && n.kind == "directory"));
     assert!(!nodes.iter().any(|n| n.name == "b.txt"));
     assert_eq!(nodes.iter().map(|n| n.depth).max(), Some(1));
+    assert_eq!(listing_of(&result.root), DirectoryListing::Read);
+    for child in as_dir(&result.root) {
+        if let FsNode::Directory { name, listing, .. } = child {
+            if *name == "empty" || *name == "nested" {
+                assert_eq!(*listing, DirectoryListing::DepthLimited);
+            }
+        }
+    }
 }
 
 /// S.07, S.08, S.09
@@ -181,6 +201,14 @@ fn depth_eight_includes_level_eight_but_not_nine() {
     assert!(nodes.iter().any(|n| n.name == "d8" && n.depth == 8 && n.kind == "directory"));
     assert!(!nodes.iter().any(|n| n.name == "l9.txt"));
     assert_eq!(nodes.iter().map(|n| n.depth).max(), Some(8));
+    let mut cursor = &result.root;
+    for name in ["d1", "d2", "d3", "d4", "d5", "d6", "d7", "d8"] {
+        cursor = as_dir(cursor)
+            .iter()
+            .find(|node| matches!(node, FsNode::Directory { name: child, .. } if child == name))
+            .expect(name);
+    }
+    assert_eq!(listing_of(cursor), DirectoryListing::DepthLimited);
 }
 
 /// S.10, S.11
@@ -209,6 +237,15 @@ fn folders_are_traversed_including_empty_and_mixed_siblings() {
     let result = tree.scan(|_| {});
     let nodes = flatten(&result.root);
     assert!(nodes.iter().any(|n| n.name == "empty" && n.kind == "directory"));
+    assert_eq!(
+        listing_of(
+            as_dir(&result.root)
+                .iter()
+                .find(|node| matches!(node, FsNode::Directory { name, .. } if name == "empty"))
+                .expect("empty")
+        ),
+        DirectoryListing::Read
+    );
     assert!(nodes.iter().any(|n| n.name == "inner" && n.kind == "directory"));
     assert!(nodes.iter().any(|n| n.name == "file.txt" && n.kind == "file"));
     assert!(nodes.iter().any(|n| n.name == "sub" && n.kind == "directory"));
@@ -358,6 +395,9 @@ fn optional_metadata_is_omitted_unless_enabled() {
             assert_eq!(*size_bytes, Some(3));
             assert!(created_at_ms.is_some());
             assert!(modified_at_ms.is_some());
+            let json = json_of(file);
+            assert!(json.get("createdAtMs").and_then(|value| value.as_u64()).is_some());
+            assert!(json.get("modifiedAtMs").and_then(|value| value.as_u64()).is_some());
         }
         FsNode::Directory { .. } => panic!("expected file"),
     }
@@ -550,8 +590,9 @@ fn windows_junction_is_not_traversed() {
         })
         .expect("junction leaf");
     match loop_node {
-        FsNode::Directory { children, .. } => {
+        FsNode::Directory { children, listing, .. } => {
             assert!(children.is_empty(), "Junction darf nicht rekursiv gelesen werden");
+            assert_eq!(*listing, DirectoryListing::Read);
         }
         FsNode::File { .. } => panic!("expected directory leaf"),
     }
@@ -610,6 +651,11 @@ fn unreadable_child_is_warned_and_scan_continues() {
         "unlesbarer Ordner muss eine Warnung erzeugen"
     );
     assert!(!names.contains(&"secret.txt".to_string()));
+    let locked_node = as_dir(&result.root)
+        .iter()
+        .find(|node| matches!(node, FsNode::Directory { name, .. } if name == "locked"))
+        .expect("locked");
+    assert_eq!(listing_of(locked_node), DirectoryListing::Incomplete);
 }
 
 fn child_names(node: &FsNode) -> Vec<String> {

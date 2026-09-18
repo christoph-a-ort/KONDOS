@@ -5,6 +5,7 @@ import {
   computeTreeWindow,
   deriveVisibleRows,
 } from "./treeRows";
+import { runTreeWorkbenchCheck } from "./treeWorkbenchCheck";
 
 function fileNode(id: string, name: string, depth: number): FileNode {
   return { id, name, path: id, depth, kind: "file" };
@@ -16,7 +17,7 @@ function directoryNode(
   depth: number,
   children: FsNode[],
 ): DirectoryNode {
-  return { id, name, path: id, depth, kind: "directory", children };
+  return { id, name, path: id, depth, kind: "directory", listing: "read", children };
 }
 
 function collectDirectoryIds(root: FsNode, into: Set<string> = new Set()): Set<string> {
@@ -70,23 +71,25 @@ export function runTreeVirtualizationCheck(): {
   renderedAtMiddle: number;
   fullTreeDom: boolean;
 } {
+  runTreeWorkbenchCheck();
+
   const fixture = buildOrderFixture();
   const defaultRows = deriveVisibleRows(fixture, new Set(["root"]));
-  assertEqual(defaultRows.map((row) => row.id).join(","), "root,root/A,root/B,root/C", "default order");
+  assertEqual(defaultRows.map((row) => row.id).join(","), "root,root/A,root/C,root/B", "default order");
   assertEqual(defaultRows[0]?.depth, 0, "root depth");
   assertEqual(defaultRows[1]?.depth, 1, "child depth");
 
   const expandedA = deriveVisibleRows(fixture, new Set(["root", "root/A"]));
   assertEqual(
     expandedA.map((row) => row.id).join(","),
-    "root,root/A,root/A/a1,root/A/a2,root/B,root/C",
+    "root,root/A,root/A/a1,root/A/a2,root/C,root/B",
     "expanded A order",
   );
 
   const fullySmall = deriveVisibleRows(fixture, collectDirectoryIds(fixture));
   assertEqual(
     fullySmall.map((row) => row.id).join(","),
-    "root,root/A,root/A/a1,root/A/a2,root/B,root/C,root/C/c1",
+    "root,root/A,root/A/a1,root/A/a2,root/C,root/C/c1,root/B",
     "fully expanded order",
   );
 

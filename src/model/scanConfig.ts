@@ -11,9 +11,9 @@ export function createDefaultScanConfig(): ScanConfig {
     maxDepth: DEFAULT_DEPTH,
     excludeHidden: true,
     extensions: [],
-    includeSize: false,
+    includeSize: true,
     includeCreatedAt: false,
-    includeModifiedAt: false,
+    includeModifiedAt: true,
   };
 }
 

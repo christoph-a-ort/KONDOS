@@ -6,6 +6,8 @@ export const SCAN_PROGRESS_EVENT = "scan://progress";
 
 export type NodeKind = "file" | "directory";
 
+export type DirectoryListing = "read" | "depthLimited" | "incomplete";
+
 export interface NodeMetadata {
   sizeBytes?: number;
   createdAtMs?: number;
@@ -21,6 +23,7 @@ interface NodeBase extends NodeMetadata {
 
 export interface DirectoryNode extends NodeBase {
   kind: "directory";
+  listing: DirectoryListing;
   children: FsNode[];
 }
 

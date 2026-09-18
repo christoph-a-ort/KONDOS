@@ -11,6 +11,15 @@ pub enum NodeKind {
     Directory,
 }
 
+/// Wie der Inhalt eines Ordners in diesem Scan behandelt wurde.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DirectoryListing {
+    Read,
+    DepthLimited,
+    Incomplete,
+}
+
 /// Hierarchischer Dateisystemknoten.
 /// Dateien haben kein `children`-Feld (intern getaggt über `kind`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,6 +31,7 @@ pub enum FsNode {
         name: String,
         path: String,
         depth: u8,
+        listing: DirectoryListing,
         children: Vec<FsNode>,
         #[serde(skip_serializing_if = "Option::is_none", rename = "sizeBytes")]
         size_bytes: Option<u64>,

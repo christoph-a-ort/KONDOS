@@ -5,7 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::export::filename::suggested_export_file_name;
 use crate::export::node::node_name;
 use crate::export::paths::{looks_like_absolute_local_path, to_portable_path};
-use crate::export::{render_export, write_export_file};
+use crate::export::{render_export, render_export_with_txt_columns, write_export_file};
+use crate::export::ExportMetaFlags;
 use crate::model::{
     ExportFormat, FsNode, ScanResult, ScanStats, ScanWarning, WarningCode,
 };
@@ -17,6 +18,7 @@ fn dir(name: &str, path: &str, depth: u8, children: Vec<FsNode>) -> FsNode {
         name: name.to_string(),
         path: path.to_string(),
         depth,
+        listing: crate::model::DirectoryListing::Read,
         children,
         size_bytes: None,
         created_at_ms: None,
@@ -113,6 +115,18 @@ fn contains_absolute(payload: &str) -> bool {
     }) || payload.contains(r"C:\\Users")
 }
 
+fn txt_columns(size: bool, modified: bool, created: bool) -> ExportMetaFlags {
+    ExportMetaFlags {
+        include_size: size,
+        include_created_at: created,
+        include_modified_at: modified,
+    }
+}
+
+fn render_txt(result: &ScanResult, columns: ExportMetaFlags) -> String {
+    render_export_with_txt_columns(ExportFormat::Txt, result, Some(columns)).expect("txt")
+}
+
 #[test]
 fn txt_is_deterministic_utf8_lf_without_bom_or_absolute_paths() {
     let result = fixture();
@@ -124,7 +138,14 @@ fn txt_is_deterministic_utf8_lf_without_bom_or_absolute_paths() {
     assert!(first.ends_with('\n'));
     assert!(first.starts_with("[Root] Mustermann/\n"));
     assert!(first.contains("├── DOKUMENTE/\n"));
-    assert!(first.contains("│   └── Angebot.PDF (12 B, erstellt 1970-01-01T00:00:00.000Z, geändert 1970-01-01T00:00:01.001Z)\n"));
+    let created = super::txt::format_txt_datetime(0);
+    let modified = super::txt::format_txt_datetime(1_001);
+    assert!(first.contains(&format!(
+        "│   └── Angebot.PDF (12 B, geändert {modified}, erstellt {created})\n"
+    )));
+    assert!(!created.contains('Z') && !created.contains('T'));
+    assert!(!modified.contains(':' ) || modified.matches(':').count() == 1);
+    assert_eq!(created.chars().filter(|ch| *ch == '.').count(), 2);
     assert!(first.contains("├── Äpfel 📁.txt\n"));
     assert!(first.contains("└── empty/\n"));
     assert!(!contains_absolute(&first));
@@ -181,6 +202,10 @@ fn json_contract_version_order_children_and_warnings() {
     assert!(!json.contains("\"path\": \"\""));
     assert!(!contains_absolute(&json));
     assert!(json.contains("\"directoryCount\": 3"));
+    assert!(
+        !json.contains("\"listing\""),
+        "internes listing-Feld gehört nicht zum öffentlichen JSON-Exportvertrag"
+    );
 }
 
 #[test]
@@ -277,6 +302,7 @@ fn write_file_uses_temp_and_protects_existing_on_failure() {
         target.to_str().unwrap(),
         ExportFormat::Txt,
         &fixture(),
+        None,
     )
     .expect("write");
     let body = fs::read_to_string(&written).unwrap();
@@ -285,7 +311,7 @@ fn write_file_uses_temp_and_protects_existing_on_failure() {
 
     let as_dir = root.join("not-a-file");
     fs::create_dir(&as_dir).unwrap();
-    let err = write_export_file(as_dir.to_str().unwrap(), ExportFormat::Csv, &fixture());
+    let err = write_export_file(as_dir.to_str().unwrap(), ExportFormat::Csv, &fixture(), None);
     assert!(err.is_err());
     assert!(as_dir.is_dir());
 
@@ -295,7 +321,8 @@ fn write_file_uses_temp_and_protects_existing_on_failure() {
     assert!(write_export_file(
         missing_parent.to_str().unwrap(),
         ExportFormat::Csv,
-        &fixture()
+        &fixture(),
+        None
     )
     .is_err());
     assert_eq!(fs::read(&original_target).unwrap(), b"KEEP");
@@ -330,6 +357,149 @@ fn suggested_name_uses_root() {
         suggested_export_file_name("Mustermann", ExportFormat::Csv),
         "Mustermann.csv"
     );
+}
+
+#[test]
+fn txt_name_only_omits_metadata_suffixes() {
+    let txt = render_txt(&fixture(), txt_columns(false, false, false));
+    assert!(txt.contains("│   └── Angebot.PDF\n"));
+    assert!(!txt.contains(" B"));
+    assert!(!txt.contains("geändert"));
+    assert!(!txt.contains("erstellt"));
+}
+
+#[test]
+fn txt_name_and_modified_omits_size_and_created() {
+    let txt = render_txt(&fixture(), txt_columns(false, true, false));
+    let modified = super::txt::format_txt_datetime(1_001);
+    assert!(txt.contains(&format!("│   └── Angebot.PDF (geändert {modified})\n")));
+    assert!(!txt.contains("12 B"));
+    assert!(!txt.contains("erstellt"));
+}
+
+#[test]
+fn txt_name_size_modified_omits_created() {
+    let txt = render_txt(&fixture(), txt_columns(true, true, false));
+    let modified = super::txt::format_txt_datetime(1_001);
+    assert!(txt.contains(&format!(
+        "│   └── Angebot.PDF (12 B, geändert {modified})\n"
+    )));
+    assert!(!txt.contains("erstellt"));
+}
+
+#[test]
+fn txt_all_visible_metadata_uses_treeview_order() {
+    let txt = render_txt(&fixture(), txt_columns(true, true, true));
+    let created = super::txt::format_txt_datetime(0);
+    let modified = super::txt::format_txt_datetime(1_001);
+    let line = format!("│   └── Angebot.PDF (12 B, geändert {modified}, erstellt {created})\n");
+    assert!(txt.contains(&line));
+    let start = txt.find("Angebot.PDF").unwrap();
+    let size = txt[start..].find("12 B").unwrap();
+    let changed = txt[start..].find("geändert").unwrap();
+    let created_at = txt[start..].find("erstellt").unwrap();
+    assert!(size < changed && changed < created_at);
+}
+
+#[test]
+fn txt_hidden_column_stays_in_snapshot_and_returns_when_shown() {
+    let result = fixture();
+    let hidden = render_txt(&result, txt_columns(true, true, false));
+    assert!(!hidden.contains("erstellt"));
+    let shown = render_txt(&result, txt_columns(true, true, true));
+    assert!(shown.contains("erstellt"));
+    assert_eq!(node_name(&result.root), "Mustermann");
+}
+
+#[test]
+fn txt_directories_never_get_metadata_suffixes() {
+    let result = ScanResult {
+        root: FsNode::Directory {
+            id: r"C:\root".into(),
+            name: "Hausverwaltung".into(),
+            path: r"C:\root".into(),
+            depth: 0,
+            listing: crate::model::DirectoryListing::Read,
+            children: vec![FsNode::Directory {
+                id: r"C:\root\Weßling".into(),
+                name: "Weßling".into(),
+                path: r"C:\root\Weßling".into(),
+                depth: 1,
+                listing: crate::model::DirectoryListing::Read,
+                children: Vec::new(),
+                size_bytes: None,
+                created_at_ms: Some(0),
+                modified_at_ms: Some(1_001),
+            }],
+            size_bytes: None,
+            created_at_ms: Some(0),
+            modified_at_ms: Some(1_001),
+        },
+        warnings: Vec::new(),
+        stats: ScanStats::default(),
+    };
+    let txt = render_txt(&result, txt_columns(true, true, true));
+    assert!(txt.starts_with("[Root] Hausverwaltung/\n"));
+    assert!(txt.contains("└── Weßling/\n"));
+    assert!(!txt.contains("geändert"));
+    assert!(!txt.contains("erstellt"));
+    assert!(!txt.contains(" B,"));
+}
+
+#[test]
+fn txt_datetime_is_local_treeview_style() {
+    let stamp = super::txt::format_txt_datetime(0);
+    assert_eq!(stamp, super::txt::format_txt_datetime(0));
+    let parts: Vec<&str> = stamp.split(['.', ' ']).collect();
+    assert_eq!(parts.len(), 4);
+    assert_eq!(parts[0].len(), 2);
+    assert_eq!(parts[1].len(), 2);
+    assert_eq!(parts[2].len(), 4);
+    assert_eq!(parts[3].len(), 5);
+    assert_eq!(parts[3].matches(':').count(), 1);
+    assert!(!stamp.contains('Z'));
+    assert!(!stamp.contains('T'));
+    assert!(!stamp.contains(".000"));
+    let txt = render_txt(&fixture(), txt_columns(false, true, false));
+    assert!(txt.contains(&format!(
+        "geändert {}",
+        super::txt::format_txt_datetime(1_001)
+    )));
+}
+
+#[test]
+fn csv_and_json_ignore_txt_column_flags() {
+    let result = fixture();
+    let csv = render_export(ExportFormat::Csv, &result).expect("csv");
+    let csv_forced = render_export_with_txt_columns(
+        ExportFormat::Csv,
+        &result,
+        Some(txt_columns(false, false, false)),
+    )
+    .expect("csv");
+    assert_eq!(csv, csv_forced);
+    assert!(csv
+        .trim_start_matches('\u{feff}')
+        .starts_with("path,kind,name,depth,sizeBytes,createdAt,modifiedAt\n"));
+    assert!(csv.contains("1970-01-01T00:00:00.000Z"));
+    let json = render_export(ExportFormat::Json, &result).expect("json");
+    let json_forced = render_export_with_txt_columns(
+        ExportFormat::Json,
+        &result,
+        Some(txt_columns(false, false, false)),
+    )
+    .expect("json");
+    assert_eq!(json, json_forced);
+    assert!(json.contains("1970-01-01T00:00:00.000Z"));
+}
+
+#[test]
+fn txt_clipboard_matches_saved_txt_for_same_columns() {
+    let result = fixture();
+    let columns = txt_columns(true, false, true);
+    let clipboard = render_txt(&result, columns);
+    let saved = render_export_with_txt_columns(ExportFormat::Txt, &result, Some(columns)).expect("txt");
+    assert_eq!(clipboard, saved);
 }
 
 fn unique_temp(label: &str) -> PathBuf {

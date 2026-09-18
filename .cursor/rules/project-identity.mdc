@@ -1,0 +1,14 @@
+---
+description: Projekt heißt KONDOS (ehemals Dateiliste)
+alwaysApply: true
+---
+
+# Projektidentität
+
+Der Workspace und der Produktname heißen **KONDOS**.
+
+Pfad: `C:\Users\COrt\OneDrive\Entwicklung\KONDOS`
+
+Der Ordner hieß zuvor `Dateiliste`. Das ist derselbe lokale Windows-IST-Scanner (Tauri/Rust/React).
+
+Sichtbare und interne Namen verwenden KONDOS bzw. `kondos` / `kondos_lib` / `com.kondos.app`.

@@ -1,4 +1,5 @@
-import { isDirectory, type FsNode } from "../model";
+import { isDirectory, type DirectoryNode, type FsNode } from "../model";
+import { DEFAULT_TREE_SORT, sortedChildren, type TreeSort } from "./treeSort";
 
 export const ROW_HEIGHT = 28;
 export const OVERSCAN = 12;
@@ -9,6 +10,7 @@ export interface VisibleTreeRow {
   node: FsNode;
   depth: number;
   directory: boolean;
+  expandable: boolean;
 }
 
 export interface TreeWindow {
@@ -18,9 +20,58 @@ export interface TreeWindow {
   bottomSpacerHeight: number;
 }
 
+export function canExpandDirectory(node: DirectoryNode): boolean {
+  return node.children.length > 0;
+}
+
+export function listingHint(node: FsNode): "depthLimited" | "incomplete" | null {
+  if (!isDirectory(node)) {
+    return null;
+  }
+  if (node.listing === "depthLimited") {
+    return "depthLimited";
+  }
+  if (node.listing === "incomplete") {
+    return "incomplete";
+  }
+  return null;
+}
+
+export function selectedIdAfterClick(
+  currentSelectedId: string | null,
+  clickedId: string,
+  keepCurrent: boolean,
+): string | null {
+  return keepCurrent ? currentSelectedId : clickedId;
+}
+
+export function selectedIdAfterCollapseAll(rootId: string): string {
+  return rootId;
+}
+
+export function collapseAllExpandedIds(rootId: string): Set<string> {
+  return new Set([rootId]);
+}
+
+export function collectExpandableDirectoryIds(
+  root: FsNode,
+  into: Set<string> = new Set(),
+): Set<string> {
+  if (isDirectory(root)) {
+    if (canExpandDirectory(root)) {
+      into.add(root.id);
+    }
+    for (const child of root.children) {
+      collectExpandableDirectoryIds(child, into);
+    }
+  }
+  return into;
+}
+
 export function deriveVisibleRows(
   root: FsNode,
   expandedIds: ReadonlySet<string>,
+  sort: TreeSort = DEFAULT_TREE_SORT,
 ): VisibleTreeRow[] {
   const rows: VisibleTreeRow[] = [];
 
@@ -31,10 +82,11 @@ export function deriveVisibleRows(
       node,
       depth,
       directory,
+      expandable: directory && canExpandDirectory(node),
     });
 
-    if (directory && expandedIds.has(node.id)) {
-      for (const child of node.children) {
+    if (directory && expandedIds.has(node.id) && node.children.length > 0) {
+      for (const child of sortedChildren(node.children, sort)) {
         walk(child, depth + 1);
       }
     }
@@ -72,4 +124,23 @@ export function computeTreeWindow(
     topSpacerHeight: start * ROW_HEIGHT,
     bottomSpacerHeight: (rowCount - end) * ROW_HEIGHT,
   };
+}
+
+export function rowIndexById(rows: readonly VisibleTreeRow[], id: string): number {
+  return rows.findIndex((row) => row.id === id);
+}
+
+export function findNodeById(root: FsNode, id: string): FsNode | undefined {
+  if (root.id === id) {
+    return root;
+  }
+  if (isDirectory(root)) {
+    for (const child of root.children) {
+      const found = findNodeById(child, id);
+      if (found !== undefined) {
+        return found;
+      }
+    }
+  }
+  return undefined;
 }

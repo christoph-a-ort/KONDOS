@@ -1,6 +1,7 @@
 export type {
   AppError,
   AppErrorKind,
+  DirectoryListing,
   DirectoryNode,
   ExportFormat,
   FileNode,

@@ -1,0 +1,41 @@
+---
+description: Aktueller KONDOS-Stand ab P0-F – Git-Regel, Architektur, was nicht anfassen
+alwaysApply: true
+---
+
+# KONDOS-Stand (ab 2026-09-18)
+
+Ausgang für jede weitere Arbeit: committed `main`, nicht die veraltete P0-C2-Handoff.
+
+## Git
+
+- Branch: `main`
+- HEAD: `60f5de574fb9920b0e26b35088cda3bd0031ea73` (`P0-F add folder drag and drop`)
+- Remote `KONDOS/main`: synchron
+- Cursor/Agenten **nie pushen**. Pushes nur manuell per TortoiseGit.
+- `.cursor/` nicht stagen, sofern der Auftrag das nicht ausdrücklich verlangt.
+- `cargo` kann `src-tauri/Cargo.lock` nur umsortieren (Paketblock `kondos`). Das ist keine Dependency-Änderung: auf HEAD zurücksetzen, nicht committen.
+
+## Abgeschlossen (nicht erneut bauen)
+
+- **P0-B** `57730f2`: Reparse/Junction nicht folgen, `scanId`, Cancel, Warnungen statt hartem Abbruch.
+- **P0-C2** `cc82689`: eigene Tree-Virtualisierung, keine Library. `src/ui/treeRows.ts`, `Set<string>` Expand, `.tree-viewport`, `ROW_HEIGHT=28`, `OVERSCAN=12`.
+- **P0-D** `c658c83`: Baseline-Instrumentierung. Ignored: `perf_scan_approximately_100k_entries`, `perf_natural_sort_wide_folder`. Nicht in die normale CI, `#[ignore]` nicht entfernen.
+- **P0-E** `8c79b50` / `c9c8bbd`: Export nur noch Rust (`src-tauri/src/export`). Frontend-`src/export` ist entfernt.
+- **P0-F** `60f5de5`: genau ein Ordner per Drag-and-Drop, dann Scan. Datei/Mehrfachablage ablehnen.
+
+`ARCHITECTURE.md` ist teilweise veraltet (Windowing und Drag-and-Drop stehen dort noch als Zukunft). Dem **Code** folgen, nicht diesem Abschnitt.
+
+## Geltende Architektur
+
+- Scanner READ-ONLY. `FsNode`/`ScanResult` nicht nebenbei umbauen. Natural-Sort-Semantik nicht ändern.
+- Tree: `deriveVisibleRows` + Windowing. Keine Virtualisierungs-Library, keine Nested-`<ul>`-Hierarchie.
+- Nach erfolgreichem Scan: flüchtiger Backend-Snapshot (`scanId` + `Arc<ScanResult>`). Export daraus, kein zweites Einlesen des Dateisystems.
+- Occupancy: Idle / Scanning / Exporting. Scan und Export schließen sich aus. Fenster schließen während Export verhindern.
+- IPC: `start_scan`, `cancel_scan`, `classify_scan_root`, `save_export`, `copy_export`, `suggest_export_filename`. Event `scan://progress`.
+- Drop: `decideDroppedPaths` → `classify_scan_root` → nur `directory` startet Scan.
+- Keine neue Dependency, kein Job-Manager, keine DB, kein Streaming-IPC, kein Tree-Library-Wechsel, ohne Auftrag kein Scanner-Rewrite.
+
+## Tests
+
+Ignored bleiben u. a. der 100k-Perf-Scan, der Wide-Folder-Sort und der Datei-Symlink-Test (os error 1314). Keine UI-Prüfung behaupten, die nicht in der Tauri-App gelaufen ist.
