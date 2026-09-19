@@ -1,0 +1,38 @@
+---
+description: Längere Berichte als einen kopierbaren Markdown-Codeblock ausgeben
+alwaysApply: true
+---
+
+# Kopierbare Berichte
+
+Berichte, Zusammenfassungen, Prüfberichte, Statusberichte und andere längere strukturierte Textausgaben, die weiterverwendet oder an ChatGPT übergeben werden, stehen in **genau einem** Markdown-Codeblock.
+
+Kurze Antworten, Rückfragen und einzeilige Hinweise brauchen keinen Codeblock.
+
+## Form
+
+- Ein Block, Sprache `text`
+- Der Block enthält den **vollständigen** Bericht, nicht nur Auszüge
+- Keine Aufteilung zwischen Chatprosa und Block: der Block allein muss lesbar und weitergebbar sein
+- Keine zweiten parallelen Report-Fassungen daneben
+
+Beispiel:
+
+```text
+1. Status: PASS
+
+2. Tests:
+- cargo check: PASS
+- cargo test: 97 passed / 0 failed / 3 ignored
+
+3. Git:
+- nichts gestaged
+- kein Commit
+- kein Push
+```
+
+## Antwortzeit
+
+Die Projektregel zur letzten Zeile `Antwortzeit: TT.MM.JJJJ, HH:MM:SS` gilt unverändert.
+
+Diese Zeile steht **außerhalb** des Codeblocks, als allerletzte Zeile der Cursor-Antwort. Nicht in den kopierbaren Bericht aufnehmen.
