@@ -1,4 +1,5 @@
 import { createDefaultScanConfig, isDirectory, type DirectoryNode, type FileNode, type FsNode } from "../model";
+import { runP1cCheck } from "./p1cCheck";
 import { shouldClearScanResultOnError } from "../scan";
 import {
   DEFAULT_COLUMN_VISIBILITY,
@@ -28,6 +29,7 @@ import {
   listingHint,
   selectedIdAfterClick,
   selectedIdAfterCollapseAll,
+  selectedIdAfterPointer,
 } from "./treeRows";
 import {
   ancestorDirectoryIds,
@@ -216,6 +218,9 @@ export function runTreeWorkbenchCheck(): void {
 
   assert(selectedIdAfterClick("root", "f", true) === "root", "twist keeps selection");
   assert(selectedIdAfterClick("root", "f", false) === "f", "row click selects");
+  assert(selectedIdAfterPointer(null, "C:/A", "twist") === null, "twist click does not select");
+  assert(selectedIdAfterPointer(null, "C:/A", "row") === "C:/A", "first row click after twist selects");
+  assert(selectedIdAfterPointer("C:/A/x.pdf", "C:/A", "twist") === "C:/A/x.pdf", "twist keeps prior selection");
 
   const collapsedParent = deriveVisibleRows(nested, new Set(["root"]));
   assert(
@@ -279,6 +284,7 @@ export function runTreeWorkbenchCheck(): void {
 
   assert(isDirectory(nested), "root directory");
   runTreeSearchCheck(nested);
+  runP1cCheck();
 }
 
 function runTreeSearchCheck(nested: DirectoryNode): void {

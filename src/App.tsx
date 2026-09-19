@@ -4,7 +4,6 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 import { parseExtensionInput } from "./filter";
 import {
-  createDefaultScanConfig,
   type ExportFormat,
   type ScanConfig,
   type ScanProgress,
@@ -31,8 +30,21 @@ import {
 import { ConfigPanel } from "./ui/ConfigPanel";
 import { ExportPanel } from "./ui/ExportPanel";
 import { ProgressPanel } from "./ui/ProgressPanel";
+import { withScanRootPath } from "./ui/displayFilter";
 import { TreeView } from "./ui/TreeView";
-import { DEFAULT_COLUMN_VISIBILITY, txtExportColumns, type ColumnVisibility } from "./ui/treeColumns";
+import {
+  txtExportColumns,
+  type ColumnVisibility,
+  type ColumnWidths,
+} from "./ui/treeColumns";
+import { type TreeSort } from "./ui/treeSort";
+import {
+  hadStoredWorkbenchPrefs,
+  loadWorkbenchPrefs,
+  prefsToScanConfig,
+  saveWorkbenchPrefs,
+  workbenchPrefsFromState,
+} from "./ui/workbenchPrefs";
 import "./App.css";
 
 function formatLabel(format: ExportFormat): string {
@@ -40,8 +52,10 @@ function formatLabel(format: ExportFormat): string {
 }
 
 function App() {
-  const [config, setConfig] = useState<ScanConfig>(createDefaultScanConfig);
-  const [extensionInput, setExtensionInput] = useState("");
+  const [initialPrefs] = useState(() => loadWorkbenchPrefs());
+  const [preferStoredWidths] = useState(() => hadStoredWorkbenchPrefs());
+  const [config, setConfig] = useState<ScanConfig>(() => prefsToScanConfig(initialPrefs));
+  const [extensionInput, setExtensionInput] = useState(() => initialPrefs.extensionInput);
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState<ScanProgress | null>(null);
   const [result, setResult] = useState<ScanResult | null>(null);
@@ -52,7 +66,11 @@ function App() {
     null,
   );
   const [exportFormat, setExportFormat] = useState<ExportFormat>("txt");
-  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibility>(DEFAULT_COLUMN_VISIBILITY);
+  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibility>(
+    () => initialPrefs.columnVisibility,
+  );
+  const [columnWidths, setColumnWidths] = useState<ColumnWidths>(() => initialPrefs.columnWidths);
+  const [treeSort, setTreeSort] = useState<TreeSort>(() => initialPrefs.sort);
   const [exportBusy, setExportBusy] = useState(false);
   const [dropActive, setDropActive] = useState(false);
   const [appliedExtensions, setAppliedExtensions] = useState<string[]>([]);
@@ -124,9 +142,25 @@ function App() {
     }
   }, [scanning, exportBusy]);
 
+  useEffect(() => {
+    saveWorkbenchPrefs(
+      workbenchPrefsFromState({
+        config,
+        extensionInput,
+        columnVisibility,
+        columnWidths,
+        sort: treeSort,
+      }),
+    );
+  }, [config, extensionInput, columnVisibility, columnWidths, treeSort]);
+
   function clearExportNotice() {
     setExportNotice(null);
     setExportNoticeKind(null);
+  }
+
+  function handleUseAsScanRoot(path: string) {
+    setConfig((current) => withScanRootPath(current, path));
   }
 
   async function handlePickDirectory() {
@@ -391,8 +425,14 @@ function App() {
           result={result}
           scanning={scanning}
           appliedExtensions={appliedExtensions}
+          sort={treeSort}
           visibility={columnVisibility}
+          widths={columnWidths}
+          preferStoredWidths={preferStoredWidths}
+          onSortChange={setTreeSort}
           onVisibilityChange={setColumnVisibility}
+          onWidthsChange={setColumnWidths}
+          onScanFromHere={handleUseAsScanRoot}
         />
       </div>
     </div>

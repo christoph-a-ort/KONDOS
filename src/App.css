@@ -97,6 +97,7 @@ header p,
 .tree-panel > .muted,
 .tree-panel > .tree-stats,
 .tree-panel > .tree-toolbar,
+.tree-panel > .display-filter,
 .tree-panel > .tree-search-row,
 .tree-panel > .tree-path,
 .tree-panel > .tree-path-row,
@@ -204,6 +205,7 @@ button:disabled {
 }
 
 .tree-panel > .tree-toolbar,
+.tree-panel > .display-filter,
 .tree-panel > .tree-search-row,
 .tree-panel > .tree-path,
 .tree-panel > .tree-path-row {
@@ -249,6 +251,71 @@ button:disabled {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   text-align: center;
+}
+
+.display-filter {
+  margin: 0 0 8px;
+  border: 1px solid #d5dbe3;
+  border-radius: 8px;
+  background: #f7f8fa;
+}
+
+.display-filter > summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  font-weight: 600;
+  list-style-position: inside;
+}
+
+.display-filter-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+.display-filter-hint {
+  margin: 0;
+}
+
+.display-filter-types {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid #e2e6eb;
+  border-radius: 6px;
+  max-height: 7.5rem;
+  overflow: auto;
+}
+
+.display-filter-types .check {
+  margin: 0 12px 6px 0;
+  display: inline-flex;
+}
+
+.display-filter-dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.display-filter-dates .field {
+  flex: 1 1 140px;
+  margin: 0;
+}
+
+.display-filter-error {
+  margin: 0;
+  color: #8a1f1f;
+}
+
+.display-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tree-filter-empty {
+  margin: 12px;
 }
 
 .tree-viewport {

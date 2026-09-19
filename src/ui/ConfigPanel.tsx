@@ -78,7 +78,7 @@ export function ConfigPanel({
       </label>
 
       <label className="field">
-        <span>Dateiendungen (optional)</span>
+        <span>Dateiendungen beim Einlesen (optional)</span>
         <input
           value={extensionInput}
           disabled={inputsLocked}

@@ -37,12 +37,22 @@ export function listingHint(node: FsNode): "depthLimited" | "incomplete" | null 
   return null;
 }
 
+export type TreePointerTarget = "twist" | "row";
+
+export function selectedIdAfterPointer(
+  currentSelectedId: string | null,
+  rowId: string,
+  target: TreePointerTarget,
+): string | null {
+  return target === "row" ? rowId : currentSelectedId;
+}
+
 export function selectedIdAfterClick(
   currentSelectedId: string | null,
   clickedId: string,
   keepCurrent: boolean,
 ): string | null {
-  return keepCurrent ? currentSelectedId : clickedId;
+  return selectedIdAfterPointer(currentSelectedId, clickedId, keepCurrent ? "twist" : "row");
 }
 
 export function selectedIdAfterCollapseAll(rootId: string): string {

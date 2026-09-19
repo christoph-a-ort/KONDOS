@@ -4,7 +4,6 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { isDirectory, type FsNode, type ScanResult } from "../model";
 import { openInExplorer, toUserError } from "../scan";
 import {
-  DEFAULT_COLUMN_WIDTHS,
   applyColumnResizeDelta,
   beginColumnResize,
   columnLabel,
@@ -29,7 +28,6 @@ import {
   findNodeById,
   listingHint,
   rowIndexById,
-  selectedIdAfterClick,
   selectedIdAfterCollapseAll,
   type VisibleTreeRow,
 } from "./treeRows";
@@ -45,26 +43,48 @@ import {
   searchCountLabel,
   withAncestorsExpanded,
 } from "./treeSearch";
-import { DEFAULT_TREE_SORT, sortAfterHidingColumn, type SortColumn, type TreeSort } from "./treeSort";
+import { sortAfterHidingColumn, type SortColumn, type TreeSort } from "./treeSort";
+import {
+  buildDisplayFilterView,
+  canScanFromHere,
+  collectDisplayExtensionOptions,
+  displayFilterApplyError,
+  displayFilterHasConstraint,
+  emptyDisplayFilterDraft,
+  formatActiveFilterSummary,
+  nodeVisibleInDisplayTree,
+  snapshotHasModifiedTimestamps,
+  type AppliedDisplayFilter,
+  type DisplayFilterDraft,
+} from "./displayFilter";
 
 interface TreeViewProps {
   result: ScanResult | null;
   scanning: boolean;
   appliedExtensions: string[];
+  sort: TreeSort;
   visibility: ColumnVisibility;
+  widths: ColumnWidths;
+  preferStoredWidths: boolean;
+  onSortChange: (sort: TreeSort) => void;
   onVisibilityChange: (visibility: ColumnVisibility) => void;
+  onWidthsChange: (widths: ColumnWidths) => void;
+  onScanFromHere: (path: string) => void;
 }
 
 export function TreeView({
   result,
   scanning,
   appliedExtensions,
+  sort,
   visibility,
+  widths,
+  preferStoredWidths,
+  onSortChange,
   onVisibilityChange,
+  onWidthsChange,
+  onScanFromHere,
 }: TreeViewProps) {
-  const [sort, setSort] = useState<TreeSort>(DEFAULT_TREE_SORT);
-  const [widths, setWidths] = useState<ColumnWidths>(DEFAULT_COLUMN_WIDTHS);
-
   if (result === null) {
     return (
       <section className="tree-panel">
@@ -92,11 +112,13 @@ export function TreeView({
         <TreePathBar
           path={null}
           hasSelection={false}
+          canScanFromHere={false}
           disabled
           notice={null}
           noticeKind={null}
           onCopy={() => {}}
           onOpen={() => {}}
+          onScanFromHere={() => {}}
         />
       </section>
     );
@@ -110,9 +132,11 @@ export function TreeView({
       sort={sort}
       visibility={visibility}
       widths={widths}
-      onSortChange={setSort}
+      preferStoredWidths={preferStoredWidths}
+      onSortChange={onSortChange}
       onVisibilityChange={onVisibilityChange}
-      onWidthsChange={setWidths}
+      onWidthsChange={onWidthsChange}
+      onScanFromHere={onScanFromHere}
     />
   );
 }
@@ -124,9 +148,11 @@ interface PopulatedTreeViewProps {
   sort: TreeSort;
   visibility: ColumnVisibility;
   widths: ColumnWidths;
+  preferStoredWidths: boolean;
   onSortChange: (sort: TreeSort) => void;
   onVisibilityChange: (visibility: ColumnVisibility) => void;
   onWidthsChange: (widths: ColumnWidths) => void;
+  onScanFromHere: (path: string) => void;
 }
 
 function PopulatedTreeView({
@@ -136,9 +162,11 @@ function PopulatedTreeView({
   sort,
   visibility,
   widths,
+  preferStoredWidths,
   onSortChange,
   onVisibilityChange,
   onWidthsChange,
+  onScanFromHere,
 }: PopulatedTreeViewProps) {
   const [expandedIds, setExpandedIds] = useState(() => defaultExpandedIds(result.root.id));
   const [activeResult, setActiveResult] = useState(result);
@@ -147,14 +175,17 @@ function PopulatedTreeView({
   const [viewportHeight, setViewportHeight] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [nameAutoFill, setNameAutoFill] = useState(true);
+  const [nameAutoFill, setNameAutoFill] = useState(!preferStoredWidths);
   const [searchQuery, setSearchQuery] = useState(emptySearchQuery);
   const [pinnedMatchId, setPinnedMatchId] = useState<string | null>(null);
   const [searchJumped, setSearchJumped] = useState(false);
   const [pathNotice, setPathNotice] = useState<string | null>(null);
   const [pathNoticeKind, setPathNoticeKind] = useState<"ok" | "error" | null>(null);
+  const [filterDraft, setFilterDraft] = useState<DisplayFilterDraft>(emptyDisplayFilterDraft);
+  const [appliedFilter, setAppliedFilter] = useState<AppliedDisplayFilter | null>(null);
+  const [filterError, setFilterError] = useState<string | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const skipSelectionRef = useRef(false);
   const pendingRevealRef = useRef<string | null>(null);
   const pathNoticeTimerRef = useRef<number | null>(null);
   const widthsRef = useRef(widths);
@@ -173,6 +204,10 @@ function PopulatedTreeView({
     setSearchJumped(false);
     setPathNotice(null);
     setPathNoticeKind(null);
+    setFilterDraft(emptyDisplayFilterDraft());
+    setAppliedFilter(null);
+    setFilterError(null);
+    setFilterOpen(false);
   }
 
   const columns = visibleColumns(visibility);
@@ -181,13 +216,28 @@ function PopulatedTreeView({
     .map((column) => `${layoutWidths[column]}px`)
     .join(" ");
   const tableWidth = columns.reduce((sum, column) => sum + layoutWidths[column], 0);
+  const extensionOptions = useMemo(
+    () => collectDisplayExtensionOptions(result.root),
+    [result.root],
+  );
+  const hasModifiedTimestamps = useMemo(
+    () => snapshotHasModifiedTimestamps(result.root),
+    [result.root],
+  );
+  const displayView = useMemo(
+    () => buildDisplayFilterView(result.root, appliedFilter, sort),
+    [result.root, appliedFilter, sort],
+  );
+  const viewRoot = displayView.tree;
+  const filterEmpty = displayView.constrained && displayView.fileMatchCount === 0;
+  const filterSummary = appliedFilter === null ? null : formatActiveFilterSummary(appliedFilter, extensionOptions);
   const rows = useMemo(
-    () => deriveVisibleRows(result.root, expandedIds, sort),
-    [result.root, expandedIds, sort],
+    () => (viewRoot === null ? [] : deriveVisibleRows(viewRoot, expandedIds, sort)),
+    [viewRoot, expandedIds, sort],
   );
   const matchIds = useMemo(
-    () => collectMatchIds(result.root, searchQuery, sort),
-    [result.root, searchQuery, sort],
+    () => (viewRoot === null ? [] : collectMatchIds(viewRoot, searchQuery, sort)),
+    [viewRoot, searchQuery, sort],
   );
   const matchIdSet = useMemo(() => createMatchIdSet(matchIds), [matchIds]);
   const currentMatchIndex = matchIndexAfterReorder(matchIds, pinnedMatchId);
@@ -239,9 +289,19 @@ function PopulatedTreeView({
     };
   }, []);
 
+  useEffect(() => {
+    if (selectedId === null) {
+      return;
+    }
+    if (viewRoot === null || !nodeVisibleInDisplayTree(viewRoot, selectedId)) {
+      setSelectedId(null);
+    }
+  }, [viewRoot, selectedId]);
+
   const treeWindow = computeTreeWindow(rows.length, scrollTop, viewportHeight);
   const visibleRows = rows.slice(treeWindow.start, treeWindow.end);
-  const selectedNode = selectedId === null ? undefined : findNodeById(result.root, selectedId);
+  const selectedNode =
+    selectedId === null || viewRoot === null ? undefined : findNodeById(viewRoot, selectedId);
   const selectedPath = selectedNode?.path;
 
   function scrollRowIntoView(id: string, nextRows: VisibleTreeRow[] = rows) {
@@ -283,14 +343,11 @@ function PopulatedTreeView({
   function handleTwistClick(event: MouseEvent<HTMLButtonElement>, id: string) {
     event.preventDefault();
     event.stopPropagation();
-    skipSelectionRef.current = true;
     toggleExpanded(id);
   }
 
   function handleRowClick(row: VisibleTreeRow) {
-    const keepCurrent = skipSelectionRef.current;
-    skipSelectionRef.current = false;
-    setSelectedId(selectedIdAfterClick(selectedId, row.id, keepCurrent));
+    setSelectedId(row.id);
   }
 
   function handleRowDoubleClick(row: VisibleTreeRow) {
@@ -319,13 +376,57 @@ function PopulatedTreeView({
   }
 
   function handleExpandAll() {
-    setExpandedIds(collectExpandableDirectoryIds(result.root));
+    setExpandedIds(collectExpandableDirectoryIds(viewRoot ?? result.root));
   }
 
   function handleCollapseAll() {
     setExpandedIds(collapseAllExpandedIds());
     setSelectedId(selectedIdAfterCollapseAll(result.root.id));
     queueMicrotask(() => scrollRowIntoView(result.root.id));
+  }
+
+  function toggleDraftExtension(key: string) {
+    setFilterDraft((current) => {
+      const selected = current.extensions.includes(key);
+      return {
+        ...current,
+        extensions: selected
+          ? current.extensions.filter((item) => item !== key)
+          : [...current.extensions, key],
+      };
+    });
+  }
+
+  function handleApplyDisplayFilter() {
+    const applyError = displayFilterApplyError(filterDraft, hasModifiedTimestamps);
+    if (applyError !== null) {
+      setFilterError(applyError);
+      return;
+    }
+    const nextApplied: AppliedDisplayFilter = {
+      extensions: [...filterDraft.extensions],
+      modifiedFrom: filterDraft.modifiedFrom,
+      modifiedUntil: filterDraft.modifiedUntil,
+    };
+    setFilterError(null);
+    setAppliedFilter(nextApplied);
+    const nextView = buildDisplayFilterView(result.root, nextApplied, sort);
+    if (displayFilterHasConstraint(nextApplied) && nextView.tree !== null) {
+      setExpandedIds(collectExpandableDirectoryIds(nextView.tree));
+    }
+    if (
+      selectedId !== null &&
+      (nextView.tree === null || !nodeVisibleInDisplayTree(nextView.tree, selectedId))
+    ) {
+      setSelectedId(null);
+    }
+  }
+
+  function handleResetDisplayFilter() {
+    setFilterDraft(emptyDisplayFilterDraft());
+    setAppliedFilter(null);
+    setFilterError(null);
+    setExpandedIds(defaultExpandedIds(result.root.id));
   }
 
   function handleSearchChange(value: string) {
@@ -342,7 +443,7 @@ function PopulatedTreeView({
     setPinnedMatchId(id);
     setSearchJumped(true);
     setExpandedIds((current) =>
-      withAncestorsExpanded(current, ancestorDirectoryIds(result.root, id)),
+      withAncestorsExpanded(current, ancestorDirectoryIds(viewRoot ?? result.root, id)),
     );
     setSelectedId(id);
     pendingRevealRef.current = id;
@@ -555,16 +656,9 @@ function PopulatedTreeView({
           })}
         </span>
         {filterLabel.length > 0 ? (
-          <span className="tree-filter-chip">
-            <svg className="tree-filter-icon" viewBox="0 0 12 12" width="11" height="11" aria-hidden="true">
-              <path
-                fill="currentColor"
-                d="M1.25 1.5h9.5L7.1 6.05v3.2L4.9 10.5V6.05L1.25 1.5z"
-              />
-            </svg>
-            Filter: {filterLabel}
-          </span>
+          <TreeFilterChip>Einlesen: {filterLabel}</TreeFilterChip>
         ) : null}
+        {filterSummary !== null ? <TreeFilterChip>{filterSummary}</TreeFilterChip> : null}
       </p>
       <div className="tree-toolbar">
         <button type="button" disabled={actionsDisabled} onClick={handleExpandAll}>
@@ -574,6 +668,82 @@ function PopulatedTreeView({
           Alles zuklappen
         </button>
       </div>
+      <details
+        className="display-filter"
+        open={filterOpen}
+        onToggle={(event) => setFilterOpen(event.currentTarget.open)}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
+        <summary>Anzeigefilter</summary>
+        <div className="display-filter-body">
+          <p className="muted display-filter-hint">
+            Wirkt nur auf die aktuelle Ansicht. Der eingelesene Bestand bleibt unverändert.
+          </p>
+          <fieldset className="display-filter-types" disabled={extensionOptions.length === 0}>
+            <legend>Dateitypen im Ergebnis</legend>
+            {extensionOptions.length === 0 ? (
+              <p className="muted">Keine Dateitypen im Ergebnis.</p>
+            ) : (
+              extensionOptions.map((option) => (
+                <label key={option.key === "" ? "none" : option.key} className="check">
+                  <input
+                    type="checkbox"
+                    checked={filterDraft.extensions.includes(option.key)}
+                    onChange={() => toggleDraftExtension(option.key)}
+                  />
+                  <span>{option.label}</span>
+                </label>
+              ))
+            )}
+          </fieldset>
+          <div className="display-filter-dates">
+            <label className="field">
+              <span>Geändert von</span>
+              <input
+                type="date"
+                value={filterDraft.modifiedFrom}
+                disabled={!hasModifiedTimestamps}
+                title={
+                  hasModifiedTimestamps
+                    ? undefined
+                    : "Datumsfilter benötigt Änderungsdaten. Beim Einlesen „Geändert“ aktivieren."
+                }
+                onChange={(event) =>
+                  setFilterDraft((current) => ({ ...current, modifiedFrom: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Geändert bis</span>
+              <input
+                type="date"
+                value={filterDraft.modifiedUntil}
+                disabled={!hasModifiedTimestamps}
+                title={
+                  hasModifiedTimestamps
+                    ? undefined
+                    : "Datumsfilter benötigt Änderungsdaten. Beim Einlesen „Geändert“ aktivieren."
+                }
+                onChange={(event) =>
+                  setFilterDraft((current) => ({ ...current, modifiedUntil: event.target.value }))
+                }
+              />
+            </label>
+          </div>
+          {!hasModifiedTimestamps ? (
+            <p className="muted">Datumsfilter nicht verfügbar: „Geändert“ wurde beim Einlesen nicht erfasst.</p>
+          ) : null}
+          {filterError !== null ? <p className="display-filter-error">{filterError}</p> : null}
+          <div className="display-filter-actions">
+            <button type="button" className="primary" onClick={handleApplyDisplayFilter}>
+              Filter anwenden
+            </button>
+            <button type="button" onClick={handleResetDisplayFilter}>
+              Filter zurücksetzen
+            </button>
+          </div>
+        </div>
+      </details>
       <TreeSearchBar
         query={searchQuery}
         countLabel={searchLabel}
@@ -676,6 +846,9 @@ function PopulatedTreeView({
               );
             })}
           </div>
+          {filterEmpty ? (
+            <p className="muted tree-filter-empty">Keine Dateien entsprechen dem aktuellen Filter.</p>
+          ) : (
           <div
             className="tree-table-body"
             onClick={(event) => {
@@ -716,11 +889,13 @@ function PopulatedTreeView({
               />
             ) : null}
           </div>
+          )}
         </div>
       </div>
       <TreePathBar
         path={selectedPath ?? null}
         hasSelection={selectedNode !== undefined}
+        canScanFromHere={canScanFromHere(selectedNode) && !scanning}
         disabled={false}
         notice={pathNotice}
         noticeKind={pathNoticeKind}
@@ -729,6 +904,11 @@ function PopulatedTreeView({
         }}
         onOpen={() => {
           void handleOpenExplorer();
+        }}
+        onScanFromHere={() => {
+          if (selectedNode !== undefined && canScanFromHere(selectedNode)) {
+            onScanFromHere(selectedNode.path);
+          }
         }}
       />
       {result.warnings.length > 0 ? (
@@ -952,23 +1132,33 @@ function TreeSearchBar({
 interface TreePathBarProps {
   path: string | null;
   hasSelection: boolean;
+  canScanFromHere: boolean;
   disabled: boolean;
   notice: string | null;
   noticeKind: "ok" | "error" | null;
   onCopy: () => void;
   onOpen: () => void;
+  onScanFromHere: () => void;
 }
 
 function TreePathBar({
   path,
   hasSelection,
+  canScanFromHere,
   disabled,
   notice,
   noticeKind,
   onCopy,
   onOpen,
+  onScanFromHere,
 }: TreePathBarProps) {
   const actionsOff = disabled || !hasSelection;
+  const scanFromHereOff = disabled || !canScanFromHere;
+  const scanFromHereTitle = !hasSelection
+    ? "Zuerst einen Ordner auswählen"
+    : !canScanFromHere
+      ? "Nur für einen ausgewählten Ordner verfügbar"
+      : "Ordner als Startverzeichnis übernehmen. Einlesen startet erst mit „Analyse starten“.";
   return (
     <div className="tree-path-row">
       <p className="tree-path muted" title={path ?? ""}>
@@ -981,6 +1171,14 @@ function TreePathBar({
         <button type="button" disabled={actionsOff} onClick={onOpen}>
           Im Explorer öffnen
         </button>
+        <button
+          type="button"
+          disabled={scanFromHereOff}
+          title={scanFromHereTitle}
+          onClick={onScanFromHere}
+        >
+          Ab hier einlesen
+        </button>
         {notice !== null ? (
           <span className={noticeKind === "error" ? "tree-path-notice is-error" : "tree-path-notice is-ok"}>
             {notice}
@@ -988,5 +1186,19 @@ function TreePathBar({
         ) : null}
       </div>
     </div>
+  );
+}
+
+function TreeFilterChip({ children }: { children: ReactNode }) {
+  return (
+    <span className="tree-filter-chip">
+      <svg className="tree-filter-icon" viewBox="0 0 12 12" width="11" height="11" aria-hidden="true">
+        <path
+          fill="currentColor"
+          d="M1.25 1.5h9.5L7.1 6.05v3.2L4.9 10.5V6.05L1.25 1.5z"
+        />
+      </svg>
+      {children}
+    </span>
   );
 }

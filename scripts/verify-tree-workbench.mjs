@@ -164,8 +164,12 @@ function sortAfterHidingColumn(sort, hidden) {
   return sort;
 }
 
+function selectedIdAfterPointer(currentSelectedId, rowId, target) {
+  return target === "row" ? rowId : currentSelectedId;
+}
+
 function selectedIdAfterClick(currentSelectedId, clickedId, keepCurrent) {
-  return keepCurrent ? currentSelectedId : clickedId;
+  return selectedIdAfterPointer(currentSelectedId, clickedId, keepCurrent ? "twist" : "row");
 }
 
 function selectedIdAfterCollapseAll(rootId) {
@@ -349,6 +353,9 @@ assert(visibleIds(tree, []) === "root", "collapse all shows only root");
 assert(findNodeById(tree, "root")?.path === "root", "root path remains after collapse all");
 assert(selectedIdAfterClick("root", "f", true) === "root", "twist keeps selection");
 assert(selectedIdAfterClick("root", "f", false) === "f", "row click selects");
+assert(selectedIdAfterPointer(null, "C:/A", "twist") === null, "twist click does not select");
+assert(selectedIdAfterPointer(null, "C:/A", "row") === "C:/A", "first row click after twist selects");
+assert(selectedIdAfterPointer("C:/A/x.pdf", "C:/A", "twist") === "C:/A/x.pdf", "twist keeps prior selection");
 assert(!visibleIds(nested, ["root"]).includes("root/A/a1"), "collapsed child not in visible rows");
 assert(findNodeById(nested, "root/A/a1")?.path === "root/A/a1", "hidden selection path from full tree");
 assert(selectedIdAfterClick("root/A/a1", "root/A", true) === "root/A/a1", "parent twist keeps child");
