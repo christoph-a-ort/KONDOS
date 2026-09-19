@@ -352,8 +352,28 @@ button:disabled {
   box-shadow: inset 3px 0 0 #3d7a45;
 }
 
-.content-hit-name {
+.content-hit-heading {
   grid-area: name;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.content-hit-format {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  color: #5c6570;
+  border: 1px solid #d5dbe3;
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+.content-hit-name {
+  min-width: 0;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;

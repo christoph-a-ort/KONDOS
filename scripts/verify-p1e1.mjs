@@ -36,10 +36,11 @@ function hit(nodeId, name, extras = {}) {
 
 const DEFAULT_SEARCH_MODE = "name";
 const NAME_SEARCH_PLACEHOLDER = "Dateiname suchen …";
-const CONTENT_SEARCH_PLACEHOLDER = "In PDF-Inhalten suchen …";
+const CONTENT_SEARCH_PLACEHOLDER = "In PDF- und Word-Inhalten suchen …";
 const CONTENT_STALE_SNAPSHOT_MESSAGE =
   "Bitte den Ordner erneut einlesen, bevor die Inhaltssuche genutzt wird.";
-const CONTENT_NO_PDFS_MESSAGE = "Im eingelesenen Bestand wurden keine PDF-Dateien gefunden.";
+const CONTENT_NO_DOCUMENTS_MESSAGE =
+  "Im eingelesenen Bestand wurden keine durchsuchbaren Dokumente gefunden.";
 const CONTENT_NO_HITS_MESSAGE = "Keine Treffer gefunden.";
 const CONTENT_FILTER_HIDES_HITS_MESSAGE =
   "Keine Treffer in der aktuellen Ansicht.\nWeitere Treffer sind durch den Anzeigefilter ausgeblendet.";
@@ -89,15 +90,15 @@ function formatContentHitSummary(options) {
 }
 
 function formatPartialCacheNotice(processed, total) {
-  return `Die Vorbereitung wurde abgebrochen.\nDie Suche berücksichtigt ${processed} von ${total} PDFs.`;
+  return `Die Vorbereitung wurde abgebrochen.\nDie Suche berücksichtigt ${processed} von ${total} Dokumenten.`;
 }
 
 function formatPartialNoHits(processed, total) {
-  return `Im bisher vorbereiteten Teilbestand wurden keine Treffer gefunden.\n${processed} von ${total} PDFs wurden berücksichtigt.`;
+  return `Im bisher vorbereiteten Teilbestand wurden keine Treffer gefunden.\n${processed} von ${total} Dokumenten wurden berücksichtigt.`;
 }
 
 function formatPrepareCounts(processed, total) {
-  return `${processed} von ${total} PDFs`;
+  return `${processed} von ${total} Dokumenten`;
 }
 
 function formatPrepareStats(searchableCount, noTextCount, problemCount) {
@@ -136,13 +137,13 @@ function snippetHighlightParts(snippet, ranges) {
 
 function emptyContentStatus(options) {
   if (!options.hasResult) return null;
-  if (options.totalPdfCount === 0) return CONTENT_NO_PDFS_MESSAGE;
+  if (options.totalDocumentCount === 0) return CONTENT_NO_DOCUMENTS_MESSAGE;
   if (options.visibleCount > 0) return null;
   if (options.totalHitCount > 0 && options.filterActive) return CONTENT_FILTER_HIDES_HITS_MESSAGE;
-  if (!options.cacheComplete) return formatPartialNoHits(options.processedPdfCount, options.totalPdfCount);
+  if (!options.cacheComplete) return formatPartialNoHits(options.processedDocumentCount, options.totalDocumentCount);
   const extras = [];
-  if (options.noTextCount > 0) extras.push(`${options.noTextCount} PDFs ohne durchsuchbaren Text.`);
-  if (options.problemCount > 0) extras.push(`${options.problemCount} PDFs konnten nicht durchsucht werden.`);
+  if (options.noTextCount > 0) extras.push(`${options.noTextCount} Dokumente ohne durchsuchbaren Text.`);
+  if (options.problemCount > 0) extras.push(`${options.problemCount} Dokumente konnten nicht durchsucht werden.`);
   return extras.length === 0 ? CONTENT_NO_HITS_MESSAGE : [CONTENT_NO_HITS_MESSAGE, ...extras].join("\n");
 }
 
@@ -165,7 +166,7 @@ function previousMatchIndex(currentIndex, matchCount, jumped) {
 
 assert(DEFAULT_SEARCH_MODE === "name", "A: default mode is Dateiname");
 assert(NAME_SEARCH_PLACEHOLDER === "Dateiname suchen …", "A: name placeholder");
-assert(CONTENT_SEARCH_PLACEHOLDER === "In PDF-Inhalten suchen …", "content placeholder is honest");
+assert(CONTENT_SEARCH_PLACEHOLDER === "In PDF- und Word-Inhalten suchen …", "content placeholder names PDF and Word");
 assert(!hasContentQuery(""), "B: empty query is not a search");
 assert(!hasContentQuery("   \t"), "B: whitespace query is not a search");
 assert(hasContentQuery("Brandschutz"), "B: real query can start search");
@@ -175,7 +176,7 @@ assert(!shouldPrepareContent(true), "D/F: complete cache skips prepare");
 const partial = formatPartialCacheNotice(142, 800);
 assert(partial.includes("142 von 800"), "H: partial cache counts");
 assert(partial.includes("abgebrochen"), "H: cancelled wording");
-assert(formatPrepareCounts(142, 800) === "142 von 800 PDFs", "I: progress counts");
+assert(formatPrepareCounts(142, 800) === "142 von 800 Dokumenten", "I: progress counts");
 assert(
   formatPrepareStats(118, 19, 5) === "118 durchsuchbar · 19 ohne Text · 5 problematisch",
   "I: progress groups",
@@ -206,8 +207,8 @@ assert(
   emptyContentStatus({
     hasResult: true,
     cacheComplete: true,
-    totalPdfCount: 2,
-    processedPdfCount: 2,
+    totalDocumentCount: 2,
+    processedDocumentCount: 2,
     visibleCount: 0,
     totalHitCount: 84,
     filterActive: true,
@@ -236,22 +237,22 @@ assert(
   emptyContentStatus({
     hasResult: true,
     cacheComplete: true,
-    totalPdfCount: 0,
-    processedPdfCount: 0,
+    totalDocumentCount: 0,
+    processedDocumentCount: 0,
     visibleCount: 0,
     totalHitCount: 0,
     filterActive: false,
     noTextCount: 0,
     problemCount: 0,
-  }) === CONTENT_NO_PDFS_MESSAGE,
-  "U: zero PDFs",
+  }) === CONTENT_NO_DOCUMENTS_MESSAGE,
+  "U: zero documents",
 );
 assert(
   emptyContentStatus({
     hasResult: true,
     cacheComplete: false,
-    totalPdfCount: 800,
-    processedPdfCount: 142,
+    totalDocumentCount: 800,
+    processedDocumentCount: 142,
     visibleCount: 0,
     totalHitCount: 0,
     filterActive: false,
@@ -290,11 +291,15 @@ assert(hook.includes('outcome.status === "cancelled"'), "G: cancelled continues 
 assert(helpers.includes("formatPartialCacheNotice"), "H: partial notice helper");
 assert(results.includes("Abbrechen"), "I: cancel button");
 assert(results.includes("formatPrepareCounts"), "I: progress counts rendered");
+assert(results.includes("contentHitFormatLabel"), "format badge uses shared label helper");
+assert(results.includes("content-hit-format"), "format badge class in hit row");
 assert(results.includes("hit.name"), "J: hit filename");
 assert(results.includes("snippetHighlightParts"), "J: snippet rendered");
+assert(results.includes('<span className="content-hit-format">'), "format badge is text in the hit row");
 assert(helpers.includes("von ${options.totalHitCount} Treffern"), "K: cap wording");
 assert(helpers.includes("visibleContentHits"), "L: view filter helper");
 assert(helpers.includes("CONTENT_FILTER_HIDES_HITS_MESSAGE"), "M: filter empty copy");
+assert(treeView.includes("CONTENT_SEARCH_ARIA_LABEL"), "content search aria uses shared label");
 assert(treeView.includes("revealTreeNode"), "N: hit reveal reuses tree navigation");
 assert(treeView.includes('contentSearch.stepHit("next")'), "O: content prev/next");
 assert(hook.includes("clearQueryAndHits"), "P: escape clears query/hits");
@@ -313,6 +318,11 @@ assert(rows.includes("export const OVERSCAN = 12;"), "V: OVERSCAN");
 assert(treeView.includes("ROW_HEIGHT"), "V: TreeView keeps windowing constant");
 assert(!treeView.includes("react-window") && !treeView.includes("react-virtual"), "V: no virtualization library");
 assert(helpers.includes(CONTENT_STALE_SNAPSHOT_MESSAGE), "T: stale snapshot wording");
+assert(helpers.includes("von ${total} Dokumenten"), "document count wording");
+assert(helpers.includes(CONTENT_NO_DOCUMENTS_MESSAGE), "empty documents copy");
+assert(helpers.includes("Durchsucht werden PDF- und Word-Dateien (.docx)."), "empty stock names supported formats");
+assert(!helpers.includes("von ${total} PDFs"), "no leftover PDF count wording");
+assert(!helpers.includes("In PDF-Inhalten suchen"), "no leftover PDF-only content search copy");
 assert(css.includes(".content-search-hits"), "21: separate hit list scroll");
 assert(css.includes(".content-hit-mark"), "11: highlight token class");
 

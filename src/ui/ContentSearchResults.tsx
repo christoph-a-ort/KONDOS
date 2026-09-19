@@ -3,6 +3,7 @@ import { useEffect, useRef, type KeyboardEvent } from "react";
 import type { ContentProgress, ContentSearchHit } from "../model";
 import {
   CONTENT_PREPARE_TITLE,
+  contentHitFormatLabel,
   formatMatchCount,
   formatPrepareCounts,
   formatPrepareStats,
@@ -54,7 +55,7 @@ export function ContentSearchResults({
           <p className="content-search-progress-title">{CONTENT_PREPARE_TITLE}</p>
           {progress !== null ? (
             <>
-              <p>{formatPrepareCounts(progress.processedPdfCount, progress.totalPdfCount)}</p>
+              <p>{formatPrepareCounts(progress.processedDocumentCount, progress.totalDocumentCount)}</p>
               {progress.currentFileName.length > 0 ? (
                 <p className="muted content-search-current" title={progress.currentFileName}>
                   {progress.currentFileName}
@@ -107,6 +108,7 @@ function ContentHitRow({
 }) {
   const folder = hitFolderLabel(hit.path, hit.name);
   const parts = snippetHighlightParts(hit.snippet, hit.highlights);
+  const formatLabel = contentHitFormatLabel(hit.format);
 
   function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key === "Enter" || event.key === " ") {
@@ -130,7 +132,10 @@ function ContentHitRow({
       }}
       onKeyDown={handleKeyDown}
     >
-      <span className="content-hit-name">{hit.name}</span>
+      <span className="content-hit-heading">
+        {formatLabel !== null ? <span className="content-hit-format">{formatLabel}</span> : null}
+        <span className="content-hit-name">{hit.name}</span>
+      </span>
       <span className="content-hit-folder" title={hit.path}>
         {folder}
       </span>

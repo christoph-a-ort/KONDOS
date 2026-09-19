@@ -3,6 +3,7 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 import { ContentSearchResults } from "./ContentSearchResults";
 import {
+  CONTENT_SEARCH_ARIA_LABEL,
   CONTENT_SEARCH_PLACEHOLDER,
   DEFAULT_SEARCH_MODE,
   NAME_SEARCH_PLACEHOLDER,
@@ -1357,7 +1358,7 @@ function TreeSearchBar({
         spellCheck={false}
         onChange={(event) => onQueryChange(event.target.value)}
         onKeyDown={onKeyDown}
-        aria-label={mode === "content" ? "In PDF-Inhalten suchen" : "Dateiname suchen"}
+        aria-label={mode === "content" ? CONTENT_SEARCH_ARIA_LABEL : "Dateiname suchen"}
       />
       <button
         type="button"

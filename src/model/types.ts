@@ -129,8 +129,8 @@ export interface ContentSearchResult {
   scanId: number;
   query: string;
   cacheComplete: boolean;
-  processedPdfCount: number;
-  totalPdfCount: number;
+  processedDocumentCount: number;
+  totalDocumentCount: number;
   totalHitCount: number;
   returnedHitCount: number;
   hits: ContentSearchHit[];
@@ -138,8 +138,8 @@ export interface ContentSearchResult {
 
 export interface ContentProgress {
   scanId: number;
-  totalPdfCount: number;
-  processedPdfCount: number;
+  totalDocumentCount: number;
+  processedDocumentCount: number;
   searchableCount: number;
   noTextCount: number;
   problemCount: number;

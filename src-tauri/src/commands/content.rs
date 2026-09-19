@@ -28,8 +28,8 @@ pub async fn start_prepare_content(
         Err(_) => {
             let failed = ContentProgress {
                 scan_id,
-                total_pdf_count: 0,
-                processed_pdf_count: 0,
+                total_document_count: 0,
+                processed_document_count: 0,
                 searchable_count: 0,
                 no_text_count: 0,
                 problem_count: 0,
@@ -103,7 +103,7 @@ mod tests {
         let progress = run_prepare_content(&state, 1, &cancel, |_| {}).expect("run");
         drop(guard);
         assert_eq!(progress.status, ContentPrepareStatus::Completed);
-        assert_eq!(progress.total_pdf_count, 0);
+        assert_eq!(progress.total_document_count, 0);
         assert!(state.content_cache_for(1).expect("cache").complete);
         assert!(!state.is_preparing_content());
         assert!(!state.is_close_blocked());

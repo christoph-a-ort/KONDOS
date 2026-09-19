@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::prepare::collect_snapshot_pdfs;
+use super::prepare::collect_snapshot_content_files;
 use super::{ContentCache, ContentEntry, ContentFormat, ContentStatus};
 use crate::error::AppError;
 use crate::scan::cmp_name_then_path;
@@ -46,15 +46,15 @@ pub struct ContentSearchResult {
     pub scan_id: u64,
     pub query: String,
     pub cache_complete: bool,
-    pub processed_pdf_count: u64,
-    pub total_pdf_count: u64,
+    pub processed_document_count: u64,
+    pub total_document_count: u64,
     pub total_hit_count: u64,
     pub returned_hit_count: u64,
     pub hits: Vec<ContentSearchHit>,
 }
 
 /// Inhaltssuche ausschließlich über den sitzungsbezogenen ContentCache.
-/// Öffnet keine PDF-Dateien.
+/// Öffnet keine Dokumentdateien.
 pub fn search_file_content(
     state: &AppState,
     scan_id: u64,
@@ -62,21 +62,21 @@ pub fn search_file_content(
 ) -> Result<ContentSearchResult, AppError> {
     state.ensure_content_search_allowed()?;
     let snapshot = state.snapshot_for_content(scan_id)?;
-    let pdfs = collect_snapshot_pdfs(&snapshot.root);
-    let total_pdf_count = pdfs.len() as u64;
+    let documents = collect_snapshot_content_files(&snapshot.root);
+    let total_document_count = documents.len() as u64;
     let terms = parse_query_terms(query);
 
     state.with_content_cache(scan_id, |cache| {
-        let processed_pdf_count = pdfs
+        let processed_document_count = documents
             .iter()
-            .filter(|pdf| cache.entries.contains_key(&pdf.path))
+            .filter(|document| cache.entries.contains_key(&document.path))
             .count() as u64;
         let mut result = ContentSearchResult {
             scan_id,
             query: query.to_string(),
             cache_complete: cache.complete,
-            processed_pdf_count,
-            total_pdf_count,
+            processed_document_count,
+            total_document_count,
             total_hit_count: 0,
             returned_hit_count: 0,
             hits: Vec::new(),
@@ -84,9 +84,9 @@ pub fn search_file_content(
         if terms.is_empty() {
             return result;
         }
-        let node_id_by_path: HashMap<&str, &str> = pdfs
+        let node_id_by_path: HashMap<&str, &str> = documents
             .iter()
-            .map(|pdf| (pdf.path.as_str(), pdf.id.as_str()))
+            .map(|document| (document.path.as_str(), document.id.as_str()))
             .collect();
         result.hits = collect_hits(cache, &terms, &node_id_by_path);
         result.total_hit_count = result.hits.len() as u64;
@@ -449,10 +449,19 @@ mod tests {
     }
 
     fn searchable(path: &str, name: &str, text: &str) -> ContentEntry {
+        searchable_with(path, name, text, ContentFormat::Pdf)
+    }
+
+    fn searchable_with(
+        path: &str,
+        name: &str,
+        text: &str,
+        format: ContentFormat,
+    ) -> ContentEntry {
         ContentEntry {
             path: path.into(),
             name: name.into(),
-            format: ContentFormat::Pdf,
+            format,
             status: ContentStatus::Searchable,
             text: Some(text.into()),
             extracted_chars: text.chars().count(),
@@ -496,8 +505,8 @@ mod tests {
             assert!(result.hits.is_empty(), "{query:?}");
             assert_eq!(result.total_hit_count, 0);
             assert_eq!(result.returned_hit_count, 0);
-            assert_eq!(result.total_pdf_count, 1);
-            assert_eq!(result.processed_pdf_count, 1);
+            assert_eq!(result.total_document_count, 1);
+            assert_eq!(result.processed_document_count, 1);
         }
     }
 
@@ -614,7 +623,7 @@ mod tests {
         let result = search_ok(&state, 5, "Inhalt");
         assert_eq!(result.total_hit_count, 1);
         assert_eq!(result.hits[0].name, "ok.pdf");
-        assert_eq!(result.processed_pdf_count, 4);
+        assert_eq!(result.processed_document_count, 4);
     }
 
     #[test]
@@ -785,8 +794,8 @@ mod tests {
         }
         let result = search_ok(&state, 11, "Trefferwert");
         assert!(!result.cache_complete);
-        assert_eq!(result.processed_pdf_count, 142);
-        assert_eq!(result.total_pdf_count, 800);
+        assert_eq!(result.processed_document_count, 142);
+        assert_eq!(result.total_document_count, 800);
         assert_eq!(result.total_hit_count, 1);
         assert_eq!(result.hits[0].name, "n007.pdf");
     }
@@ -884,5 +893,176 @@ mod tests {
         assert!(result.hits[0].match_count >= 2);
         assert!(result.hits[0].snippet.contains("Brandschutzklappe"));
         assert!(result.hits[0].highlights.len() >= 2);
+    }
+
+    #[test]
+    fn search_counts_pdf_and_docx_not_xlsx_and_still_finds_pdf() {
+        let state = AppState::new();
+        state.store_snapshot(
+            44,
+            snapshot(vec![
+                file("a.pdf", "C:\\root\\a.pdf"),
+                file("brief.docx", "C:\\root\\brief.docx"),
+                file("tabelle.xlsx", "C:\\root\\tabelle.xlsx"),
+                file("notes.txt", "C:\\root\\notes.txt"),
+            ]),
+        );
+        state
+            .insert_content_entry(
+                44,
+                searchable("C:\\root\\a.pdf", "a.pdf", "Brandschutzklappe Nachtrag"),
+            )
+            .expect("pdf");
+        state
+            .insert_content_entry(
+                44,
+                ContentEntry {
+                    path: "C:\\root\\brief.docx".into(),
+                    name: "brief.docx".into(),
+                    format: ContentFormat::Docx,
+                    status: ContentStatus::ParseError,
+                    text: None,
+                    extracted_chars: 0,
+                    truncated: false,
+                },
+            )
+            .expect("docx stub");
+        state.mark_content_complete(44).expect("complete");
+        let result = search_ok(&state, 44, "Brandschutzklappe Nachtrag");
+        assert_eq!(result.total_document_count, 2);
+        assert_eq!(result.processed_document_count, 2);
+        assert_eq!(result.total_hit_count, 1);
+        assert_eq!(result.hits[0].name, "a.pdf");
+        assert_eq!(result.hits[0].format, ContentFormat::Pdf);
+        assert!(result.cache_complete);
+    }
+
+    #[test]
+    fn mixed_pdf_and_docx_hits_share_one_200_cap() {
+        let mut files = Vec::new();
+        let total = MAX_CONTENT_SEARCH_HITS + 7;
+        for i in 0..total {
+            let (name, format) = if i % 2 == 0 {
+                (format!("hit {i:03}.pdf"), ContentFormat::Pdf)
+            } else {
+                (format!("hit {i:03}.docx"), ContentFormat::Docx)
+            };
+            let path = format!("C:\\root\\{name}");
+            files.push((
+                name.clone(),
+                path.clone(),
+                searchable_with(&path, &name, "gemeinsamer Treffer", format),
+            ));
+        }
+        let children = files.iter().map(|(name, path, _)| file(name, path)).collect();
+        let state = AppState::new();
+        state.store_snapshot(61, snapshot(children));
+        for (_, _, entry) in files {
+            state.insert_content_entry(61, entry).expect("insert");
+        }
+        let result = search_ok(&state, 61, "Treffer");
+        assert_eq!(result.total_hit_count, total as u64);
+        assert_eq!(result.returned_hit_count, MAX_CONTENT_SEARCH_HITS as u64);
+        assert_eq!(result.hits.len(), MAX_CONTENT_SEARCH_HITS);
+        assert!(result.hits.iter().any(|hit| hit.format == ContentFormat::Pdf));
+        assert!(result.hits.iter().any(|hit| hit.format == ContentFormat::Docx));
+    }
+
+    #[test]
+    fn mixed_pdf_and_docx_hit_order_ignores_format() {
+        let state = ready_state(
+            62,
+            vec![
+                (
+                    "Datei 10.docx",
+                    "C:\\root\\c\\Datei 10.docx",
+                    searchable_with(
+                        "C:\\root\\c\\Datei 10.docx",
+                        "Datei 10.docx",
+                        "Inhalt",
+                        ContentFormat::Docx,
+                    ),
+                ),
+                (
+                    "Datei 2.pdf",
+                    "C:\\root\\b\\Datei 2.pdf",
+                    searchable("C:\\root\\b\\Datei 2.pdf", "Datei 2.pdf", "Inhalt"),
+                ),
+                (
+                    "Datei 2.docx",
+                    "C:\\root\\a\\Datei 2.docx",
+                    searchable_with(
+                        "C:\\root\\a\\Datei 2.docx",
+                        "Datei 2.docx",
+                        "Inhalt",
+                        ContentFormat::Docx,
+                    ),
+                ),
+            ],
+        );
+        let result = search_ok(&state, 62, "Inhalt");
+        let names_paths: Vec<_> = result
+            .hits
+            .iter()
+            .map(|hit| (hit.name.as_str(), hit.path.as_str(), hit.format))
+            .collect();
+        assert_eq!(
+            names_paths,
+            vec![
+                ("Datei 2.docx", "C:\\root\\a\\Datei 2.docx", ContentFormat::Docx),
+                ("Datei 2.pdf", "C:\\root\\b\\Datei 2.pdf", ContentFormat::Pdf),
+                ("Datei 10.docx", "C:\\root\\c\\Datei 10.docx", ContentFormat::Docx),
+            ]
+        );
+    }
+
+    #[test]
+    fn docx_umlauts_eszett_and_emoji_use_existing_search_rules() {
+        let text = "Vortext Änderung Straße 😀 für Müller Probe";
+        let state = ready_state(
+            63,
+            vec![
+                (
+                    "brief.docx",
+                    "C:\\root\\brief.docx",
+                    searchable_with(
+                        "C:\\root\\brief.docx",
+                        "brief.docx",
+                        text,
+                        ContentFormat::Docx,
+                    ),
+                ),
+                (
+                    "ascii.pdf",
+                    "C:\\root\\ascii.pdf",
+                    searchable("C:\\root\\ascii.pdf", "ascii.pdf", "Nur Mueller ohne Umlaut"),
+                ),
+            ],
+        );
+        assert_eq!(search_ok(&state, 63, "Müller").hits[0].name, "brief.docx");
+        assert_eq!(search_ok(&state, 63, "müller").total_hit_count, 1);
+        let ae = search_ok(&state, 63, "Mueller");
+        assert_eq!(ae.total_hit_count, 1);
+        assert_eq!(ae.hits[0].name, "ascii.pdf");
+        assert_eq!(search_ok(&state, 63, "Straße").hits[0].format, ContentFormat::Docx);
+        assert_eq!(search_ok(&state, 63, "Strasse").total_hit_count, 0);
+
+        let result = search_ok(&state, 63, "Änderung Straße 😀");
+        let hit = &result.hits[0];
+        assert_eq!(hit.format, ContentFormat::Docx);
+        assert!(hit.highlights.len() >= 3, "{hit:?}");
+        let marked: Vec<String> = hit
+            .highlights
+            .iter()
+            .map(|range| slice_utf16(&hit.snippet, range.start, range.end))
+            .collect();
+        assert!(marked
+            .iter()
+            .any(|part| fold_case(part) == fold_case("Änderung")));
+        let emoji = marked
+            .iter()
+            .find(|part| part.contains('😀'))
+            .expect("emoji highlight");
+        assert_eq!(emoji.encode_utf16().count(), 2);
     }
 }

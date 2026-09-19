@@ -1,15 +1,25 @@
-import { isDirectory, type ContentProgress, type ContentSearchHit, type FsNode, type HighlightRange } from "../model";
+import {
+  isDirectory,
+  type ContentFormat,
+  type ContentProgress,
+  type ContentSearchHit,
+  type FsNode,
+  type HighlightRange,
+} from "../model";
 import { toUserError } from "../scan";
 
 export type SearchMode = "name" | "content";
 
 export const DEFAULT_SEARCH_MODE: SearchMode = "name";
 export const NAME_SEARCH_PLACEHOLDER = "Dateiname suchen …";
-export const CONTENT_SEARCH_PLACEHOLDER = "In PDF-Inhalten suchen …";
+export const CONTENT_SEARCH_PLACEHOLDER = "In PDF- und Word-Inhalten suchen …";
+export const CONTENT_SEARCH_ARIA_LABEL = "In PDF- und Word-Inhalten suchen";
 export const CONTENT_STALE_SNAPSHOT_MESSAGE =
   "Bitte den Ordner erneut einlesen, bevor die Inhaltssuche genutzt wird.";
-export const CONTENT_NO_PDFS_MESSAGE =
-  "Im eingelesenen Bestand wurden keine PDF-Dateien gefunden.";
+export const CONTENT_NO_DOCUMENTS_MESSAGE =
+  "Im eingelesenen Bestand wurden keine durchsuchbaren Dokumente gefunden.";
+export const CONTENT_SUPPORTED_FORMATS_HINT =
+  "Durchsucht werden PDF- und Word-Dateien (.docx).";
 export const CONTENT_NO_HITS_MESSAGE = "Keine Treffer gefunden.";
 export const CONTENT_FILTER_HIDES_HITS_MESSAGE =
   "Keine Treffer in der aktuellen Ansicht.\nWeitere Treffer sind durch den Anzeigefilter ausgeblendet.";
@@ -50,6 +60,16 @@ export function visibleContentHits(
   return hits.filter((hit) => visibleIds.has(hit.nodeId));
 }
 
+export function contentHitFormatLabel(format: ContentFormat): "PDF" | "DOCX" | null {
+  if (format === "pdf") {
+    return "PDF";
+  }
+  if (format === "docx") {
+    return "DOCX";
+  }
+  return null;
+}
+
 export function formatMatchCount(count: number): string {
   return count === 1 ? "1 Treffer" : `${count} Treffer`;
 }
@@ -77,26 +97,26 @@ export function formatContentHitSummary(options: {
 }
 
 export function formatPartialCacheNotice(processed: number, total: number): string {
-  return `Die Vorbereitung wurde abgebrochen.\nDie Suche berücksichtigt ${processed} von ${total} PDFs.`;
+  return `Die Vorbereitung wurde abgebrochen.\nDie Suche berücksichtigt ${processed} von ${total} Dokumenten.`;
 }
 
 export function formatPartialNoHits(processed: number, total: number): string {
-  return `Im bisher vorbereiteten Teilbestand wurden keine Treffer gefunden.\n${processed} von ${total} PDFs wurden berücksichtigt.`;
+  return `Im bisher vorbereiteten Teilbestand wurden keine Treffer gefunden.\n${processed} von ${total} Dokumenten wurden berücksichtigt.`;
 }
 
 export function formatNoHitsExtras(noTextCount: number, problemCount: number): string[] {
   const lines: string[] = [];
   if (noTextCount > 0) {
-    lines.push(`${noTextCount} PDFs ohne durchsuchbaren Text.`);
+    lines.push(`${noTextCount} Dokumente ohne durchsuchbaren Text.`);
   }
   if (problemCount > 0) {
-    lines.push(`${problemCount} PDFs konnten nicht durchsucht werden.`);
+    lines.push(`${problemCount} Dokumente konnten nicht durchsucht werden.`);
   }
   return lines;
 }
 
 export function formatPrepareCounts(processed: number, total: number): string {
-  return `${processed} von ${total} PDFs`;
+  return `${processed} von ${total} Dokumenten`;
 }
 
 export function formatPrepareStats(
@@ -190,8 +210,8 @@ export function contentSearchUserError(error: unknown): string {
 export function emptyContentStatus(options: {
   hasResult: boolean;
   cacheComplete: boolean;
-  totalPdfCount: number;
-  processedPdfCount: number;
+  totalDocumentCount: number;
+  processedDocumentCount: number;
   visibleCount: number;
   totalHitCount: number;
   filterActive: boolean;
@@ -201,8 +221,8 @@ export function emptyContentStatus(options: {
   if (!options.hasResult) {
     return null;
   }
-  if (options.totalPdfCount === 0) {
-    return CONTENT_NO_PDFS_MESSAGE;
+  if (options.totalDocumentCount === 0) {
+    return `${CONTENT_NO_DOCUMENTS_MESSAGE}\n${CONTENT_SUPPORTED_FORMATS_HINT}`;
   }
   if (options.visibleCount > 0) {
     return null;
@@ -211,7 +231,7 @@ export function emptyContentStatus(options: {
     return CONTENT_FILTER_HIDES_HITS_MESSAGE;
   }
   if (!options.cacheComplete) {
-    return formatPartialNoHits(options.processedPdfCount, options.totalPdfCount);
+    return formatPartialNoHits(options.processedDocumentCount, options.totalDocumentCount);
   }
   const extras = formatNoHitsExtras(options.noTextCount, options.problemCount);
   if (extras.length === 0) {

@@ -73,8 +73,8 @@ export function useContentSearch({
   const emptyStatus = emptyContentStatus({
     hasResult: result !== null && !preparing,
     cacheComplete: result?.cacheComplete ?? cacheComplete,
-    totalPdfCount: result?.totalPdfCount ?? progress?.totalPdfCount ?? 0,
-    processedPdfCount: result?.processedPdfCount ?? progress?.processedPdfCount ?? 0,
+    totalDocumentCount: result?.totalDocumentCount ?? progress?.totalDocumentCount ?? 0,
+    processedDocumentCount: result?.processedDocumentCount ?? progress?.processedDocumentCount ?? 0,
     visibleCount: visibleHits.length,
     totalHitCount: result?.totalHitCount ?? 0,
     filterActive,
@@ -83,7 +83,7 @@ export function useContentSearch({
   });
   const notice =
     cancelledPartial && result !== null && !result.cacheComplete
-      ? formatPartialCacheNotice(result.processedPdfCount, result.totalPdfCount)
+      ? formatPartialCacheNotice(result.processedDocumentCount, result.totalDocumentCount)
       : error;
 
   const setBusy = useCallback((busy: boolean) => {

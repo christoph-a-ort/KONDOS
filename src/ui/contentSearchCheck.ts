@@ -4,12 +4,15 @@ import { OVERSCAN, ROW_HEIGHT } from "./treeRows";
 import { nextMatchIndex, previousMatchIndex } from "./treeSearch";
 import {
   CONTENT_FILTER_HIDES_HITS_MESSAGE,
-  CONTENT_NO_PDFS_MESSAGE,
+  CONTENT_NO_DOCUMENTS_MESSAGE,
+  CONTENT_SEARCH_ARIA_LABEL,
   CONTENT_SEARCH_PLACEHOLDER,
   CONTENT_STALE_SNAPSHOT_MESSAGE,
+  CONTENT_SUPPORTED_FORMATS_HINT,
   DEFAULT_SEARCH_MODE,
   NAME_SEARCH_PLACEHOLDER,
   collectNodeIds,
+  contentHitFormatLabel,
   contentSearchUserError,
   emptyContentStatus,
   formatContentHitSummary,
@@ -57,7 +60,18 @@ function assert(condition: boolean, label: string): void {
 export function runP1e1Check(): void {
   assert(DEFAULT_SEARCH_MODE === "name", "A: default mode is Dateiname");
   assert(NAME_SEARCH_PLACEHOLDER === "Dateiname suchen …", "A: name placeholder");
-  assert(CONTENT_SEARCH_PLACEHOLDER === "In PDF-Inhalten suchen …", "content placeholder is honest");
+  assert(
+    CONTENT_SEARCH_PLACEHOLDER === "In PDF- und Word-Inhalten suchen …",
+    "A: content placeholder names PDF and Word",
+  );
+  assert(
+    CONTENT_SEARCH_ARIA_LABEL === "In PDF- und Word-Inhalten suchen",
+    "A: content aria-label names PDF and Word",
+  );
+  assert(CONTENT_SEARCH_PLACEHOLDER.includes("PDF") && CONTENT_SEARCH_PLACEHOLDER.includes("Word"), "A: placeholder PDF+Word");
+  assert(CONTENT_SEARCH_ARIA_LABEL.includes("PDF") && CONTENT_SEARCH_ARIA_LABEL.includes("Word"), "A: aria PDF+Word");
+  assert(!CONTENT_SEARCH_PLACEHOLDER.includes("In PDF-Inhalten suchen"), "K: old PDF-only placeholder gone");
+  assert(!CONTENT_SEARCH_ARIA_LABEL.includes("In PDF-Inhalten suchen"), "K: old PDF-only aria gone");
   assert(!hasContentQuery(""), "B: empty query is not a search");
   assert(!hasContentQuery("   \t"), "B: whitespace query is not a search");
   assert(hasContentQuery("Brandschutz"), "B: real query can start search");
@@ -70,8 +84,9 @@ export function runP1e1Check(): void {
 
   const partial = formatPartialCacheNotice(142, 800);
   assert(partial.includes("142 von 800"), "H: partial cache counts");
+  assert(partial.includes("Dokumenten"), "H: document wording");
   assert(partial.includes("abgebrochen"), "H: cancelled wording");
-  assert(formatPrepareCounts(142, 800) === "142 von 800 PDFs", "I: progress counts");
+  assert(formatPrepareCounts(142, 800) === "142 von 800 Dokumenten", "I: progress counts");
   assert(
     formatPrepareStats(118, 19, 5) === "118 durchsuchbar · 19 ohne Text · 5 problematisch",
     "I: progress groups",
@@ -114,11 +129,68 @@ export function runP1e1Check(): void {
   assert(visible.length === 1 && visible[0].nodeId === "C:/root/A/a.pdf", "L: display filter uses nodeId");
   assert(visibleContentHits(hits, collectNodeIds(tree)).length === 2, "L: unfiltered keeps backend hits");
 
+  const mixedHits = [
+    hit("C:/root/A/a.pdf", "a.pdf"),
+    hit("C:/root/B/brief.docx", "brief.docx", { format: "docx" }),
+  ];
+  const mixedTree = dir("C:/root", "root", [
+    dir("C:/root/A", "A", [file("C:/root/A/a.pdf", "a.pdf"), file("C:/root/A/note.txt", "note.txt")]),
+    dir("C:/root/B", "B", [file("C:/root/B/brief.docx", "brief.docx")]),
+  ]);
+  const pdfView = dir("C:/root", "root", [
+    dir("C:/root/A", "A", [file("C:/root/A/a.pdf", "a.pdf")]),
+  ]);
+  const docxView = dir("C:/root", "root", [
+    dir("C:/root/B", "B", [file("C:/root/B/brief.docx", "brief.docx")]),
+  ]);
+  const mixedVisible = visibleContentHits(mixedHits, collectNodeIds(pdfView));
+  assert(
+    mixedVisible.length === 1 && mixedVisible[0].nodeId === "C:/root/A/a.pdf",
+    "L: mixed viewRoot keeps PDF hit",
+  );
+  const docxVisible = visibleContentHits(mixedHits, collectNodeIds(docxView));
+  assert(
+    docxVisible.length === 1 &&
+      docxVisible[0].nodeId === "C:/root/B/brief.docx" &&
+      docxVisible[0].format === "docx",
+    "L: mixed viewRoot keeps DOCX hit",
+  );
+  assert(
+    visibleContentHits(mixedHits, collectNodeIds(mixedTree)).length === 2,
+    "L: mixed unfiltered keeps PDF and DOCX backend hits",
+  );
+  assert(contentHitFormatLabel("pdf") === "PDF", "C: PDF hit format label");
+  assert(contentHitFormatLabel("docx") === "DOCX", "D: DOCX hit format label");
+  assert(contentHitFormatLabel("xlsx") === null, "N: XLSX is not shown as a supported hit format");
+  assert(
+    mixedHits.map((entry) => contentHitFormatLabel(entry.format)).join(",") === "PDF,DOCX",
+    "E: PDF and DOCX labels appear in the same hit list order",
+  );
+  assert(
+    mixedHits.map((entry) => entry.name).join(",") === "a.pdf,brief.docx",
+    "F: format labels do not reorder hits",
+  );
+  assert(
+    formatContentHitSummary({
+      hasResult: true,
+      filterActive: false,
+      visibleCount: 2,
+      totalHitCount: 2,
+      returnedHitCount: 2,
+    }) === "2 Treffer",
+    "G: mixed hit count stays format-neutral",
+  );
+  assert(
+    visibleContentHits(mixedHits, collectNodeIds(pdfView)).length === 1 &&
+      visibleContentHits(mixedHits, collectNodeIds(docxView)).length === 1,
+    "H: format badge is not a viewRoot filter",
+  );
+
   const filterStatus = emptyContentStatus({
     hasResult: true,
     cacheComplete: true,
-    totalPdfCount: 2,
-    processedPdfCount: 2,
+    totalDocumentCount: 2,
+    processedDocumentCount: 2,
     visibleCount: 0,
     totalHitCount: 84,
     filterActive: true,
@@ -178,8 +250,8 @@ export function runP1e1Check(): void {
     scanId: 3,
     query: "alt",
     cacheComplete: true,
-    processedPdfCount: 2,
-    totalPdfCount: 2,
+    processedDocumentCount: 2,
+    totalDocumentCount: 2,
     totalHitCount: 2,
     returnedHitCount: 2,
     hits,
@@ -191,23 +263,52 @@ export function runP1e1Check(): void {
   });
   assert(stale === CONTENT_STALE_SNAPSHOT_MESSAGE, "T: stale snapshot wording");
 
-  const noPdfs = emptyContentStatus({
+  const noDocuments = emptyContentStatus({
     hasResult: true,
     cacheComplete: true,
-    totalPdfCount: 0,
-    processedPdfCount: 0,
+    totalDocumentCount: 0,
+    processedDocumentCount: 0,
     visibleCount: 0,
     totalHitCount: 0,
     filterActive: false,
     noTextCount: 0,
     problemCount: 0,
   });
-  assert(noPdfs === CONTENT_NO_PDFS_MESSAGE, "U: zero PDFs");
+  assert(
+    noDocuments === `${CONTENT_NO_DOCUMENTS_MESSAGE}\n${CONTENT_SUPPORTED_FORMATS_HINT}`,
+    "U: zero documents",
+  );
+  assert(
+    noDocuments !== null &&
+      noDocuments.includes("keine durchsuchbaren Dokumente") &&
+      noDocuments.includes("PDF- und Word-Dateien (.docx)") &&
+      !noDocuments.includes("keine PDF-Dateien") &&
+      !noDocuments.toLocaleLowerCase().includes("xlsx") &&
+      !noDocuments.toLocaleLowerCase().includes("excel"),
+    "M/N: empty stock is document-neutral and names PDF + Word (.docx)",
+  );
+  const onlyDocxPrepared = emptyContentStatus({
+    hasResult: true,
+    cacheComplete: true,
+    totalDocumentCount: 1,
+    processedDocumentCount: 1,
+    visibleCount: 0,
+    totalHitCount: 0,
+    filterActive: false,
+    noTextCount: 0,
+    problemCount: 1,
+  });
+  assert(
+    onlyDocxPrepared !== CONTENT_NO_DOCUMENTS_MESSAGE &&
+      onlyDocxPrepared !== null &&
+      onlyDocxPrepared.includes("1 Dokumente konnten nicht durchsucht werden."),
+    "docx-only prepared stock is not treated as empty",
+  );
   const partialNone = emptyContentStatus({
     hasResult: true,
     cacheComplete: false,
-    totalPdfCount: 800,
-    processedPdfCount: 142,
+    totalDocumentCount: 800,
+    processedDocumentCount: 142,
     visibleCount: 0,
     totalHitCount: 0,
     filterActive: false,
@@ -218,8 +319,8 @@ export function runP1e1Check(): void {
   const completeNone = emptyContentStatus({
     hasResult: true,
     cacheComplete: true,
-    totalPdfCount: 20,
-    processedPdfCount: 20,
+    totalDocumentCount: 20,
+    processedDocumentCount: 20,
     visibleCount: 0,
     totalHitCount: 0,
     filterActive: false,
@@ -229,8 +330,8 @@ export function runP1e1Check(): void {
   assert(
     completeNone !== null &&
       completeNone.includes("Keine Treffer gefunden.") &&
-      completeNone.includes("18 PDFs ohne durchsuchbaren Text.") &&
-      completeNone.includes("3 PDFs konnten nicht durchsucht werden."),
+      completeNone.includes("18 Dokumente ohne durchsuchbaren Text.") &&
+      completeNone.includes("3 Dokumente konnten nicht durchsucht werden."),
     "no-hit extras",
   );
 
@@ -239,8 +340,8 @@ export function runP1e1Check(): void {
   assert(hitFolderLabel("C:\\root\\DOKUMENTE\\Angebot.pdf", "Angebot.pdf") === "C:\\root\\DOKUMENTE", "folder label");
   assert(isProgressForContent(7, {
     scanId: 7,
-    totalPdfCount: 1,
-    processedPdfCount: 1,
+    totalDocumentCount: 1,
+    processedDocumentCount: 1,
     searchableCount: 1,
     noTextCount: 0,
     problemCount: 0,
@@ -249,8 +350,8 @@ export function runP1e1Check(): void {
   }), "progress belongs to scan");
   assert(!isProgressForContent(7, {
     scanId: 8,
-    totalPdfCount: 1,
-    processedPdfCount: 1,
+    totalDocumentCount: 1,
+    processedDocumentCount: 1,
     searchableCount: 0,
     noTextCount: 0,
     problemCount: 0,
@@ -283,4 +384,5 @@ export function runP1e1Check(): void {
     }),
     "O: preparing disables open",
   );
+  assert(formatPrepareCounts(142, 800) !== "142 von 800 PDFs", "L: no leftover PDF count wording");
 }

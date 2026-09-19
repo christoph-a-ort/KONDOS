@@ -2,6 +2,7 @@ use std::io;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 
+use super::docx::extract_docx_text;
 use super::format::content_format_from_name;
 use super::{ContentEntry, ContentFormat, ContentStatus};
 
@@ -40,38 +41,70 @@ fn extract_named_path(path: &Path, path_str: String, name: String) -> ContentEnt
     let metadata = match std::fs::metadata(path) {
         Ok(metadata) => metadata,
         Err(err) => {
-            return status_entry(path_str, name, format, content_status_from_io(&err));
+            return status_entry(
+                path_str,
+                name,
+                resolved_content_format(format),
+                content_status_from_io(&err),
+            );
         }
     };
     if metadata.is_dir() {
-        return status_entry(path_str, name, format, ContentStatus::IoError);
+        return status_entry(
+            path_str,
+            name,
+            resolved_content_format(format),
+            ContentStatus::IoError,
+        );
     }
     if file_exceeds_size_limit(metadata.len()) {
-        return status_entry(path_str, name, format, ContentStatus::TooLarge);
+        return status_entry(
+            path_str,
+            name,
+            resolved_content_format(format),
+            ContentStatus::TooLarge,
+        );
     }
 
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(err) => {
-            return status_entry(path_str, name, format, content_status_from_io(&err));
+            return status_entry(
+                path_str,
+                name,
+                resolved_content_format(format),
+                content_status_from_io(&err),
+            );
         }
     };
     if file_exceeds_size_limit(bytes.len() as u64) {
-        return status_entry(path_str, name, format, ContentStatus::TooLarge);
+        return status_entry(
+            path_str,
+            name,
+            resolved_content_format(format),
+            ContentStatus::TooLarge,
+        );
     }
 
     match format {
         Some(ContentFormat::Pdf) => extract_pdf_bytes(path_str, name, &bytes),
-        Some(ContentFormat::Docx) | Some(ContentFormat::Xlsx) | None => {
-            status_entry(path_str, name, format, ContentStatus::ParseError)
+        Some(ContentFormat::Docx) => match catch_parser_unwind(|| extract_docx_text(&bytes)) {
+            Ok(raw) => entry_from_extracted_text(path_str, name, ContentFormat::Docx, raw),
+            Err(status) => status_entry(path_str, name, ContentFormat::Docx, status),
+        },
+        Some(ContentFormat::Xlsx) => {
+            status_entry(path_str, name, ContentFormat::Xlsx, ContentStatus::ParseError)
         }
+        // Unbekannte Endungen werden nicht gesammelt. ContentEntry.format ist kein Option;
+        // ohne neue Enum-Variante bleibt Pdf nur dieser direkte extract_path-Fallback.
+        None => status_entry(path_str, name, ContentFormat::Pdf, ContentStatus::ParseError),
     }
 }
 
 fn extract_pdf_bytes(path: String, name: String, bytes: &[u8]) -> ContentEntry {
     match run_pdf_extract(bytes) {
-        Ok(raw) => entry_from_extracted_text(path, name, raw),
-        Err(status) => status_entry(path, name, Some(ContentFormat::Pdf), status),
+        Ok(raw) => entry_from_extracted_text(path, name, ContentFormat::Pdf, raw),
+        Err(status) => status_entry(path, name, ContentFormat::Pdf, status),
     }
 }
 
@@ -150,17 +183,26 @@ fn looks_protected_message(msg: &str) -> bool {
 }
 
 /// `extracted_chars` ist die Zeichenzahl des rohen Parser-Textes vor der Byte-Kappung.
-fn entry_from_extracted_text(path: String, name: String, raw: String) -> ContentEntry {
+fn entry_from_extracted_text(
+    path: String,
+    name: String,
+    format: ContentFormat,
+    raw: String,
+) -> ContentEntry {
     let body = finalize_extracted_text(raw);
     ContentEntry {
         path,
         name,
-        format: ContentFormat::Pdf,
+        format,
         status: body.status,
         text: body.text,
         extracted_chars: body.extracted_chars,
         truncated: body.truncated,
     }
+}
+
+fn resolved_content_format(format: Option<ContentFormat>) -> ContentFormat {
+    format.unwrap_or(ContentFormat::Pdf)
 }
 
 struct FinalizedText {
@@ -208,13 +250,13 @@ fn truncate_utf8_bytes(raw: String, max_bytes: usize) -> (String, bool) {
 fn status_entry(
     path: String,
     name: String,
-    format: Option<ContentFormat>,
+    format: ContentFormat,
     status: ContentStatus,
 ) -> ContentEntry {
     ContentEntry {
         path,
         name,
-        format: format.unwrap_or(ContentFormat::Pdf),
+        format,
         status,
         text: None,
         extracted_chars: 0,
@@ -486,6 +528,24 @@ mod tests {
         let _ = fs::remove_file(&path);
         assert_eq!(entry.status, ContentStatus::ParseError);
         assert_eq!(entry.format, crate::content::ContentFormat::Docx);
+        assert_eq!(entry.text, None);
+    }
+
+    #[test]
+    fn unimplemented_xlsx_keeps_xlsx_format() {
+        let path = std::env::temp_dir().join(format!(
+            "kondos-e21-{}-{}.xlsx",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::write(&path, text_pdf("soll nicht als PDF gelesen werden")).expect("xlsx bytes");
+        let entry = extract_path(&path);
+        let _ = fs::remove_file(&path);
+        assert_eq!(entry.status, ContentStatus::ParseError);
+        assert_eq!(entry.format, crate::content::ContentFormat::Xlsx);
         assert_eq!(entry.text, None);
     }
 
