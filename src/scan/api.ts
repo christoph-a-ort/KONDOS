@@ -3,7 +3,10 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
 import {
+  CONTENT_PROGRESS_EVENT,
   SCAN_PROGRESS_EVENT,
+  type ContentProgress,
+  type ContentSearchResult,
   type ExportFormat,
   type ScanConfig,
   type ScanProgress,
@@ -57,6 +60,10 @@ export function openInExplorer(path: string, directory: boolean): Promise<void> 
   return invoke("open_in_explorer", { path, directory });
 }
 
+export function openWithDefault(scanId: number, nodeId: string): Promise<void> {
+  return invoke("open_with_default", { scanId, nodeId });
+}
+
 export function suggestExportFilename(format: ExportFormat, scanId: number): Promise<string> {
   return invoke<string>("suggest_export_filename", { format, scanId });
 }
@@ -67,6 +74,26 @@ export function subscribeScanProgress(
   return listen<ScanProgress>(SCAN_PROGRESS_EVENT, (event) => {
     handler(event.payload);
   });
+}
+
+export function startPrepareContent(scanId: number): Promise<ContentProgress> {
+  return invoke<ContentProgress>("start_prepare_content", { scanId });
+}
+
+export function cancelPrepareContent(scanId: number): Promise<void> {
+  return invoke("cancel_prepare_content", { scanId });
+}
+
+export function subscribeContentProgress(
+  handler: (progress: ContentProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<ContentProgress>(CONTENT_PROGRESS_EVENT, (event) => {
+    handler(event.payload);
+  });
+}
+
+export function searchFileContent(scanId: number, query: string): Promise<ContentSearchResult> {
+  return invoke<ContentSearchResult>("search_file_content", { scanId, query });
 }
 
 export async function pickExportPath(

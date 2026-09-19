@@ -1,12 +1,17 @@
 export {
+  cancelPrepareContent,
   cancelScan,
   classifyScanRoot,
   copyExport,
   openInExplorer,
+  openWithDefault,
   pickDirectory,
   pickExportPath,
   saveExport,
+  searchFileContent,
+  startPrepareContent,
   startScan,
+  subscribeContentProgress,
   subscribeScanProgress,
   suggestExportFilename,
 } from "./api";

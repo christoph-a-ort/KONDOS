@@ -3,6 +3,7 @@ export const MAX_DEPTH = 8;
 export const DEFAULT_DEPTH = 8;
 
 export const SCAN_PROGRESS_EVENT = "scan://progress";
+export const CONTENT_PROGRESS_EVENT = "content://progress";
 
 export type NodeKind = "file" | "directory";
 
@@ -102,3 +103,46 @@ export interface AppError {
 }
 
 export type ExportFormat = "txt" | "json" | "csv";
+
+export type ContentPrepareStatus = "running" | "completed" | "cancelled" | "failed";
+
+export type ContentFormat = "pdf" | "docx" | "xlsx";
+
+/** Inclusive `start`, exclusive `end`, UTF-16 code units of `snippet` (JS `substring`). */
+export interface HighlightRange {
+  start: number;
+  end: number;
+}
+
+export interface ContentSearchHit {
+  nodeId: string;
+  path: string;
+  name: string;
+  format: ContentFormat;
+  /** Non-overlapping substring hits of all deduped terms, summed. Not a phrase count. */
+  matchCount: number;
+  snippet: string;
+  highlights: HighlightRange[];
+}
+
+export interface ContentSearchResult {
+  scanId: number;
+  query: string;
+  cacheComplete: boolean;
+  processedPdfCount: number;
+  totalPdfCount: number;
+  totalHitCount: number;
+  returnedHitCount: number;
+  hits: ContentSearchHit[];
+}
+
+export interface ContentProgress {
+  scanId: number;
+  totalPdfCount: number;
+  processedPdfCount: number;
+  searchableCount: number;
+  noTextCount: number;
+  problemCount: number;
+  currentFileName: string;
+  status: ContentPrepareStatus;
+}

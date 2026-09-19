@@ -1,4 +1,5 @@
 mod commands;
+mod content;
 mod error;
 mod export;
 mod filter;
@@ -7,7 +8,8 @@ mod scan;
 mod state;
 
 use commands::{
-    cancel_scan, classify_scan_root, copy_export, open_in_explorer, save_export, start_scan,
+    cancel_prepare_content, cancel_scan, classify_scan_root, copy_export, open_in_explorer,
+    open_with_default, save_export, search_file_content, start_prepare_content, start_scan,
     suggest_export_filename,
 };
 use state::AppState;
@@ -21,7 +23,7 @@ pub fn run() {
         .manage(AppState::new())
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                if window.state::<AppState>().is_exporting() {
+                if window.state::<AppState>().is_close_blocked() {
                     api.prevent_close();
                 }
             }
@@ -33,7 +35,11 @@ pub fn run() {
             save_export,
             copy_export,
             suggest_export_filename,
-            open_in_explorer
+            open_in_explorer,
+            open_with_default,
+            start_prepare_content,
+            cancel_prepare_content,
+            search_file_content
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

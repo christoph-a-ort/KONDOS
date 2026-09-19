@@ -1,6 +1,7 @@
 import { createDefaultScanConfig, isDirectory, type DirectoryNode, type FileNode, type FsNode } from "../model";
 import { runP1cCheck } from "./p1cCheck";
 import { runP1dCheck } from "./p1dCheck";
+import { runP1e1Check } from "./contentSearchCheck";
 import { shouldClearScanResultOnError } from "../scan";
 import {
   DEFAULT_COLUMN_VISIBILITY,
@@ -287,6 +288,7 @@ export function runTreeWorkbenchCheck(): void {
   runTreeSearchCheck(nested);
   runP1cCheck();
   runP1dCheck();
+  runP1e1Check();
 }
 
 function runTreeSearchCheck(nested: DirectoryNode): void {

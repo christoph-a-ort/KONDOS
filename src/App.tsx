@@ -72,6 +72,7 @@ function App() {
   const [columnWidths, setColumnWidths] = useState<ColumnWidths>(() => initialPrefs.columnWidths);
   const [treeSort, setTreeSort] = useState<TreeSort>(() => initialPrefs.sort);
   const [exportBusy, setExportBusy] = useState(false);
+  const [preparingContent, setPreparingContent] = useState(false);
   const [dropActive, setDropActive] = useState(false);
   const [appliedExtensions, setAppliedExtensions] = useState<string[]>([]);
   const scanLockRef = useRef(false);
@@ -79,6 +80,7 @@ function App() {
   const activeScanIdRef = useRef<number | null>(null);
   const scanningRef = useRef(false);
   const exportBusyRef = useRef(false);
+  const preparingContentRef = useRef(false);
   const configRef = useRef(config);
   const extensionInputRef = useRef(extensionInput);
   const resultRef = useRef(result);
@@ -87,6 +89,7 @@ function App() {
 
   scanningRef.current = scanning;
   exportBusyRef.current = exportBusy;
+  preparingContentRef.current = preparingContent;
   configRef.current = config;
   extensionInputRef.current = extensionInput;
   resultRef.current = result;
@@ -112,7 +115,11 @@ function App() {
           return;
         }
 
-        const busy = scanningRef.current || exportBusyRef.current || scanLockRef.current;
+        const busy =
+          scanningRef.current ||
+          exportBusyRef.current ||
+          preparingContentRef.current ||
+          scanLockRef.current;
         if (event.payload.type === "enter" || event.payload.type === "over") {
           setDropActive(!busy);
           return;
@@ -137,10 +144,17 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (scanning || exportBusy) {
+    if (scanning || exportBusy || preparingContent) {
       setDropActive(false);
     }
-  }, [scanning, exportBusy]);
+  }, [scanning, exportBusy, preparingContent]);
+
+  useEffect(() => {
+    if (result === null) {
+      preparingContentRef.current = false;
+      setPreparingContent(false);
+    }
+  }, [result]);
 
   useEffect(() => {
     saveWorkbenchPrefs(
@@ -175,8 +189,18 @@ function App() {
     }
   }
 
+  function handlePreparingContentChange(busy: boolean) {
+    preparingContentRef.current = busy;
+    setPreparingContent(busy);
+  }
+
   async function handleStartScan(rootPathOverride?: string) {
-    if (scanLockRef.current || exportBusyRef.current || scanningRef.current) {
+    if (
+      scanLockRef.current ||
+      exportBusyRef.current ||
+      scanningRef.current ||
+      preparingContentRef.current
+    ) {
       return;
     }
     const rootPath = rootPathOverride ?? configRef.current.rootPath;
@@ -266,7 +290,12 @@ function App() {
   }
 
   async function handleDroppedPaths(paths: string[]) {
-    if (scanningRef.current || exportBusyRef.current || scanLockRef.current) {
+    if (
+      scanningRef.current ||
+      exportBusyRef.current ||
+      preparingContentRef.current ||
+      scanLockRef.current
+    ) {
       return;
     }
 
@@ -278,7 +307,12 @@ function App() {
 
     try {
       const kind = await classifyScanRoot(decision.path);
-      if (scanningRef.current || exportBusyRef.current || scanLockRef.current) {
+      if (
+        scanningRef.current ||
+        exportBusyRef.current ||
+        preparingContentRef.current ||
+        scanLockRef.current
+      ) {
         return;
       }
       if (kind !== "directory") {
@@ -287,7 +321,12 @@ function App() {
       }
       await handleStartScan(decision.path);
     } catch (cause) {
-      if (scanningRef.current || exportBusyRef.current || scanLockRef.current) {
+      if (
+        scanningRef.current ||
+        exportBusyRef.current ||
+        preparingContentRef.current ||
+        scanLockRef.current
+      ) {
         return;
       }
       setError(toUserError(cause));
@@ -311,7 +350,7 @@ function App() {
   }
 
   async function handleCopy() {
-    if (result === null || resultScanId === null) {
+    if (result === null || resultScanId === null || preparingContentRef.current) {
       return;
     }
     setExportBusy(true);
@@ -335,7 +374,7 @@ function App() {
   }
 
   async function handleSave() {
-    if (result === null || resultScanId === null) {
+    if (result === null || resultScanId === null || preparingContentRef.current) {
       return;
     }
     setExportBusy(true);
@@ -394,7 +433,7 @@ function App() {
             config={config}
             extensionInput={extensionInput}
             scanning={scanning}
-            locked={exportBusy}
+            locked={exportBusy || preparingContent}
             onConfigChange={setConfig}
             onExtensionInputChange={setExtensionInput}
             onPickDirectory={() => {
@@ -410,7 +449,7 @@ function App() {
           <ProgressPanel scanning={scanning} progress={progress} />
           <ExportPanel
             format={exportFormat}
-            disabled={result === null || resultScanId === null || scanning}
+            disabled={result === null || resultScanId === null || scanning || preparingContent}
             busy={exportBusy}
             onFormatChange={setExportFormat}
             onCopy={() => {
@@ -423,7 +462,9 @@ function App() {
         </aside>
         <TreeView
           result={result}
+          resultScanId={resultScanId}
           scanning={scanning}
+          exportBusy={exportBusy}
           appliedExtensions={appliedExtensions}
           sort={treeSort}
           visibility={columnVisibility}
@@ -433,6 +474,7 @@ function App() {
           onVisibilityChange={setColumnVisibility}
           onWidthsChange={setColumnWidths}
           onScanFromHere={handleUseAsScanRoot}
+          onPreparingContentChange={handlePreparingContentChange}
         />
       </div>
     </div>

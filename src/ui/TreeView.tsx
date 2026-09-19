@@ -1,8 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type UIEvent } from "react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
-import { isDirectory, type FsNode, type ScanResult, type ScanWarning } from "../model";
-import { openInExplorer, toUserError } from "../scan";
+import { ContentSearchResults } from "./ContentSearchResults";
+import {
+  CONTENT_SEARCH_PLACEHOLDER,
+  DEFAULT_SEARCH_MODE,
+  NAME_SEARCH_PLACEHOLDER,
+  type SearchMode,
+} from "./contentSearch";
+import { useContentSearch } from "./useContentSearch";
+import { canOpenWithDefault, FILE_OPEN_LABEL, isOccupancyIdle } from "./fileOpen";
+import { isDirectory, isFile, type FsNode, type ScanResult, type ScanWarning } from "../model";
+import { openInExplorer, openWithDefault, toUserError } from "../scan";
 import {
   applyColumnResizeDelta,
   beginColumnResize,
@@ -68,7 +77,9 @@ import {
 
 interface TreeViewProps {
   result: ScanResult | null;
+  resultScanId: number | null;
   scanning: boolean;
+  exportBusy: boolean;
   appliedExtensions: string[];
   sort: TreeSort;
   visibility: ColumnVisibility;
@@ -78,11 +89,14 @@ interface TreeViewProps {
   onVisibilityChange: (visibility: ColumnVisibility) => void;
   onWidthsChange: (widths: ColumnWidths) => void;
   onScanFromHere: (path: string) => void;
+  onPreparingContentChange: (busy: boolean) => void;
 }
 
 export function TreeView({
   result,
+  resultScanId,
   scanning,
+  exportBusy,
   appliedExtensions,
   sort,
   visibility,
@@ -92,6 +106,7 @@ export function TreeView({
   onVisibilityChange,
   onWidthsChange,
   onScanFromHere,
+  onPreparingContentChange,
 }: TreeViewProps) {
   if (result === null) {
     return (
@@ -106,10 +121,14 @@ export function TreeView({
           </button>
         </div>
         <TreeSearchBar
+          mode={DEFAULT_SEARCH_MODE}
           query=""
+          placeholder={NAME_SEARCH_PLACEHOLDER}
           countLabel={null}
           canNavigate={false}
           disabled
+          modeDisabled
+          onModeChange={() => {}}
           onQueryChange={() => {}}
           onPrevious={() => {}}
           onNext={() => {}}
@@ -120,10 +139,12 @@ export function TreeView({
         <TreePathBar
           path={null}
           hasSelection={false}
+          canOpenFile={false}
           canScanFromHere={false}
           disabled
           notice={null}
           noticeKind={null}
+          onOpenFile={() => {}}
           onCopy={() => {}}
           onOpen={() => {}}
           onScanFromHere={() => {}}
@@ -136,7 +157,9 @@ export function TreeView({
   return (
     <PopulatedTreeView
       result={result}
+      resultScanId={resultScanId}
       scanning={scanning}
+      exportBusy={exportBusy}
       appliedExtensions={appliedExtensions}
       sort={sort}
       visibility={visibility}
@@ -146,13 +169,16 @@ export function TreeView({
       onVisibilityChange={onVisibilityChange}
       onWidthsChange={onWidthsChange}
       onScanFromHere={onScanFromHere}
+      onPreparingContentChange={onPreparingContentChange}
     />
   );
 }
 
 interface PopulatedTreeViewProps {
   result: ScanResult;
+  resultScanId: number | null;
   scanning: boolean;
+  exportBusy: boolean;
   appliedExtensions: string[];
   sort: TreeSort;
   visibility: ColumnVisibility;
@@ -162,11 +188,14 @@ interface PopulatedTreeViewProps {
   onVisibilityChange: (visibility: ColumnVisibility) => void;
   onWidthsChange: (widths: ColumnWidths) => void;
   onScanFromHere: (path: string) => void;
+  onPreparingContentChange: (busy: boolean) => void;
 }
 
 function PopulatedTreeView({
   result,
+  resultScanId,
   scanning,
+  exportBusy,
   appliedExtensions,
   sort,
   visibility,
@@ -176,6 +205,7 @@ function PopulatedTreeView({
   onVisibilityChange,
   onWidthsChange,
   onScanFromHere,
+  onPreparingContentChange,
 }: PopulatedTreeViewProps) {
   const [expandedIds, setExpandedIds] = useState(() => defaultExpandedIds(result.root.id));
   const [activeResult, setActiveResult] = useState(result);
@@ -186,6 +216,7 @@ function PopulatedTreeView({
   const [menuOpen, setMenuOpen] = useState(false);
   const [nameAutoFill, setNameAutoFill] = useState(!preferStoredWidths);
   const [searchQuery, setSearchQuery] = useState(emptySearchQuery);
+  const [searchMode, setSearchMode] = useState<SearchMode>(DEFAULT_SEARCH_MODE);
   const [pinnedMatchId, setPinnedMatchId] = useState<string | null>(null);
   const [searchJumped, setSearchJumped] = useState(false);
   const [pathNotice, setPathNotice] = useState<string | null>(null);
@@ -198,6 +229,7 @@ function PopulatedTreeView({
   const [warningOfferReset, setWarningOfferReset] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const pendingRevealRef = useRef<string | null>(null);
+  const openInFlightRef = useRef(false);
   const pathNoticeTimerRef = useRef<number | null>(null);
   const widthsRef = useRef(widths);
   const nameAutoFillRef = useRef(nameAutoFill);
@@ -211,6 +243,7 @@ function PopulatedTreeView({
     setScrollTop(0);
     setMenuOpen(false);
     setSearchQuery(emptySearchQuery());
+    setSearchMode(DEFAULT_SEARCH_MODE);
     setPinnedMatchId(null);
     setSearchJumped(false);
     setPathNotice(null);
@@ -244,6 +277,12 @@ function PopulatedTreeView({
   const viewRoot = displayView.tree;
   const filterEmpty = displayView.constrained && displayView.fileMatchCount === 0;
   const filterSummary = appliedFilter === null ? null : formatActiveFilterSummary(appliedFilter, extensionOptions);
+  const contentSearch = useContentSearch({
+    scanId: resultScanId,
+    viewRoot,
+    appliedFilter,
+    onPreparingChange: onPreparingContentChange,
+  });
   const rows = useMemo(
     () => (viewRoot === null ? [] : deriveVisibleRows(viewRoot, expandedIds, sort)),
     [viewRoot, expandedIds, sort],
@@ -252,12 +291,27 @@ function PopulatedTreeView({
     () => (viewRoot === null ? [] : collectMatchIds(viewRoot, searchQuery, sort)),
     [viewRoot, searchQuery, sort],
   );
-  const matchIdSet = useMemo(() => createMatchIdSet(matchIds), [matchIds]);
+  const nameMatchIdSet = useMemo(() => createMatchIdSet(matchIds), [matchIds]);
+  const contentMatchIdSet = useMemo(
+    () => createMatchIdSet(contentSearch.visibleHits.map((hit) => hit.nodeId)),
+    [contentSearch.visibleHits],
+  );
+  const matchIdSet = searchMode === "content" ? contentMatchIdSet : nameMatchIdSet;
   const currentMatchIndex = matchIndexAfterReorder(matchIds, pinnedMatchId);
-  const currentMatchId =
+  const currentNameMatchId =
     searchJumped && currentMatchIndex >= 0 ? matchIds[currentMatchIndex] : undefined;
-  const searchLabel = searchCountLabel(searchQuery, matchIds.length, currentMatchIndex);
-  const canNavigateMatches = matchIds.length > 0;
+  const currentMatchId =
+    searchMode === "content"
+      ? contentSearch.jumped
+        ? (contentSearch.activeNodeId ?? undefined)
+        : undefined
+      : currentNameMatchId;
+  const searchLabel =
+    searchMode === "content"
+      ? contentSearch.countLabel
+      : searchCountLabel(searchQuery, matchIds.length, currentMatchIndex);
+  const canNavigateMatches =
+    searchMode === "content" ? contentSearch.canNavigate : matchIds.length > 0;
   const viewWorkStats = useMemo(() => collectViewWorkStats(viewRoot), [viewRoot]);
   const detailModel = useMemo(
     () => buildNodeDetails(result.root, selectedId, result.warnings, appliedExtensions.length > 0),
@@ -321,6 +375,16 @@ function PopulatedTreeView({
   const selectedNode =
     selectedId === null || viewRoot === null ? undefined : findNodeById(viewRoot, selectedId);
   const selectedPath = selectedNode?.path;
+  const occupancyIdle = isOccupancyIdle({
+    scanning,
+    exportBusy,
+    preparingContent: contentSearch.preparing,
+  });
+  const canOpenFile = canOpenWithDefault({
+    hasCurrentScan: resultScanId !== null,
+    isFileSelected: selectedNode !== undefined && isFile(selectedNode),
+    occupancyIdle,
+  });
 
   function scrollRowIntoView(id: string, nextRows: VisibleTreeRow[] = rows) {
     const index = rowIndexById(nextRows, id);
@@ -379,6 +443,10 @@ function PopulatedTreeView({
   function handleRowDoubleClick(row: VisibleTreeRow) {
     if (row.expandable) {
       toggleExpanded(row.id);
+      return;
+    }
+    if (!row.directory) {
+      void openFileByNodeId(row.id);
     }
   }
 
@@ -470,6 +538,10 @@ function PopulatedTreeView({
     }
     setPinnedMatchId(id);
     setSearchJumped(true);
+    revealTreeNode(id);
+  }
+
+  function revealTreeNode(id: string) {
     setExpandedIds((current) =>
       withAncestorsExpanded(current, ancestorDirectoryIds(viewRoot ?? result.root, id)),
     );
@@ -478,10 +550,24 @@ function PopulatedTreeView({
   }
 
   function handleNextMatch() {
+    if (searchMode === "content") {
+      const id = contentSearch.stepHit("next");
+      if (id !== null) {
+        revealTreeNode(id);
+      }
+      return;
+    }
     revealMatchAt(nextMatchIndex(currentMatchIndex, matchIds.length, searchJumped));
   }
 
   function handlePreviousMatch() {
+    if (searchMode === "content") {
+      const id = contentSearch.stepHit("prev");
+      if (id !== null) {
+        revealTreeNode(id);
+      }
+      return;
+    }
     revealMatchAt(previousMatchIndex(currentMatchIndex, matchIds.length, searchJumped));
   }
 
@@ -500,6 +586,13 @@ function PopulatedTreeView({
   function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     event.stopPropagation();
     if (event.key === "Escape") {
+      if (searchMode === "content") {
+        if (contentSearch.query.length > 0 || contentSearch.result !== null) {
+          event.preventDefault();
+          contentSearch.clearQueryAndHits();
+        }
+        return;
+      }
       if (searchQuery.length > 0) {
         event.preventDefault();
         handleSearchChange(emptySearchQuery());
@@ -508,11 +601,47 @@ function PopulatedTreeView({
     }
     if (event.key === "Enter") {
       event.preventDefault();
+      if (searchMode === "content") {
+        void contentSearch.runContentSearch();
+        return;
+      }
       if (event.shiftKey) {
         handlePreviousMatch();
       } else {
         handleNextMatch();
       }
+    }
+  }
+
+  function handleActivateContentHit(nodeId: string) {
+    const id = contentSearch.activateHit(nodeId);
+    if (id !== null) {
+      revealTreeNode(id);
+    }
+  }
+
+  function handleOpenContentHit(nodeId: string) {
+    handleActivateContentHit(nodeId);
+    void openFileByNodeId(nodeId);
+  }
+
+  async function openFileByNodeId(nodeId: string) {
+    if (openInFlightRef.current || resultScanId === null || !occupancyIdle) {
+      return;
+    }
+    const node = findNodeById(result.root, nodeId);
+    if (node === undefined || !isFile(node)) {
+      return;
+    }
+    openInFlightRef.current = true;
+    try {
+      await openWithDefault(resultScanId, nodeId);
+      setPathNotice(null);
+      setPathNoticeKind(null);
+    } catch (cause) {
+      showPathNotice(toUserError(cause), "error");
+    } finally {
+      openInFlightRef.current = false;
     }
   }
 
@@ -786,15 +915,45 @@ function PopulatedTreeView({
         </div>
       </details>
       <TreeSearchBar
-        query={searchQuery}
+        mode={searchMode}
+        query={searchMode === "content" ? contentSearch.query : searchQuery}
+        placeholder={searchMode === "content" ? CONTENT_SEARCH_PLACEHOLDER : NAME_SEARCH_PLACEHOLDER}
         countLabel={searchLabel}
         canNavigate={canNavigateMatches}
         disabled={false}
-        onQueryChange={handleSearchChange}
+        modeDisabled={false}
+        searchDisabled={false}
+        onModeChange={setSearchMode}
+        onQueryChange={(value) => {
+          if (searchMode === "content") {
+            contentSearch.handleQueryChange(value);
+          } else {
+            handleSearchChange(value);
+          }
+        }}
         onPrevious={handlePreviousMatch}
         onNext={handleNextMatch}
         onKeyDown={handleSearchKeyDown}
       />
+      {searchMode === "content" || contentSearch.preparing ? (
+        <ContentSearchResults
+          preparing={contentSearch.preparing}
+          progress={contentSearch.progress}
+          notice={searchMode === "content" ? contentSearch.notice : null}
+          emptyStatus={searchMode === "content" ? contentSearch.emptyStatus : null}
+          summary={searchMode === "content" ? contentSearch.summary : null}
+          hits={searchMode === "content" ? contentSearch.visibleHits : []}
+          activeNodeId={
+            searchMode === "content" && contentSearch.jumped ? contentSearch.activeNodeId : null
+          }
+          prepareDisabled={false}
+          onCancelPrepare={() => {
+            void contentSearch.cancelPrepare();
+          }}
+          onActivateHit={handleActivateContentHit}
+          onOpenHit={handleOpenContentHit}
+        />
+      ) : null}
       <div
         className="tree-viewport"
         ref={viewportRef}
@@ -936,10 +1095,16 @@ function PopulatedTreeView({
       <TreePathBar
         path={selectedPath ?? null}
         hasSelection={selectedNode !== undefined}
-        canScanFromHere={canScanFromHere(selectedNode) && !scanning}
+        canOpenFile={canOpenFile}
+        canScanFromHere={canScanFromHere(selectedNode) && !scanning && !contentSearch.preparing}
         disabled={false}
         notice={pathNotice}
         noticeKind={pathNoticeKind}
+        onOpenFile={() => {
+          if (selectedId !== null) {
+            void openFileByNodeId(selectedId);
+          }
+        }}
         onCopy={() => {
           void handleCopyPath();
         }}
@@ -1131,10 +1296,15 @@ function cellValue(node: FsNode, column: ColumnId, directory: boolean): ReactNod
 }
 
 interface TreeSearchBarProps {
+  mode: SearchMode;
   query: string;
+  placeholder: string;
   countLabel: string | null;
   canNavigate: boolean;
   disabled: boolean;
+  modeDisabled?: boolean;
+  searchDisabled?: boolean;
+  onModeChange: (mode: SearchMode) => void;
   onQueryChange: (value: string) => void;
   onPrevious: () => void;
   onNext: () => void;
@@ -1142,33 +1312,57 @@ interface TreeSearchBarProps {
 }
 
 function TreeSearchBar({
+  mode,
   query,
+  placeholder,
   countLabel,
   canNavigate,
   disabled,
+  modeDisabled = false,
+  searchDisabled = false,
+  onModeChange,
   onQueryChange,
   onPrevious,
   onNext,
   onKeyDown,
 }: TreeSearchBarProps) {
+  const inputDisabled = disabled || searchDisabled;
   return (
     <div className="tree-search-row">
+      <div className="search-mode-toggle" role="group" aria-label="Suchmodus">
+        <button
+          type="button"
+          aria-pressed={mode === "name"}
+          disabled={disabled || modeDisabled}
+          onClick={() => onModeChange("name")}
+        >
+          Dateiname
+        </button>
+        <button
+          type="button"
+          aria-pressed={mode === "content"}
+          disabled={disabled || modeDisabled}
+          onClick={() => onModeChange("content")}
+        >
+          Dateiinhalt
+        </button>
+      </div>
       <input
         type="search"
         className="tree-search-input"
-        placeholder="Suchen …"
+        placeholder={placeholder}
         value={query}
-        disabled={disabled}
+        disabled={inputDisabled}
         autoComplete="off"
         spellCheck={false}
         onChange={(event) => onQueryChange(event.target.value)}
         onKeyDown={onKeyDown}
-        aria-label="Im Ergebnis suchen"
+        aria-label={mode === "content" ? "In PDF-Inhalten suchen" : "Dateiname suchen"}
       />
       <button
         type="button"
         className="tree-search-nav"
-        disabled={disabled || !canNavigate}
+        disabled={inputDisabled || !canNavigate}
         onClick={onPrevious}
         aria-label="Vorheriger Treffer"
       >
@@ -1178,7 +1372,7 @@ function TreeSearchBar({
       <button
         type="button"
         className="tree-search-nav"
-        disabled={disabled || !canNavigate}
+        disabled={inputDisabled || !canNavigate}
         onClick={onNext}
         aria-label="Nächster Treffer"
       >
@@ -1191,10 +1385,12 @@ function TreeSearchBar({
 interface TreePathBarProps {
   path: string | null;
   hasSelection: boolean;
+  canOpenFile: boolean;
   canScanFromHere: boolean;
   disabled: boolean;
   notice: string | null;
   noticeKind: "ok" | "error" | null;
+  onOpenFile: () => void;
   onCopy: () => void;
   onOpen: () => void;
   onScanFromHere: () => void;
@@ -1203,16 +1399,24 @@ interface TreePathBarProps {
 function TreePathBar({
   path,
   hasSelection,
+  canOpenFile,
   canScanFromHere,
   disabled,
   notice,
   noticeKind,
+  onOpenFile,
   onCopy,
   onOpen,
   onScanFromHere,
 }: TreePathBarProps) {
   const actionsOff = disabled || !hasSelection;
+  const openFileOff = disabled || !canOpenFile;
   const scanFromHereOff = disabled || !canScanFromHere;
+  const openFileTitle = !hasSelection
+    ? "Zuerst eine Datei auswählen"
+    : !canOpenFile
+      ? "Nur für Dateien verfügbar, und nur wenn keine Analyse, kein Export und keine Inhaltsvorbereitung läuft."
+      : "Mit dem unter Windows zugeordneten Standardprogramm öffnen";
   const scanFromHereTitle = !hasSelection
     ? "Zuerst einen Ordner auswählen"
     : !canScanFromHere
@@ -1224,11 +1428,14 @@ function TreePathBar({
         Pfad: {path ?? "—"}
       </p>
       <div className="tree-path-actions">
-        <button type="button" disabled={actionsOff} onClick={onCopy}>
-          Pfad kopieren
+        <button type="button" disabled={openFileOff} title={openFileTitle} onClick={onOpenFile}>
+          {FILE_OPEN_LABEL}
         </button>
         <button type="button" disabled={actionsOff} onClick={onOpen}>
           Im Explorer öffnen
+        </button>
+        <button type="button" disabled={actionsOff} onClick={onCopy}>
+          Pfad kopieren
         </button>
         <button
           type="button"

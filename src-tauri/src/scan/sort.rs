@@ -36,6 +36,19 @@ fn node_path(node: &FsNode) -> &str {
     }
 }
 
+/// Dateiname Natural-Sort, Tie-Breaker Originalname, danach Pfad.
+/// Dieselbe Vergleichsbasis wie die Scanner-Kindersortierung, ohne Ordner-vor-Dateien.
+pub(crate) fn cmp_name_then_path(
+    left_name: &str,
+    left_path: &str,
+    right_name: &str,
+    right_path: &str,
+) -> Ordering {
+    natural_cmp(left_name, right_name)
+        .then_with(|| left_name.cmp(right_name))
+        .then_with(|| left_path.cmp(right_path))
+}
+
 fn natural_cmp(left: &str, right: &str) -> Ordering {
     let left_fold: String = left.chars().flat_map(char::to_lowercase).collect();
     let right_fold: String = right.chars().flat_map(char::to_lowercase).collect();

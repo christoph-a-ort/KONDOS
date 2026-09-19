@@ -99,6 +99,7 @@ header p,
 .tree-panel > .tree-toolbar,
 .tree-panel > .display-filter,
 .tree-panel > .tree-search-row,
+.tree-panel > .content-search-panel,
 .tree-panel > .tree-path,
 .tree-panel > .tree-path-row,
 .tree-panel > .tree-details,
@@ -209,6 +210,7 @@ button:disabled {
 .tree-panel > .tree-toolbar,
 .tree-panel > .display-filter,
 .tree-panel > .tree-search-row,
+.tree-panel > .content-search-panel,
 .tree-panel > .tree-path,
 .tree-panel > .tree-path-row,
 .tree-panel > .tree-details,
@@ -232,8 +234,159 @@ button:disabled {
 .tree-search-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin: 0 0 4px;
+}
+
+.search-mode-toggle {
+  display: flex;
+  flex-shrink: 0;
+}
+
+.search-mode-toggle button {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 0;
+}
+
+.search-mode-toggle button:first-child {
+  border-top-left-radius: 6px;
+  border-bottom-left-radius: 6px;
+}
+
+.search-mode-toggle button:last-child {
+  border-top-right-radius: 6px;
+  border-bottom-right-radius: 6px;
+  margin-left: -1px;
+}
+
+.search-mode-toggle button[aria-pressed="true"] {
+  background: #1f4b99;
+  color: #fff;
+  border-color: #1f4b99;
+  position: relative;
+  z-index: 1;
+}
+
+.search-mode-toggle button:focus-visible,
+.tree-search-nav:focus-visible,
+.content-hit:focus-visible,
+.content-search-progress button:focus-visible {
+  outline: 2px solid #1f4b99;
+  outline-offset: 1px;
+}
+
+.content-search-panel {
+  margin: 0 0 8px;
+  border: 1px solid #d5dbe3;
+  border-radius: 8px;
+  background: #f7f8fa;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+}
+
+.content-search-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.content-search-progress-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.content-search-progress p {
+  margin: 0;
+}
+
+.content-search-current {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content-search-progress button {
+  align-self: flex-start;
+  margin-top: 4px;
+  height: 28px;
+  padding: 0 10px;
+}
+
+.content-search-notice,
+.content-search-summary,
+.content-search-empty {
+  margin: 0;
+  white-space: pre-line;
+}
+
+.content-search-hits {
+  overflow: auto;
+  max-height: 168px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.content-hit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "name count"
+    "folder folder"
+    "snippet snippet";
+  gap: 1px 10px;
+  width: 100%;
+  text-align: left;
+  height: auto;
+  padding: 6px 8px;
+  background: #fff;
+}
+
+.content-hit.is-active {
+  background: #d4e6d4;
+  box-shadow: inset 3px 0 0 #3d7a45;
+}
+
+.content-hit-name {
+  grid-area: name;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content-hit-count {
+  grid-area: count;
+  color: #5c6570;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.content-hit-folder {
+  grid-area: folder;
+  color: #5c6570;
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content-hit-snippet {
+  grid-area: snippet;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.content-hit-mark {
+  background: #d4e6d4;
+  color: inherit;
+  font-weight: 600;
+  padding: 0;
 }
 
 .tree-search-input {
