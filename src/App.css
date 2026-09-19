@@ -101,7 +101,9 @@ header p,
 .tree-panel > .tree-search-row,
 .tree-panel > .tree-path,
 .tree-panel > .tree-path-row,
-.tree-panel > .warnings {
+.tree-panel > .tree-details,
+.tree-panel > .warnings,
+.tree-panel > .warning-notice {
   flex-shrink: 0;
 }
 
@@ -208,7 +210,10 @@ button:disabled {
 .tree-panel > .display-filter,
 .tree-panel > .tree-search-row,
 .tree-panel > .tree-path,
-.tree-panel > .tree-path-row {
+.tree-panel > .tree-path-row,
+.tree-panel > .tree-details,
+.tree-panel > .warnings,
+.tree-panel > .warning-notice {
   flex-shrink: 0;
 }
 
@@ -712,14 +717,100 @@ button:disabled {
   font-weight: 700;
 }
 
+.tree-view-work {
+  color: #3d4650;
+}
+
 .warnings {
-  margin-top: 16px;
+  margin-top: 8px;
 }
 
 .warnings ul {
-  padding-left: 18px;
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
   max-height: 160px;
   overflow: auto;
+}
+
+.warning-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.warning-item:hover,
+.warning-item:focus-visible {
+  background: #eef3f8;
+}
+
+.warning-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  color: #3d4650;
+  font-size: 0.9em;
+}
+
+.warning-notice button {
+  padding: 4px 8px;
+}
+
+.tree-details {
+  margin-top: 8px;
+  border: 1px solid #d5dbe3;
+  border-radius: 8px;
+  padding: 4px 8px 6px;
+  background: #f7f9fb;
+}
+
+.tree-details summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.tree-details-empty {
+  margin: 6px 0 2px;
+}
+
+.tree-details-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px 12px;
+  margin: 6px 0 2px;
+  max-height: 168px;
+  overflow: auto;
+  font-size: 0.85rem;
+}
+
+.tree-details-grid dt {
+  color: #5b6570;
+}
+
+.tree-details-grid dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-details-grid dd.is-path {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  word-break: break-all;
+}
+
+.tree-details-grid dd.is-muted {
+  color: #6b7380;
 }
 
 @media (max-width: 900px) {

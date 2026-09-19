@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type UIEvent } from "react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
-import { isDirectory, type FsNode, type ScanResult } from "../model";
+import { isDirectory, type FsNode, type ScanResult, type ScanWarning } from "../model";
 import { openInExplorer, toUserError } from "../scan";
 import {
   applyColumnResizeDelta,
@@ -17,6 +17,14 @@ import {
   type OptionalColumn,
 } from "./treeColumns";
 import { formatByteSize, formatDateTime, formatExtensionFilter, formatTreeStatsLine, createdColumnText } from "./treeFormat";
+import {
+  buildNodeDetails,
+  DETAIL_NONE_LABEL,
+  emptyNodeDetailModel,
+  type NodeDetailModel,
+} from "./nodeDetails";
+import { collectViewWorkStats, formatViewWorkStats } from "./viewStats";
+import { resolveWarningJump } from "./warningNavigation";
 import {
   ROW_HEIGHT,
   TREE_INDENT_PX,
@@ -120,6 +128,7 @@ export function TreeView({
           onOpen={() => {}}
           onScanFromHere={() => {}}
         />
+        <TreeDetailsBar model={emptyNodeDetailModel()} />
       </section>
     );
   }
@@ -185,6 +194,8 @@ function PopulatedTreeView({
   const [appliedFilter, setAppliedFilter] = useState<AppliedDisplayFilter | null>(null);
   const [filterError, setFilterError] = useState<string | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [warningNotice, setWarningNotice] = useState<string | null>(null);
+  const [warningOfferReset, setWarningOfferReset] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const pendingRevealRef = useRef<string | null>(null);
   const pathNoticeTimerRef = useRef<number | null>(null);
@@ -208,6 +219,8 @@ function PopulatedTreeView({
     setAppliedFilter(null);
     setFilterError(null);
     setFilterOpen(false);
+    setWarningNotice(null);
+    setWarningOfferReset(false);
   }
 
   const columns = visibleColumns(visibility);
@@ -245,6 +258,11 @@ function PopulatedTreeView({
     searchJumped && currentMatchIndex >= 0 ? matchIds[currentMatchIndex] : undefined;
   const searchLabel = searchCountLabel(searchQuery, matchIds.length, currentMatchIndex);
   const canNavigateMatches = matchIds.length > 0;
+  const viewWorkStats = useMemo(() => collectViewWorkStats(viewRoot), [viewRoot]);
+  const detailModel = useMemo(
+    () => buildNodeDetails(result.root, selectedId, result.warnings, appliedExtensions.length > 0),
+    [result.root, result.warnings, selectedId, appliedExtensions],
+  );
 
   useEffect(() => {
     const element = viewportRef.current;
@@ -346,8 +364,16 @@ function PopulatedTreeView({
     toggleExpanded(id);
   }
 
+  function clearSelectionFromPointer() {
+    setSelectedId(null);
+    setWarningNotice(null);
+    setWarningOfferReset(false);
+  }
+
   function handleRowClick(row: VisibleTreeRow) {
     setSelectedId(row.id);
+    setWarningNotice(null);
+    setWarningOfferReset(false);
   }
 
   function handleRowDoubleClick(row: VisibleTreeRow) {
@@ -427,6 +453,8 @@ function PopulatedTreeView({
     setAppliedFilter(null);
     setFilterError(null);
     setExpandedIds(defaultExpandedIds(result.root.id));
+    setWarningNotice(null);
+    setWarningOfferReset(false);
   }
 
   function handleSearchChange(value: string) {
@@ -455,6 +483,18 @@ function PopulatedTreeView({
 
   function handlePreviousMatch() {
     revealMatchAt(previousMatchIndex(currentMatchIndex, matchIds.length, searchJumped));
+  }
+
+  function handleWarningActivate(warning: ScanWarning) {
+    const jump = resolveWarningJump(result.root, viewRoot, warning.path);
+    setWarningNotice(jump.notice);
+    setWarningOfferReset(jump.offerFilterReset);
+    if (!jump.applySelection || jump.targetId === null) {
+      return;
+    }
+    setExpandedIds((current) => withAncestorsExpanded(current, jump.ancestorIds));
+    setSelectedId(jump.targetId);
+    pendingRevealRef.current = jump.targetId;
   }
 
   function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -519,7 +559,7 @@ function PopulatedTreeView({
 
   function handleViewportClick(event: MouseEvent<HTMLDivElement>) {
     if (event.target === event.currentTarget) {
-      setSelectedId(null);
+      clearSelectionFromPointer();
     }
   }
 
@@ -655,6 +695,7 @@ function PopulatedTreeView({
             durationMs: result.stats.durationMs,
           })}
         </span>
+        <span className="tree-view-work">{formatViewWorkStats(viewWorkStats)}</span>
         {filterLabel.length > 0 ? (
           <TreeFilterChip>Einlesen: {filterLabel}</TreeFilterChip>
         ) : null}
@@ -853,7 +894,7 @@ function PopulatedTreeView({
             className="tree-table-body"
             onClick={(event) => {
               if (event.target === event.currentTarget) {
-                setSelectedId(null);
+                clearSelectionFromPointer();
               }
             }}
           >
@@ -862,7 +903,7 @@ function PopulatedTreeView({
                 className="tree-spacer"
                 aria-hidden="true"
                 style={{ height: treeWindow.topSpacerHeight }}
-                onClick={() => setSelectedId(null)}
+                onClick={() => clearSelectionFromPointer()}
               />
             ) : null}
             {visibleRows.map((row) => (
@@ -885,7 +926,7 @@ function PopulatedTreeView({
                 className="tree-spacer"
                 aria-hidden="true"
                 style={{ height: treeWindow.bottomSpacerHeight }}
-                onClick={() => setSelectedId(null)}
+                onClick={() => clearSelectionFromPointer()}
               />
             ) : null}
           </div>
@@ -911,17 +952,35 @@ function PopulatedTreeView({
           }
         }}
       />
+      <TreeDetailsBar model={detailModel} />
       {result.warnings.length > 0 ? (
-        <details className="warnings">
+        <details className="warnings" onKeyDown={(event) => event.stopPropagation()}>
           <summary>Warnungen ({result.warnings.length})</summary>
           <ul>
             {result.warnings.map((warning, index) => (
               <li key={`${warning.path}:${warning.code}:${index}`}>
-                {warning.path}: {warning.message}
+                <button
+                  type="button"
+                  className="warning-item"
+                  title="Zur betroffenen Stelle im Baum springen"
+                  onClick={() => handleWarningActivate(warning)}
+                >
+                  {warning.path}: {warning.message}
+                </button>
               </li>
             ))}
           </ul>
         </details>
+      ) : null}
+      {warningNotice !== null ? (
+        <p className="warning-notice">
+          <span>{warningNotice}</span>
+          {warningOfferReset ? (
+            <button type="button" onClick={handleResetDisplayFilter}>
+              Filter zurücksetzen
+            </button>
+          ) : null}
+        </p>
       ) : null}
     </section>
   );
@@ -1186,6 +1245,78 @@ function TreePathBar({
         ) : null}
       </div>
     </div>
+  );
+}
+
+function TreeDetailsBar({ model }: { model: NodeDetailModel }) {
+  return (
+    <details className="tree-details">
+      <summary>Details</summary>
+      {model.selected ? (
+        <dl className="tree-details-grid">
+          <DetailRow label="Name" value={model.name ?? ""} />
+          <DetailRow label="Typ" value={model.typeLabel ?? ""} />
+          {model.path !== null ? <DetailRow label="Pfad" value={model.path} path /> : null}
+          {model.kind === "file" && model.extension !== null ? (
+            <DetailRow label="Dateiendung" value={model.extension} />
+          ) : null}
+          {model.depth !== null ? <DetailRow label="Tiefe" value={String(model.depth)} /> : null}
+          {model.kind === "file" && model.size !== null ? (
+            <DetailRow label="Größe" value={model.size.text} muted={model.size.state !== "present"} />
+          ) : null}
+          {model.kind === "file" && model.modified !== null ? (
+            <DetailRow label="Geändert" value={model.modified.text} muted={model.modified.state !== "present"} />
+          ) : null}
+          {model.kind === "file" && model.created !== null ? (
+            <DetailRow label="Erstellt" value={model.created.text} muted={model.created.state !== "present"} />
+          ) : null}
+          {model.kind === "directory" && model.listingLabel !== null ? (
+            <DetailRow label="Einlesestatus" value={model.listingLabel} />
+          ) : null}
+          {model.kind === "directory" && model.directDirectories !== null ? (
+            <DetailRow label="Direkte Unterordner" value={String(model.directDirectories)} />
+          ) : null}
+          {model.kind === "directory" && model.directFiles !== null ? (
+            <DetailRow label="Direkte Dateien" value={String(model.directFiles)} />
+          ) : null}
+          {model.kind === "directory" && model.containedDirectories !== null ? (
+            <DetailRow label="Enthaltene Ordner" value={String(model.containedDirectories)} />
+          ) : null}
+          {model.kind === "directory" && model.containedFiles !== null ? (
+            <DetailRow label="Enthaltene Dateien" value={String(model.containedFiles)} />
+          ) : null}
+          {model.subtreeSize !== null ? (
+            <DetailRow label="Größe" value={model.subtreeSize.text} muted={model.subtreeSize.incomplete} />
+          ) : null}
+          {model.warningSummary !== null ? (
+            <DetailRow label="Warnungen" value={model.warningSummary} />
+          ) : null}
+        </dl>
+      ) : (
+        <p className="muted tree-details-empty">{DETAIL_NONE_LABEL}</p>
+      )}
+    </details>
+  );
+}
+
+function DetailRow({
+  label,
+  value,
+  path = false,
+  muted = false,
+}: {
+  label: string;
+  value: string;
+  path?: boolean;
+  muted?: boolean;
+}) {
+  return (
+    <>
+      <dt>{label}</dt>
+      <dd className={`${path ? "is-path" : ""}${muted ? " is-muted" : ""}`.trim() || undefined} title={value}>
+        {value}
+      </dd>
+    </>
   );
 }
 
