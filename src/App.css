@@ -19,6 +19,32 @@ body {
   padding: 16px 20px 24px;
 }
 
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.app-header-text {
+  min-width: 0;
+}
+
+.dottyfm-logo {
+  height: 76px;
+  width: auto;
+  object-fit: contain;
+  flex: 0 0 auto;
+  margin-block: -6px;
+}
+
+@media (max-width: 960px) {
+  .dottyfm-logo {
+    height: 48px;
+    margin-block: 0;
+  }
+}
+
 .app.drop-active {
   outline: 2px solid #1f4b99;
   outline-offset: -2px;

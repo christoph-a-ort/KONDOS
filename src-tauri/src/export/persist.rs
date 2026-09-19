@@ -86,7 +86,7 @@ fn temp_path_for(target: &Path) -> PathBuf {
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
     let temp_name = format!(
-        ".{name}.kondos-export-{}-{nanos}.tmp",
+        ".{name}.dottyfm-export-{}-{nanos}.tmp",
         std::process::id()
     );
     match parent {
@@ -155,5 +155,20 @@ fn io_cause(err: &io::Error) -> &'static str {
         io::ErrorKind::AlreadyExists => "Die Datei konnte nicht ersetzt werden.",
         io::ErrorKind::InvalidInput => "Der Pfad ist ungültig.",
         _ => "Die Datei konnte nicht gespeichert werden.",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::temp_path_for;
+    use std::path::Path;
+
+    #[test]
+    fn temp_name_uses_dottyfm_prefix() {
+        let path = temp_path_for(Path::new(r"C:\out\liste.txt"));
+        let name = path.file_name().expect("temp name").to_string_lossy();
+        assert!(name.contains(".dottyfm-export-"), "{name}");
+        assert!(name.starts_with(".liste.txt.dottyfm-export-"), "{name}");
+        assert!(name.ends_with(".tmp"), "{name}");
     }
 }

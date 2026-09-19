@@ -1,4 +1,4 @@
-# KONDOS
+# DottyFM
 
 Desktop-Anwendung (Tauri 2, React, TypeScript, Rust) zur Erfassung, Anzeige und zum Export von Ordner- und Dateistrukturen.
 

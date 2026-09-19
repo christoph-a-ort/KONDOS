@@ -1,14 +1,26 @@
 ---
-description: Projekt heißt KONDOS (ehemals Dateiliste)
+description: Produkt heißt DottyFM; technische Legacy-Namen bleiben bewusst
 alwaysApply: true
 ---
 
 # Projektidentität
 
-Der Workspace und der Produktname heißen **KONDOS**.
+Der sichtbare Produktname ist **DottyFM** (Langform: Dotty File Manager).
 
-Das geöffnete Repository bzw. der aktuelle KONDOS-Projektordner ist die maßgebliche Projektwurzel.
+Das geöffnete Repository bzw. der aktuelle Projektordner ist die maßgebliche Projektwurzel.
 
-Der Ordner hieß zuvor `Dateiliste`. Das ist derselbe lokale Windows-IST-Scanner (Tauri/Rust/React).
+Der lokale Ordner kann weiterhin `KONDOS` heißen. Das ist dasselbe lokale Windows-IST-Scanner-Projekt (Tauri/Rust/React).
 
-Sichtbare und interne Namen verwenden KONDOS bzw. `kondos` / `kondos_lib` / `com.kondos.app`.
+## Sichtbar
+
+Benutzertexte, Fenstertitel, `productName` und npm-Paketname verwenden **DottyFM** bzw. `dottyfm`.
+
+## Technisch bewusst unverändert
+
+Diese Legacy-/Stabilitätsnamen nicht ungefragt umbenennen:
+
+- Tauri identifier: `com.kondos.app`
+- Rust package: `kondos`
+- Rust library: `kondos_lib`
+- Git remote: `KONDOS`
+- LocalStorage-Legacy-Key `kondos.workbench-prefs.v1` nur für Migration

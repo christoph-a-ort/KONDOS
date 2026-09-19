@@ -23,7 +23,8 @@ function dir(id, name, children) {
 const NO_EXTENSION_KEY = "";
 const NO_EXTENSION_LABEL = "Ohne Dateiendung";
 const DEFAULT_TREE_SORT = { column: "name", direction: "asc" };
-const WORKBENCH_PREFS_KEY = "kondos.workbench-prefs.v1";
+const WORKBENCH_PREFS_KEY = "dottyfm.workbench-prefs.v1";
+const LEGACY_WORKBENCH_PREFS_KEY = "kondos.workbench-prefs.v1";
 const MAX_DEPTH = 8;
 const DEFAULT_DEPTH = 8;
 const MIN_DEPTH = 1;
@@ -120,14 +121,31 @@ function sanitizeWorkbenchPrefs(raw) {
   };
 }
 
-function loadWorkbenchPrefs(storage) {
-  const raw = storage.getItem(WORKBENCH_PREFS_KEY);
-  if (raw === null || raw.trim().length === 0) return defaultWorkbenchPrefs();
+function storedRaw(storage, key) {
+  const raw = storage.getItem(key);
+  if (raw === null || String(raw).trim().length === 0) return null;
+  return raw;
+}
+
+function parseStoredPrefs(raw) {
   try {
     return sanitizeWorkbenchPrefs(JSON.parse(raw));
   } catch {
-    return defaultWorkbenchPrefs();
+    return null;
   }
+}
+
+function loadWorkbenchPrefs(storage) {
+  const current = storedRaw(storage, WORKBENCH_PREFS_KEY);
+  if (current !== null) {
+    return parseStoredPrefs(current) ?? defaultWorkbenchPrefs();
+  }
+  const legacy = storedRaw(storage, LEGACY_WORKBENCH_PREFS_KEY);
+  if (legacy === null) return defaultWorkbenchPrefs();
+  const migrated = parseStoredPrefs(legacy);
+  if (migrated === null) return defaultWorkbenchPrefs();
+  saveWorkbenchPrefs(migrated, storage);
+  return migrated;
 }
 
 function saveWorkbenchPrefs(prefs, storage) {
@@ -410,6 +428,23 @@ assert(fallback.maxDepth === 8, "prefs: invalid depth");
 assert(fallback.includeSize === true && fallback.sort.column === "name", "prefs: invalid fields fallback");
 assert(!("searchQuery" in fallback), "prefs: search not stored");
 assert(loadWorkbenchPrefs({ getItem: () => "{not json", setItem() {} }).maxDepth === DEFAULT_DEPTH, "prefs: broken json");
+
+const legacyOnly = new MemoryStorage();
+legacyOnly.setItem(LEGACY_WORKBENCH_PREFS_KEY, JSON.stringify(saved));
+const migrated = loadWorkbenchPrefs(legacyOnly);
+assert(migrated.rootPath === "C:/Hausverwaltung", "prefs: legacy migrated");
+assert(JSON.parse(legacyOnly.getItem(WORKBENCH_PREFS_KEY)).rootPath === "C:/Hausverwaltung", "prefs: copied to new key");
+assert(legacyOnly.getItem(LEGACY_WORKBENCH_PREFS_KEY) !== null, "prefs: legacy kept");
+
+const both = new MemoryStorage();
+both.setItem(LEGACY_WORKBENCH_PREFS_KEY, JSON.stringify(saved));
+both.setItem(WORKBENCH_PREFS_KEY, JSON.stringify(sanitizeWorkbenchPrefs({ ...saved, rootPath: "C:/DottyFM" })));
+assert(loadWorkbenchPrefs(both).rootPath === "C:/DottyFM", "prefs: current key wins");
+
+const brokenLegacy = new MemoryStorage();
+brokenLegacy.setItem(LEGACY_WORKBENCH_PREFS_KEY, "{not json");
+assert(loadWorkbenchPrefs(brokenLegacy).rootPath === "", "prefs: invalid legacy does not break start");
+assert(brokenLegacy.getItem(WORKBENCH_PREFS_KEY) === null, "prefs: invalid legacy not copied");
 
 const folder = dir("C:/A", "A", [file("C:/A/x.pdf", "x.pdf")]);
 assert(!canScanFromHere(undefined) && !canScanFromHere(file("C:/A/x.pdf", "x.pdf")), "scan-from: none/file off");

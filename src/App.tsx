@@ -46,6 +46,7 @@ import {
   workbenchPrefsFromState,
 } from "./ui/workbenchPrefs";
 import "./App.css";
+import dottyFmLogo from "./assets/dottyfm-logo.png";
 
 function formatLabel(format: ExportFormat): string {
   return format.toUpperCase();
@@ -408,9 +409,17 @@ function App() {
 
   return (
     <div className={dropActive ? "app drop-active" : "app"}>
-      <header>
-        <h1>KONDOS</h1>
-        <p>Ordner- und Dateistrukturen erfassen, anzeigen und exportieren.</p>
+      <header className="app-header">
+        <div className="app-header-text">
+          <h1>DottyFM</h1>
+          <p>Ordner- und Dateistrukturen erfassen, anzeigen und exportieren.</p>
+        </div>
+        <img
+          className="dottyfm-logo"
+          src={dottyFmLogo}
+          alt=""
+          aria-hidden="true"
+        />
       </header>
       {dropActive ? <p className="drop-hint">Ordner hier ablegen</p> : null}
       {error !== null ? <p className="error">{error}</p> : null}

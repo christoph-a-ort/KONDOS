@@ -9,7 +9,8 @@ import {
 } from "./treeColumns";
 import { DEFAULT_TREE_SORT, type SortColumn, type SortDirection, type TreeSort } from "./treeSort";
 
-export const WORKBENCH_PREFS_KEY = "kondos.workbench-prefs.v1";
+export const WORKBENCH_PREFS_KEY = "dottyfm.workbench-prefs.v1";
+export const LEGACY_WORKBENCH_PREFS_KEY = "kondos.workbench-prefs.v1";
 export const WORKBENCH_PREFS_VERSION = 1;
 
 export interface WorkbenchPrefs {
@@ -140,8 +141,7 @@ export function hadStoredWorkbenchPrefs(storage: WorkbenchStorage | null = brows
     return false;
   }
   try {
-    const raw = storage.getItem(WORKBENCH_PREFS_KEY);
-    return raw !== null && raw.trim().length > 0;
+    return storedRaw(storage, WORKBENCH_PREFS_KEY) !== null || storedRaw(storage, LEGACY_WORKBENCH_PREFS_KEY) !== null;
   } catch {
     return false;
   }
@@ -152,11 +152,20 @@ export function loadWorkbenchPrefs(storage: WorkbenchStorage | null = browserSto
     return defaultWorkbenchPrefs();
   }
   try {
-    const raw = storage.getItem(WORKBENCH_PREFS_KEY);
-    if (raw === null || raw.trim().length === 0) {
+    const current = storedRaw(storage, WORKBENCH_PREFS_KEY);
+    if (current !== null) {
+      return parseStoredPrefs(current) ?? defaultWorkbenchPrefs();
+    }
+    const legacy = storedRaw(storage, LEGACY_WORKBENCH_PREFS_KEY);
+    if (legacy === null) {
       return defaultWorkbenchPrefs();
     }
-    return sanitizeWorkbenchPrefs(JSON.parse(raw) as unknown);
+    const migrated = parseStoredPrefs(legacy);
+    if (migrated === null) {
+      return defaultWorkbenchPrefs();
+    }
+    saveWorkbenchPrefs(migrated, storage);
+    return migrated;
   } catch {
     return defaultWorkbenchPrefs();
   }
@@ -183,6 +192,22 @@ export function browserStorage(): WorkbenchStorage | null {
       return null;
     }
     return localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function storedRaw(storage: WorkbenchStorage, key: string): string | null {
+  const raw = storage.getItem(key);
+  if (raw === null || raw.trim().length === 0) {
+    return null;
+  }
+  return raw;
+}
+
+function parseStoredPrefs(raw: string): WorkbenchPrefs | null {
+  try {
+    return sanitizeWorkbenchPrefs(JSON.parse(raw) as unknown);
   } catch {
     return null;
   }

@@ -1,6 +1,6 @@
-export const DROP_MULTIPLE_MESSAGE = "Bitte legen Sie genau einen Ordner auf KONDOS.";
+export const DROP_MULTIPLE_MESSAGE = "Bitte legen Sie genau einen Ordner auf DottyFM.";
 export const DROP_FILE_MESSAGE =
-  "Bitte legen Sie einen Ordner auf KONDOS. Einzelne Dateien werden derzeit nicht unterstützt.";
+  "Bitte legen Sie einen Ordner auf DottyFM. Einzelne Dateien werden derzeit nicht unterstützt.";
 
 export type DroppedPathsDecision =
   | { action: "accept"; path: string }

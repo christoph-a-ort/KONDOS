@@ -26,6 +26,7 @@ import {
   sanitizeWorkbenchPrefs,
   saveWorkbenchPrefs,
   WORKBENCH_PREFS_KEY,
+  LEGACY_WORKBENCH_PREFS_KEY,
   type WorkbenchStorage,
 } from "./workbenchPrefs";
 
@@ -124,7 +125,31 @@ function runPrefsCheck(): void {
   assert(fallback.sort.column === "name", "prefs: invalid sort falls back");
   assert(!("searchQuery" in fallback), "prefs: session-only search not stored");
   assert(loadWorkbenchPrefs({ getItem: () => "{not json", setItem: () => {} }).maxDepth === defaults.maxDepth, "prefs: broken json");
-  assert(WORKBENCH_PREFS_KEY.startsWith("kondos."), "prefs: namespaced key");
+  assert(WORKBENCH_PREFS_KEY === "dottyfm.workbench-prefs.v1", "prefs: current namespaced key");
+  assert(LEGACY_WORKBENCH_PREFS_KEY === "kondos.workbench-prefs.v1", "prefs: legacy key kept for migration");
+
+  const legacyOnly = new MemoryStorage();
+  legacyOnly.setItem(LEGACY_WORKBENCH_PREFS_KEY, JSON.stringify(saved));
+  assert(hadStoredWorkbenchPrefs(legacyOnly), "prefs: legacy storage counts as present");
+  const migrated = loadWorkbenchPrefs(legacyOnly);
+  assert(migrated.rootPath === "C:/Hausverwaltung", "prefs: legacy root migrated");
+  assert(migrated.columnWidths.name === 320, "prefs: legacy widths migrated");
+  const afterMigrate = JSON.parse(legacyOnly.getItem(WORKBENCH_PREFS_KEY) ?? "{}") as Record<string, unknown>;
+  assert(afterMigrate.rootPath === "C:/Hausverwaltung", "prefs: legacy copied to new key");
+  assert(legacyOnly.getItem(LEGACY_WORKBENCH_PREFS_KEY) !== null, "prefs: legacy key is not deleted");
+
+  const both = new MemoryStorage();
+  both.setItem(LEGACY_WORKBENCH_PREFS_KEY, JSON.stringify(saved));
+  const newer = sanitizeWorkbenchPrefs({ ...saved, rootPath: "C:/DottyFM" });
+  both.setItem(WORKBENCH_PREFS_KEY, JSON.stringify(newer));
+  const winner = loadWorkbenchPrefs(both);
+  assert(winner.rootPath === "C:/DottyFM", "prefs: current key wins over legacy");
+  assert(JSON.parse(both.getItem(LEGACY_WORKBENCH_PREFS_KEY) ?? "{}").rootPath === "C:/Hausverwaltung", "prefs: legacy left unchanged when current exists");
+
+  const brokenLegacy = new MemoryStorage();
+  brokenLegacy.setItem(LEGACY_WORKBENCH_PREFS_KEY, "{not json");
+  assert(loadWorkbenchPrefs(brokenLegacy).rootPath === defaults.rootPath, "prefs: invalid legacy does not break start");
+  assert(brokenLegacy.getItem(WORKBENCH_PREFS_KEY) === null, "prefs: invalid legacy is not copied");
 }
 
 function runScanFromHereCheck(): void {
