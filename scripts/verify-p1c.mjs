@@ -25,8 +25,8 @@ const NO_EXTENSION_LABEL = "Ohne Dateiendung";
 const DEFAULT_TREE_SORT = { column: "name", direction: "asc" };
 const WORKBENCH_PREFS_KEY = "dottyfm.workbench-prefs.v1";
 const LEGACY_WORKBENCH_PREFS_KEY = "kondos.workbench-prefs.v1";
-const MAX_DEPTH = 8;
-const DEFAULT_DEPTH = 8;
+const MAX_DEPTH = 32;
+const DEFAULT_DEPTH = 16;
 const MIN_DEPTH = 1;
 const COLUMN_MIN_WIDTH = { name: 180, size: 88, modified: 140, created: 140 };
 const DEFAULT_COLUMN_WIDTHS = { name: 280, size: 100, modified: 156, created: 156 };
@@ -424,10 +424,16 @@ const fallback = sanitizeWorkbenchPrefs({
   sort: { column: "owner", direction: "sideways" },
   searchQuery: "secret",
 });
-assert(fallback.maxDepth === 8, "prefs: invalid depth");
+assert(fallback.maxDepth === MAX_DEPTH, "prefs: invalid depth");
 assert(fallback.includeSize === true && fallback.sort.column === "name", "prefs: invalid fields fallback");
 assert(!("searchQuery" in fallback), "prefs: search not stored");
 assert(loadWorkbenchPrefs({ getItem: () => "{not json", setItem() {} }).maxDepth === DEFAULT_DEPTH, "prefs: broken json");
+assert(sanitizeWorkbenchPrefs({ maxDepth: 8 }).maxDepth === 8, "prefs: stored 8 remains 8");
+assert(clampDepth(0) === MIN_DEPTH, "prefs: clamp 0 to min");
+assert(clampDepth(16) === 16, "prefs: clamp 16");
+assert(clampDepth(32) === MAX_DEPTH, "prefs: clamp 32");
+assert(clampDepth(33) === MAX_DEPTH, "prefs: clamp 33 to max");
+assert(clampDepth(99) === MAX_DEPTH, "prefs: clamp 99 to max");
 
 const legacyOnly = new MemoryStorage();
 legacyOnly.setItem(LEGACY_WORKBENCH_PREFS_KEY, JSON.stringify(saved));

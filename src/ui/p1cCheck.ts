@@ -1,4 +1,4 @@
-import { createDefaultScanConfig, type DirectoryNode, type FileNode, type FsNode } from "../model";
+import { clampDepth, createDefaultScanConfig, DEFAULT_DEPTH, MAX_DEPTH, MIN_DEPTH, type DirectoryNode, type FileNode, type FsNode } from "../model";
 import {
   buildDisplayFilterView,
   canScanFromHere,
@@ -76,6 +76,13 @@ function runPrefsCheck(): void {
   });
   assert(empty.rootPath === defaults.rootPath, "prefs: empty storage uses defaults");
   assert(empty.maxDepth === createDefaultScanConfig().maxDepth, "prefs: default depth");
+  assert(createDefaultScanConfig().maxDepth === DEFAULT_DEPTH, "prefs: default depth constant");
+  assert(DEFAULT_DEPTH === 16 && MAX_DEPTH === 32 && MIN_DEPTH === 1, "prefs: depth bounds");
+  assert(clampDepth(0) === MIN_DEPTH, "prefs: clamp 0 to min");
+  assert(clampDepth(16) === 16, "prefs: clamp 16");
+  assert(clampDepth(32) === 32, "prefs: clamp 32");
+  assert(clampDepth(33) === MAX_DEPTH, "prefs: clamp 33 to max");
+  assert(clampDepth(99) === MAX_DEPTH, "prefs: clamp 99 to max");
   assert(empty.includeSize === true && empty.includeModifiedAt === true, "prefs: default metadata");
   assert(empty.includeCreatedAt === false, "prefs: created off by default");
   assert(empty.columnVisibility.created === false, "prefs: created column off");
@@ -118,7 +125,7 @@ function runPrefsCheck(): void {
     searchQuery: "secret",
     selectedId: "keep-me",
   });
-  assert(fallback.maxDepth === 8, "prefs: invalid depth falls back");
+  assert(fallback.maxDepth === MAX_DEPTH, "prefs: invalid depth falls back");
   assert(fallback.includeSize === true, "prefs: invalid boolean falls back");
   assert(fallback.columnVisibility.size === true, "prefs: invalid column falls back");
   assert(fallback.columnWidths.name >= 180, "prefs: width clamped");
@@ -127,6 +134,9 @@ function runPrefsCheck(): void {
   assert(loadWorkbenchPrefs({ getItem: () => "{not json", setItem: () => {} }).maxDepth === defaults.maxDepth, "prefs: broken json");
   assert(WORKBENCH_PREFS_KEY === "dottyfm.workbench-prefs.v1", "prefs: current namespaced key");
   assert(LEGACY_WORKBENCH_PREFS_KEY === "kondos.workbench-prefs.v1", "prefs: legacy key kept for migration");
+
+  const keepEight = sanitizeWorkbenchPrefs({ maxDepth: 8 });
+  assert(keepEight.maxDepth === 8, "prefs: stored 8 remains 8");
 
   const legacyOnly = new MemoryStorage();
   legacyOnly.setItem(LEGACY_WORKBENCH_PREFS_KEY, JSON.stringify(saved));

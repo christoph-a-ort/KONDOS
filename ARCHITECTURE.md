@@ -1,6 +1,6 @@
 # Architektur — DottyFM
 
-Leichtgewichtiges Desktop-Werkzeug zur Erfassung, Visualisierung und zum Export von Ordner- und Dateistrukturen (max. Tiefe 8).
+Leichtgewichtiges Desktop-Werkzeug zur Erfassung, Visualisierung und zum Export von Ordner- und Dateistrukturen (max. Tiefe 32).
 
 ## Modulgrenzen
 
@@ -26,7 +26,7 @@ Intern getaggte Unterscheidung `kind: "file" | "directory"`.
 
 - Dateien sind Blattknoten und besitzen **keine** `children`.
 - Ordner besitzen immer `children` (ggf. leer).
-- `depth`: Root = 0, direkte Kinder = 1, … bis maximal 8.
+- `depth`: Root = 0, direkte Kinder = 1, … bis maximal 32.
 - `id`: identisch mit dem absoluten Pfad (eindeutig innerhalb eines Scans).
 - `sizeBytes` wird nur für Dateien gesetzt (Dateigröße aus Metadaten, keine rekursive Ordnergröße).
 - Zeitstempel (`createdAtMs`, `modifiedAtMs`) sind optional und nur gesetzt, wenn die jeweilige Option aktiv ist.
@@ -34,7 +34,7 @@ Intern getaggte Unterscheidung `kind: "file" | "directory"`.
 
 ### `ScanConfig`
 
-- `rootPath`, `maxDepth` (1–8, Standard 8)
+- `rootPath`, `maxDepth` (1–32, Standard 16)
 - `excludeHidden`
 - `extensions` (leer = alle Dateien; Ordner werden trotzdem traversiert)
 - `includeSize`, `includeCreatedAt`, `includeModifiedAt`

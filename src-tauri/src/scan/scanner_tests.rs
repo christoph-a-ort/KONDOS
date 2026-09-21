@@ -211,6 +211,76 @@ fn depth_eight_includes_level_eight_but_not_nine() {
     assert_eq!(listing_of(cursor), DirectoryListing::DepthLimited);
 }
 
+fn nested_dir_rel(levels: u8) -> String {
+    (1..=levels)
+        .map(|level| format!("d{level}"))
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// S.07 analog für die neue Obergrenze 32.
+#[test]
+fn depth_thirty_two_includes_level_thirty_two_but_not_thirty_three() {
+    let tree = TempTree::new("depth-32");
+    tree.mkdir(&nested_dir_rel(32));
+    tree.write_file(&format!("{}/l32.txt", nested_dir_rel(31)), b"32");
+    tree.write_file(&format!("{}/l33.txt", nested_dir_rel(32)), b"33");
+    let result = tree.scan(|config| config.max_depth = 32);
+    let nodes = flatten(&result.root);
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.name == "l32.txt" && n.depth == 32 && n.kind == "file")
+    );
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.name == "d32" && n.depth == 32 && n.kind == "directory")
+    );
+    assert!(!nodes.iter().any(|n| n.name == "l33.txt"));
+    assert_eq!(nodes.iter().map(|n| n.depth).max(), Some(32));
+    let mut cursor = &result.root;
+    for level in 1..=32 {
+        let name = format!("d{level}");
+        cursor = as_dir(cursor)
+            .iter()
+            .find(|node| matches!(node, FsNode::Directory { name: child, .. } if *child == name))
+            .expect("nested directory");
+    }
+    assert_eq!(listing_of(cursor), DirectoryListing::DepthLimited);
+}
+
+#[test]
+fn default_depth_sixteen_includes_level_sixteen_but_not_seventeen() {
+    let tree = TempTree::new("depth-default-16");
+    tree.mkdir(&nested_dir_rel(16));
+    tree.write_file(&format!("{}/l16.txt", nested_dir_rel(15)), b"16");
+    tree.write_file(&format!("{}/l17.txt", nested_dir_rel(16)), b"17");
+    let result = tree.scan(|_| {});
+    let nodes = flatten(&result.root);
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.name == "l16.txt" && n.depth == 16 && n.kind == "file")
+    );
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.name == "d16" && n.depth == 16 && n.kind == "directory")
+    );
+    assert!(!nodes.iter().any(|n| n.name == "l17.txt"));
+    assert_eq!(nodes.iter().map(|n| n.depth).max(), Some(16));
+    let mut cursor = &result.root;
+    for level in 1..=16 {
+        let name = format!("d{level}");
+        cursor = as_dir(cursor)
+            .iter()
+            .find(|node| matches!(node, FsNode::Directory { name: child, .. } if *child == name))
+            .expect("nested directory");
+    }
+    assert_eq!(listing_of(cursor), DirectoryListing::DepthLimited);
+}
+
 /// S.10, S.11
 #[test]
 fn files_are_leaf_nodes_without_children_field() {
