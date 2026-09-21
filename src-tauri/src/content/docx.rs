@@ -4,31 +4,23 @@ use quick_xml::events::Event;
 use quick_xml::name::QName;
 use zip::ZipArchive;
 
+use super::ooxml::{
+    is_encrypted_office_part_name, normalize_zip_name, read_limited,
+    xml_total_exceeds_limit as uncompressed_exceeds, MAX_DOCX_XML_TOTAL_BYTES,
+};
 use super::ContentStatus;
 
-/// Unkomprimierte Größe eines gelesenen XML-Parts.
-pub(crate) const MAX_XML_PART_BYTES: u64 = 32 * 1024 * 1024;
-/// Summe unkomprimierter gelesener XML-Parts (P1-E2.2: nur document.xml).
-pub(crate) const MAX_XML_TOTAL_BYTES: u64 = 48 * 1024 * 1024;
-pub(crate) const MAX_ZIP_ENTRIES: usize = 4096;
+pub(crate) const MAX_XML_TOTAL_BYTES: u64 = MAX_DOCX_XML_TOTAL_BYTES;
+pub(crate) use super::ooxml::{
+    looks_like_ole_compound, xml_part_exceeds_limit, zip_entry_count_exceeds_limit, MAX_XML_PART_BYTES,
+};
+#[cfg(test)]
+pub(crate) use super::ooxml::{MAX_ZIP_ENTRIES, OLE_MAGIC};
 
-const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 const DOCUMENT_XML: &str = "word/document.xml";
 
-pub(crate) fn looks_like_ole_compound(bytes: &[u8]) -> bool {
-    bytes.len() >= OLE_MAGIC.len() && bytes[..OLE_MAGIC.len()] == OLE_MAGIC
-}
-
-pub(crate) fn xml_part_exceeds_limit(uncompressed: u64) -> bool {
-    uncompressed > MAX_XML_PART_BYTES
-}
-
 pub(crate) fn xml_total_exceeds_limit(uncompressed: u64) -> bool {
-    uncompressed > MAX_XML_TOTAL_BYTES
-}
-
-pub(crate) fn zip_entry_count_exceeds_limit(count: usize) -> bool {
-    count > MAX_ZIP_ENTRIES
+    uncompressed_exceeds(uncompressed, MAX_XML_TOTAL_BYTES)
 }
 
 /// Extrahiert sichtbaren Dokumenttext aus einem DOCX-Container.
@@ -71,9 +63,7 @@ fn inspect_archive<R: Read + Seek>(
             return Err(ContentStatus::ParseError);
         }
         let name = normalize_zip_name(file.name());
-        if name.eq_ignore_ascii_case("encryptedpackage")
-            || name.eq_ignore_ascii_case("encryptioninfo")
-        {
+        if is_encrypted_office_part_name(&name) {
             encrypted_office = true;
         }
         if name.eq_ignore_ascii_case(DOCUMENT_XML) {
@@ -88,24 +78,6 @@ fn inspect_archive<R: Read + Seek>(
         None if encrypted_office => Err(ContentStatus::Protected),
         None => Err(ContentStatus::ParseError),
     }
-}
-
-fn normalize_zip_name(name: &str) -> String {
-    name.replace('\\', "/")
-        .trim_start_matches("./")
-        .to_string()
-}
-
-fn read_limited<R: Read>(reader: &mut R, max_bytes: u64) -> Result<Vec<u8>, ContentStatus> {
-    let mut limited = reader.take(max_bytes.saturating_add(1));
-    let mut buf = Vec::new();
-    limited
-        .read_to_end(&mut buf)
-        .map_err(|_| ContentStatus::ParseError)?;
-    if buf.len() as u64 > max_bytes {
-        return Err(ContentStatus::TooLarge);
-    }
-    Ok(buf)
 }
 
 fn extract_text_from_document_xml(xml: &str) -> Result<String, ContentStatus> {

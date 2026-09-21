@@ -36,7 +36,7 @@ function hit(nodeId, name, extras = {}) {
 
 const DEFAULT_SEARCH_MODE = "name";
 const NAME_SEARCH_PLACEHOLDER = "Dateiname suchen …";
-const CONTENT_SEARCH_PLACEHOLDER = "In PDF- und Word-Inhalten suchen …";
+const CONTENT_SEARCH_PLACEHOLDER = "In PDF-, Word- und Excel-Inhalten suchen …";
 const CONTENT_STALE_SNAPSHOT_MESSAGE =
   "Bitte den Ordner erneut einlesen, bevor die Inhaltssuche genutzt wird.";
 const CONTENT_NO_DOCUMENTS_MESSAGE =
@@ -166,7 +166,7 @@ function previousMatchIndex(currentIndex, matchCount, jumped) {
 
 assert(DEFAULT_SEARCH_MODE === "name", "A: default mode is Dateiname");
 assert(NAME_SEARCH_PLACEHOLDER === "Dateiname suchen …", "A: name placeholder");
-assert(CONTENT_SEARCH_PLACEHOLDER === "In PDF- und Word-Inhalten suchen …", "content placeholder names PDF and Word");
+assert(CONTENT_SEARCH_PLACEHOLDER === "In PDF-, Word- und Excel-Inhalten suchen …", "content placeholder names PDF, Word and Excel");
 assert(!hasContentQuery(""), "B: empty query is not a search");
 assert(!hasContentQuery("   \t"), "B: whitespace query is not a search");
 assert(hasContentQuery("Brandschutz"), "B: real query can start search");
@@ -320,7 +320,7 @@ assert(!treeView.includes("react-window") && !treeView.includes("react-virtual")
 assert(helpers.includes(CONTENT_STALE_SNAPSHOT_MESSAGE), "T: stale snapshot wording");
 assert(helpers.includes("von ${total} Dokumenten"), "document count wording");
 assert(helpers.includes(CONTENT_NO_DOCUMENTS_MESSAGE), "empty documents copy");
-assert(helpers.includes("Durchsucht werden PDF- und Word-Dateien (.docx)."), "empty stock names supported formats");
+assert(helpers.includes("Durchsucht werden PDF-, Word- (.docx) und Excel-Dateien (.xlsx)."), "empty stock names supported formats");
 assert(!helpers.includes("von ${total} PDFs"), "no leftover PDF count wording");
 assert(!helpers.includes("In PDF-Inhalten suchen"), "no leftover PDF-only content search copy");
 assert(css.includes(".content-search-hits"), "21: separate hit list scroll");

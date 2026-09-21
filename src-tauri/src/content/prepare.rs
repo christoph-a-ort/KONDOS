@@ -66,7 +66,7 @@ impl PrepareCounts {
     }
 }
 
-/// Sammelt unterstützte Inhaltsdokumente des Snapshots (PDF und DOCX).
+/// Sammelt unterstützte Inhaltsdokumente des Snapshots (PDF, DOCX und XLSX).
 ///
 /// Reihenfolge: Tiefensuche in der vorhandenen `children`-Reihenfolge
 /// des Scanners (Ordner vor Dateien, Natural-Sort innerhalb der Gruppen).
@@ -272,6 +272,7 @@ mod tests {
         ContentPrepareStatus, SnapshotContentFile,
     };
     use crate::content::docx::test_docx_plain_text;
+    use crate::content::xlsx::test_xlsx_from_parts;
     use crate::content::{ContentEntry, ContentFormat, ContentStatus};
     use crate::error::AppErrorKind;
     use crate::model::{DirectoryListing, FsNode, ScanResult, ScanStats};
@@ -512,6 +513,7 @@ mod tests {
                 ("brief.DOCX", ContentFormat::Docx),
                 ("letter.docx", ContentFormat::Docx),
                 ("m.pdf", ContentFormat::Pdf),
+                ("table.xlsx", ContentFormat::Xlsx),
             ]
         );
     }
@@ -534,7 +536,7 @@ mod tests {
     }
 
     #[test]
-    fn prepares_all_pdfs_case_insensitive_and_ignores_other_files() {
+    fn prepares_pdfs_and_treats_invalid_xlsx_as_problem() {
         let tmp = TempDir::new("all");
         let searchable = tmp.write("a.pdf", &text_pdf("Alpha"));
         let upper = tmp.write("B.PDF", &text_pdf("Beta"));
@@ -555,15 +557,17 @@ mod tests {
         state.store_snapshot(4, result_from_root(root));
         let progress = run_prepare_content_guarded(&state, 4, |_| {}).expect("prepare");
         assert_eq!(progress.status, ContentPrepareStatus::Completed);
-        assert_eq!(progress.total_document_count, 2);
-        assert_eq!(progress.processed_document_count, 2);
+        assert_eq!(progress.total_document_count, 3);
+        assert_eq!(progress.processed_document_count, 3);
         assert_eq!(progress.searchable_count, 2);
+        assert_eq!(progress.problem_count, 1);
         let cache = state.content_cache_for(4).expect("cache");
         assert!(cache.complete);
-        assert_eq!(cache.entries.len(), 2);
+        assert_eq!(cache.entries.len(), 3);
         assert!(!cache.entries.contains_key(&notes.to_string_lossy().into_owned()));
         assert_eq!(status_of(&state, 4, &searchable), ContentStatus::Searchable);
         assert_eq!(status_of(&state, 4, &upper), ContentStatus::Searchable);
+        assert_eq!(status_of(&state, 4, &xlsx), ContentStatus::ParseError);
         assert!(!state.is_close_blocked());
     }
 
@@ -958,11 +962,18 @@ mod tests {
     }
 
     #[test]
-    fn mixed_pdf_and_docx_are_prepared_xlsx_is_skipped() {
+    fn mixed_pdf_docx_and_xlsx_are_prepared() {
         let tmp = TempDir::new("mixed");
         let pdf = tmp.write("a.pdf", &text_pdf("Alpha"));
         let docx = tmp.write("brief.docx", b"not a real docx");
-        let xlsx = tmp.write("tabelle.xlsx", b"xlsx");
+        let xlsx = tmp.write(
+            "tabelle.xlsx",
+            &test_xlsx_from_parts(
+                "Tabelle",
+                None,
+                r#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Alpha</t></is></c></row></sheetData></worksheet>"#,
+            ),
+        );
         let notes = tmp.write("notes.txt", b"txt");
         let root = dir(
             "root",
@@ -979,34 +990,47 @@ mod tests {
         state.store_snapshot(41, result_from_root(root));
         let progress = run_prepare_content_guarded(&state, 41, |_| {}).expect("prepare");
         assert_eq!(progress.status, ContentPrepareStatus::Completed);
-        assert_eq!(progress.total_document_count, 2);
-        assert_eq!(progress.processed_document_count, 2);
-        assert_eq!(progress.searchable_count, 1);
+        assert_eq!(progress.total_document_count, 3);
+        assert_eq!(progress.processed_document_count, 3);
+        assert_eq!(progress.searchable_count, 2);
         assert_eq!(progress.problem_count, 1);
         assert_eq!(progress.no_text_count, 0);
         let cache = state.content_cache_for(41).expect("cache");
         assert!(cache.complete);
-        assert_eq!(cache.entries.len(), 2);
-        assert!(!cache.entries.contains_key(&xlsx.to_string_lossy().into_owned()));
+        assert_eq!(cache.entries.len(), 3);
         assert!(!cache.entries.contains_key(&notes.to_string_lossy().into_owned()));
         assert_eq!(status_of(&state, 41, &pdf), ContentStatus::Searchable);
         assert_eq!(status_of(&state, 41, &docx), ContentStatus::ParseError);
+        assert_eq!(status_of(&state, 41, &xlsx), ContentStatus::Searchable);
         assert_eq!(
             cache
                 .entries
-                .get(&pdf.to_string_lossy().into_owned())
-                .expect("pdf")
+                .get(&xlsx.to_string_lossy().into_owned())
+                .expect("xlsx")
                 .format,
-            ContentFormat::Pdf
+            ContentFormat::Xlsx
         );
-        assert_eq!(
-            cache
-                .entries
-                .get(&docx.to_string_lossy().into_owned())
-                .expect("docx")
-                .format,
-            ContentFormat::Docx
+    }
+
+    #[test]
+    fn xlsx_only_snapshot_is_prepared_and_not_counted_as_empty() {
+        let tmp = TempDir::new("xlsx-only");
+        let xlsx = tmp.write("only.xlsx", b"stub");
+        let root = dir(
+            "root",
+            &tmp.path.to_string_lossy(),
+            0,
+            vec![file("only.xlsx", &xlsx, 1)],
         );
+        let state = AppState::new();
+        state.store_snapshot(43, result_from_root(root));
+        let progress = run_prepare_content_guarded(&state, 43, |_| {}).expect("prepare");
+        assert_eq!(progress.total_document_count, 1);
+        assert_eq!(progress.processed_document_count, 1);
+        assert_eq!(progress.problem_count, 1);
+        assert_eq!(progress.searchable_count, 0);
+        assert!(state.content_cache_for(43).expect("cache").complete);
+        assert_eq!(status_of(&state, 43, &xlsx), ContentStatus::ParseError);
     }
 
     #[test]
@@ -1031,11 +1055,19 @@ mod tests {
     }
 
     #[test]
-    fn cancel_and_resume_skip_cached_pdf_and_docx_in_snapshot_order() {
+    fn cancel_and_resume_skip_cached_pdf_docx_and_xlsx_in_snapshot_order() {
         let tmp = TempDir::new("mixed-resume");
         let first_pdf = tmp.write("one.pdf", &text_pdf("one"));
         let docx = tmp.write("two.docx", b"docx stub");
-        let second_pdf = tmp.write("three.pdf", &text_pdf("three"));
+        let xlsx = tmp.write(
+            "three.xlsx",
+            &test_xlsx_from_parts(
+                "Blatt",
+                None,
+                r#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>ResumeZelle</t></is></c></row></sheetData></worksheet>"#,
+            ),
+        );
+        let second_pdf = tmp.write("four.pdf", &text_pdf("four"));
         let root = dir(
             "root",
             &tmp.path.to_string_lossy(),
@@ -1043,7 +1075,8 @@ mod tests {
             vec![
                 file("one.pdf", &first_pdf, 1),
                 file("two.docx", &docx, 1),
-                file("three.pdf", &second_pdf, 1),
+                file("three.xlsx", &xlsx, 1),
+                file("four.pdf", &second_pdf, 1),
             ],
         );
         let state = AppState::new();
@@ -1059,7 +1092,7 @@ mod tests {
             .expect("cancel");
             assert_eq!(progress.status, ContentPrepareStatus::Cancelled);
             assert_eq!(progress.processed_document_count, 2);
-            assert_eq!(progress.total_document_count, 3);
+            assert_eq!(progress.total_document_count, 4);
         }
         let partial = state.content_cache_for(43).expect("partial");
         assert!(!partial.complete);
@@ -1072,21 +1105,24 @@ mod tests {
             .contains_key(&docx.to_string_lossy().into_owned()));
         assert!(!partial
             .entries
+            .contains_key(&xlsx.to_string_lossy().into_owned()));
+        assert!(!partial
+            .entries
             .contains_key(&second_pdf.to_string_lossy().into_owned()));
 
         let (events, on_progress) = record_progress();
         let progress = run_prepare_content_guarded(&state, 43, on_progress).expect("resume");
         assert_eq!(progress.status, ContentPrepareStatus::Completed);
-        assert_eq!(progress.total_document_count, 3);
-        assert_eq!(progress.processed_document_count, 3);
-        assert_eq!(progress.searchable_count, 2);
+        assert_eq!(progress.total_document_count, 4);
+        assert_eq!(progress.processed_document_count, 4);
+        assert_eq!(progress.searchable_count, 3);
         assert_eq!(progress.problem_count, 1);
         let cache = state.content_cache_for(43).expect("done");
         assert!(cache.complete);
-        assert_eq!(cache.entries.len(), 3);
+        assert_eq!(cache.entries.len(), 4);
         let start = events.lock().expect("events")[0].clone();
         assert_eq!(start.processed_document_count, 2);
-        assert_eq!(start.total_document_count, 3);
+        assert_eq!(start.total_document_count, 4);
         assert_eq!(
             cache
                 .entries
@@ -1103,7 +1139,11 @@ mod tests {
                 .status,
             ContentStatus::ParseError
         );
+        assert_eq!(status_of(&state, 43, &xlsx), ContentStatus::Searchable);
         assert_eq!(status_of(&state, 43, &second_pdf), ContentStatus::Searchable);
+        let hits = crate::content::search_file_content(&state, 43, "ResumeZelle").expect("xlsx search");
+        assert_eq!(hits.total_hit_count, 1);
+        assert_eq!(hits.hits[0].format, ContentFormat::Xlsx);
     }
 
     #[test]
@@ -1121,7 +1161,14 @@ mod tests {
             ),
         );
         let broken = tmp.write("kaputt.docx", b"not a zip");
-        let xlsx = tmp.write("tabelle.xlsx", b"xlsx");
+        let xlsx = tmp.write(
+            "tabelle.xlsx",
+            &test_xlsx_from_parts(
+                "Tabelle",
+                None,
+                r#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Brandschutzklappe</t></is></c></row></sheetData></worksheet>"#,
+            ),
+        );
         let root = dir(
             "root",
             &tmp.path.to_string_lossy(),
@@ -1138,25 +1185,27 @@ mod tests {
         state.store_snapshot(51, result_from_root(root));
         let progress = run_prepare_content_guarded(&state, 51, |_| {}).expect("prepare");
         assert_eq!(progress.status, ContentPrepareStatus::Completed);
-        assert_eq!(progress.total_document_count, 4);
-        assert_eq!(progress.processed_document_count, 4);
-        assert_eq!(progress.searchable_count, 2);
+        assert_eq!(progress.total_document_count, 5);
+        assert_eq!(progress.processed_document_count, 5);
+        assert_eq!(progress.searchable_count, 3);
         assert_eq!(progress.no_text_count, 1);
         assert_eq!(progress.problem_count, 1);
         assert_eq!(status_of(&state, 51, &pdf), ContentStatus::Searchable);
         assert_eq!(status_of(&state, 51, &good), ContentStatus::Searchable);
         assert_eq!(status_of(&state, 51, &empty), ContentStatus::NoExtractableText);
         assert_eq!(status_of(&state, 51, &broken), ContentStatus::ParseError);
+        assert_eq!(status_of(&state, 51, &xlsx), ContentStatus::Searchable);
         let cache = state.content_cache_for(51).expect("cache");
         assert!(cache.complete);
-        assert!(!cache.entries.contains_key(&xlsx.to_string_lossy().into_owned()));
+        assert!(cache.entries.contains_key(&xlsx.to_string_lossy().into_owned()));
 
         let result = crate::content::search_file_content(&state, 51, "Brandschutzklappe").expect("search");
-        assert_eq!(result.total_hit_count, 2);
-        assert_eq!(result.returned_hit_count, 2);
+        assert_eq!(result.total_hit_count, 3);
+        assert_eq!(result.returned_hit_count, 3);
         let names: Vec<&str> = result.hits.iter().map(|hit| hit.name.as_str()).collect();
         assert!(names.contains(&"a.pdf"));
         assert!(names.contains(&"brief.docx"));
+        assert!(names.contains(&"tabelle.xlsx"));
         assert_eq!(
             result.hits.iter().find(|hit| hit.name == "a.pdf").map(|hit| hit.format),
             Some(ContentFormat::Pdf)
@@ -1171,6 +1220,13 @@ mod tests {
         assert!(!docx_hit.snippet.contains("w:t"));
         assert!(!docx_hit.snippet.contains("<?xml"));
         assert!(!docx_hit.snippet.contains("w:document"));
+        let xlsx_hit = result
+            .hits
+            .iter()
+            .find(|hit| hit.name == "tabelle.xlsx")
+            .expect("xlsx hit");
+        assert_eq!(xlsx_hit.format, ContentFormat::Xlsx);
+        assert!(!xlsx_hit.snippet.contains("sheetData"));
 
         let and_hits = crate::content::search_file_content(&state, 51, "Brandschutzklappe Nachtrag")
             .expect("and");

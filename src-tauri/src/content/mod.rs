@@ -3,8 +3,10 @@ use std::collections::HashMap;
 mod docx;
 mod extract;
 mod format;
+mod ooxml;
 mod prepare;
 mod search;
+mod xlsx;
 
 pub use extract::extract_path;
 pub use prepare::{
@@ -12,7 +14,7 @@ pub use prepare::{
 };
 pub use search::{search_file_content, ContentSearchResult};
 
-/// Dateiformat für den Inhaltsextrakt. P1-E2.2 extrahiert PDF und DOCX.
+/// Dateiformat für den Inhaltsextrakt. P1-E3 extrahiert PDF, DOCX und XLSX.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ContentFormat {

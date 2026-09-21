@@ -12,14 +12,14 @@ export type SearchMode = "name" | "content";
 
 export const DEFAULT_SEARCH_MODE: SearchMode = "name";
 export const NAME_SEARCH_PLACEHOLDER = "Dateiname suchen …";
-export const CONTENT_SEARCH_PLACEHOLDER = "In PDF- und Word-Inhalten suchen …";
-export const CONTENT_SEARCH_ARIA_LABEL = "In PDF- und Word-Inhalten suchen";
+export const CONTENT_SEARCH_PLACEHOLDER = "In PDF-, Word- und Excel-Inhalten suchen …";
+export const CONTENT_SEARCH_ARIA_LABEL = "In PDF-, Word- und Excel-Inhalten suchen";
 export const CONTENT_STALE_SNAPSHOT_MESSAGE =
   "Bitte den Ordner erneut einlesen, bevor die Inhaltssuche genutzt wird.";
 export const CONTENT_NO_DOCUMENTS_MESSAGE =
   "Im eingelesenen Bestand wurden keine durchsuchbaren Dokumente gefunden.";
 export const CONTENT_SUPPORTED_FORMATS_HINT =
-  "Durchsucht werden PDF- und Word-Dateien (.docx).";
+  "Durchsucht werden PDF-, Word- (.docx) und Excel-Dateien (.xlsx).";
 export const CONTENT_NO_HITS_MESSAGE = "Keine Treffer gefunden.";
 export const CONTENT_FILTER_HIDES_HITS_MESSAGE =
   "Keine Treffer in der aktuellen Ansicht.\nWeitere Treffer sind durch den Anzeigefilter ausgeblendet.";
@@ -60,12 +60,15 @@ export function visibleContentHits(
   return hits.filter((hit) => visibleIds.has(hit.nodeId));
 }
 
-export function contentHitFormatLabel(format: ContentFormat): "PDF" | "DOCX" | null {
+export function contentHitFormatLabel(format: ContentFormat): "PDF" | "DOCX" | "XLSX" | null {
   if (format === "pdf") {
     return "PDF";
   }
   if (format === "docx") {
     return "DOCX";
+  }
+  if (format === "xlsx") {
+    return "XLSX";
   }
   return null;
 }

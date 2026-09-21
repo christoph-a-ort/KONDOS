@@ -4,6 +4,7 @@ use std::path::Path;
 
 use super::docx::extract_docx_text;
 use super::format::content_format_from_name;
+use super::xlsx::extract_xlsx_text;
 use super::{ContentEntry, ContentFormat, ContentStatus};
 
 /// Dateien über dieser Größe werden nicht vollständig gelesen.
@@ -92,9 +93,10 @@ fn extract_named_path(path: &Path, path_str: String, name: String) -> ContentEnt
             Ok(raw) => entry_from_extracted_text(path_str, name, ContentFormat::Docx, raw),
             Err(status) => status_entry(path_str, name, ContentFormat::Docx, status),
         },
-        Some(ContentFormat::Xlsx) => {
-            status_entry(path_str, name, ContentFormat::Xlsx, ContentStatus::ParseError)
-        }
+        Some(ContentFormat::Xlsx) => match catch_parser_unwind(|| extract_xlsx_text(&bytes)) {
+            Ok(raw) => entry_from_extracted_text(path_str, name, ContentFormat::Xlsx, raw),
+            Err(status) => status_entry(path_str, name, ContentFormat::Xlsx, status),
+        },
         // Unbekannte Endungen werden nicht gesammelt. ContentEntry.format ist kein Option;
         // ohne neue Enum-Variante bleibt Pdf nur dieser direkte extract_path-Fallback.
         None => status_entry(path_str, name, ContentFormat::Pdf, ContentStatus::ParseError),
@@ -532,7 +534,7 @@ mod tests {
     }
 
     #[test]
-    fn unimplemented_xlsx_keeps_xlsx_format() {
+    fn invalid_xlsx_keeps_xlsx_format_and_is_not_parsed_as_pdf() {
         let path = std::env::temp_dir().join(format!(
             "kondos-e21-{}-{}.xlsx",
             std::process::id(),

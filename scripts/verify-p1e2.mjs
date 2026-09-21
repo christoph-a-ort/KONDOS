@@ -30,12 +30,12 @@ const productive = [formatRs, extractRs, prepareRs, searchRs, commandsRs, typesT
   "\n",
 );
 
-assert(formatRs.includes("ContentFormat::Pdf | ContentFormat::Docx"), "A: collect supports Pdf|Docx");
+assert(formatRs.includes("ContentFormat::Pdf | ContentFormat::Docx | ContentFormat::Xlsx"), "A: collect supports Pdf|Docx|Xlsx");
 assert(formatRs.includes("is_supported_content_document"), "A: shared support helper");
-assert(formatRs.includes("ContentFormat::Xlsx"), "xlsx remains reserved");
+assert(formatRs.includes("ContentFormat::Xlsx"), "xlsx format exists");
 assert(
-  formatRs.includes("assert!(!is_supported_content_document(ContentFormat::Xlsx))"),
-  "F: XLSX is not collected",
+  formatRs.includes("assert!(is_supported_content_document(ContentFormat::Xlsx))"),
+  "F: XLSX is collected",
 );
 
 assert(prepareRs.includes("fn collect_snapshot_content_files"), "collect renamed");
@@ -76,9 +76,11 @@ assert(
   "PDF extract keeps Pdf format",
 );
 assert(extractRs.includes("extract_docx_text"), "DOCX extract is dispatched");
+assert(extractRs.includes("extract_xlsx_text"), "XLSX extract is dispatched");
 assert(!extractRs.includes("word/document.xml"), "DOCX XML parser stays in docx.rs");
-assert(!extractRs.includes("zip::"), "zip usage stays in docx.rs");
-assert(!extractRs.includes("quick_xml"), "quick-xml usage stays in docx.rs");
+assert(!extractRs.includes("xl/workbook.xml"), "XLSX XML parser stays in xlsx.rs");
+assert(!extractRs.includes("zip::"), "zip usage stays out of extract.rs");
+assert(!extractRs.includes("quick_xml"), "quick-xml usage stays out of extract.rs");
 
 const docxRs = read("src-tauri/src/content/docx.rs");
 assert(docxRs.includes("word/document.xml"), "document.xml is the required part");
@@ -109,18 +111,16 @@ assert(!productive.includes("search_docx"), "no DOCX-specific search function");
 
 const treeView = read("src/ui/TreeView.tsx");
 const css = read("src/App.css");
-assert(helpers.includes("In PDF- und Word-Inhalten suchen …"), "placeholder names PDF and Word");
-assert(helpers.includes('CONTENT_SEARCH_ARIA_LABEL = "In PDF- und Word-Inhalten suchen"'), "aria names PDF and Word");
+assert(helpers.includes("In PDF-, Word- und Excel-Inhalten suchen …"), "placeholder names PDF, Word and Excel");
+assert(helpers.includes('CONTENT_SEARCH_ARIA_LABEL = "In PDF-, Word- und Excel-Inhalten suchen"'), "aria names PDF, Word and Excel");
 assert(treeView.includes("CONTENT_SEARCH_ARIA_LABEL"), "TreeView uses shared content aria-label");
 assert(!helpers.includes("In PDF-Inhalten suchen …"), "old PDF-only placeholder gone");
 assert(!treeView.includes("In PDF-Inhalten suchen"), "old PDF-only aria gone");
-assert(helpers.includes("contentHitFormatLabel"), "shared PDF/DOCX format label");
+assert(helpers.includes("contentHitFormatLabel"), "shared format label");
 assert(results.includes("content-hit-format"), "format badge in shared hit list");
 assert(css.includes(".content-hit-format"), "compact format badge CSS");
-assert(helpers.includes("Durchsucht werden PDF- und Word-Dateien (.docx)."), "empty stock names PDF and Word");
-assert(!helpers.includes("PDF, Word und Excel"), "XLSX is not announced as searchable");
-assert(!results.includes("Excel"), "results do not advertise Excel");
-assert(!treeView.includes("Excel"), "search bar does not advertise Excel");
+assert(helpers.includes("Durchsucht werden PDF-, Word- (.docx) und Excel-Dateien (.xlsx)."), "empty stock names PDF, Word and Excel");
+assert(helpers.includes('format === "xlsx"'), "XLSX format label is implemented");
 assert(results.includes("onClick={onActivate}"), "hit click still activates tree");
 assert(results.includes("onDoubleClick") && results.includes("onOpen()"), "hit double-click still opens");
 assert(treeView.includes("openWithDefault(resultScanId, nodeId)"), "open path remains format-agnostic");

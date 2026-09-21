@@ -14,10 +14,12 @@ pub fn content_format_from_name(name: &str) -> Option<ContentFormat> {
     }
 }
 
-/// Inhaltsdokumente, die die Prepare-Pipeline in diesem Stand sammelt.
-/// XLSX bleibt bis P1-E3 erkannt, aber ungesammelt.
+/// Inhaltsdokumente, die die Prepare-Pipeline sammelt.
 pub fn is_supported_content_document(format: ContentFormat) -> bool {
-    matches!(format, ContentFormat::Pdf | ContentFormat::Docx)
+    matches!(
+        format,
+        ContentFormat::Pdf | ContentFormat::Docx | ContentFormat::Xlsx
+    )
 }
 
 #[cfg(test)]
@@ -41,10 +43,10 @@ mod tests {
     }
 
     #[test]
-    fn prepare_collects_pdf_and_docx_but_not_xlsx() {
+    fn prepare_collects_pdf_docx_and_xlsx() {
         use super::is_supported_content_document;
         assert!(is_supported_content_document(ContentFormat::Pdf));
         assert!(is_supported_content_document(ContentFormat::Docx));
-        assert!(!is_supported_content_document(ContentFormat::Xlsx));
+        assert!(is_supported_content_document(ContentFormat::Xlsx));
     }
 }

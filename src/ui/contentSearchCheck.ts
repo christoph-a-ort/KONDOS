@@ -61,15 +61,25 @@ export function runP1e1Check(): void {
   assert(DEFAULT_SEARCH_MODE === "name", "A: default mode is Dateiname");
   assert(NAME_SEARCH_PLACEHOLDER === "Dateiname suchen …", "A: name placeholder");
   assert(
-    CONTENT_SEARCH_PLACEHOLDER === "In PDF- und Word-Inhalten suchen …",
-    "A: content placeholder names PDF and Word",
+    CONTENT_SEARCH_PLACEHOLDER === "In PDF-, Word- und Excel-Inhalten suchen …",
+    "A: content placeholder names PDF, Word and Excel",
   );
   assert(
-    CONTENT_SEARCH_ARIA_LABEL === "In PDF- und Word-Inhalten suchen",
-    "A: content aria-label names PDF and Word",
+    CONTENT_SEARCH_ARIA_LABEL === "In PDF-, Word- und Excel-Inhalten suchen",
+    "A: content aria-label names PDF, Word and Excel",
   );
-  assert(CONTENT_SEARCH_PLACEHOLDER.includes("PDF") && CONTENT_SEARCH_PLACEHOLDER.includes("Word"), "A: placeholder PDF+Word");
-  assert(CONTENT_SEARCH_ARIA_LABEL.includes("PDF") && CONTENT_SEARCH_ARIA_LABEL.includes("Word"), "A: aria PDF+Word");
+  assert(
+    CONTENT_SEARCH_PLACEHOLDER.includes("PDF") &&
+      CONTENT_SEARCH_PLACEHOLDER.includes("Word") &&
+      CONTENT_SEARCH_PLACEHOLDER.includes("Excel"),
+    "A: placeholder PDF+Word+Excel",
+  );
+  assert(
+    CONTENT_SEARCH_ARIA_LABEL.includes("PDF") &&
+      CONTENT_SEARCH_ARIA_LABEL.includes("Word") &&
+      CONTENT_SEARCH_ARIA_LABEL.includes("Excel"),
+    "A: aria PDF+Word+Excel",
+  );
   assert(!CONTENT_SEARCH_PLACEHOLDER.includes("In PDF-Inhalten suchen"), "K: old PDF-only placeholder gone");
   assert(!CONTENT_SEARCH_ARIA_LABEL.includes("In PDF-Inhalten suchen"), "K: old PDF-only aria gone");
   assert(!hasContentQuery(""), "B: empty query is not a search");
@@ -132,10 +142,12 @@ export function runP1e1Check(): void {
   const mixedHits = [
     hit("C:/root/A/a.pdf", "a.pdf"),
     hit("C:/root/B/brief.docx", "brief.docx", { format: "docx" }),
+    hit("C:/root/C/tabelle.xlsx", "tabelle.xlsx", { format: "xlsx" }),
   ];
   const mixedTree = dir("C:/root", "root", [
     dir("C:/root/A", "A", [file("C:/root/A/a.pdf", "a.pdf"), file("C:/root/A/note.txt", "note.txt")]),
     dir("C:/root/B", "B", [file("C:/root/B/brief.docx", "brief.docx")]),
+    dir("C:/root/C", "C", [file("C:/root/C/tabelle.xlsx", "tabelle.xlsx")]),
   ]);
   const pdfView = dir("C:/root", "root", [
     dir("C:/root/A", "A", [file("C:/root/A/a.pdf", "a.pdf")]),
@@ -156,18 +168,18 @@ export function runP1e1Check(): void {
     "L: mixed viewRoot keeps DOCX hit",
   );
   assert(
-    visibleContentHits(mixedHits, collectNodeIds(mixedTree)).length === 2,
-    "L: mixed unfiltered keeps PDF and DOCX backend hits",
+    visibleContentHits(mixedHits, collectNodeIds(mixedTree)).length === 3,
+    "L: mixed unfiltered keeps PDF, DOCX and XLSX backend hits",
   );
   assert(contentHitFormatLabel("pdf") === "PDF", "C: PDF hit format label");
   assert(contentHitFormatLabel("docx") === "DOCX", "D: DOCX hit format label");
-  assert(contentHitFormatLabel("xlsx") === null, "N: XLSX is not shown as a supported hit format");
+  assert(contentHitFormatLabel("xlsx") === "XLSX", "N: XLSX hit format label");
   assert(
-    mixedHits.map((entry) => contentHitFormatLabel(entry.format)).join(",") === "PDF,DOCX",
-    "E: PDF and DOCX labels appear in the same hit list order",
+    mixedHits.map((entry) => contentHitFormatLabel(entry.format)).join(",") === "PDF,DOCX,XLSX",
+    "E: PDF, DOCX and XLSX labels appear in the same hit list order",
   );
   assert(
-    mixedHits.map((entry) => entry.name).join(",") === "a.pdf,brief.docx",
+    mixedHits.map((entry) => entry.name).join(",") === "a.pdf,brief.docx,tabelle.xlsx",
     "F: format labels do not reorder hits",
   );
   assert(
@@ -281,11 +293,9 @@ export function runP1e1Check(): void {
   assert(
     noDocuments !== null &&
       noDocuments.includes("keine durchsuchbaren Dokumente") &&
-      noDocuments.includes("PDF- und Word-Dateien (.docx)") &&
-      !noDocuments.includes("keine PDF-Dateien") &&
-      !noDocuments.toLocaleLowerCase().includes("xlsx") &&
-      !noDocuments.toLocaleLowerCase().includes("excel"),
-    "M/N: empty stock is document-neutral and names PDF + Word (.docx)",
+      noDocuments.includes("PDF-, Word- (.docx) und Excel-Dateien (.xlsx)") &&
+      !noDocuments.includes("keine PDF-Dateien"),
+    "M/N: empty stock is document-neutral and names PDF, Word (.docx) and Excel (.xlsx)",
   );
   const onlyDocxPrepared = emptyContentStatus({
     hasResult: true,

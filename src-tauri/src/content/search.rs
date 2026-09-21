@@ -144,7 +144,7 @@ fn hit_from_entry(
     }
     let text = entry.text.as_deref()?;
     let (folded, orig_of_folded) = fold_with_map(text);
-    if !terms.iter().all(|term| folded.contains(term.as_str())) {
+    if !terms.iter().all(|term| term_occurs(&folded, term)) {
         return None;
     }
     let match_count = terms
@@ -181,15 +181,64 @@ fn fold_with_map(original: &str) -> (String, Vec<usize>) {
     (folded, orig_of_folded)
 }
 
+fn is_ascii_digit_term(term: &str) -> bool {
+    !term.is_empty() && term.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn has_ascii_digit_before(text: &str, byte_index: usize) -> bool {
+    if byte_index == 0 {
+        return false;
+    }
+    text.get(..byte_index)
+        .and_then(|prefix| prefix.chars().next_back())
+        .is_some_and(|ch| ch.is_ascii_digit())
+}
+
+fn has_ascii_digit_at(text: &str, byte_index: usize) -> bool {
+    text.get(byte_index..)
+        .and_then(|rest| rest.chars().next())
+        .is_some_and(|ch| ch.is_ascii_digit())
+}
+
+fn term_match_allowed(haystack: &str, start: usize, end: usize, term: &str) -> bool {
+    if !is_ascii_digit_term(term) {
+        return true;
+    }
+    !has_ascii_digit_before(haystack, start) && !has_ascii_digit_at(haystack, end)
+}
+
+fn find_term_from(haystack: &str, term: &str, from: usize) -> Option<usize> {
+    if term.is_empty() || from > haystack.len() {
+        return None;
+    }
+    let mut cursor = from;
+    while let Some(found) = haystack.get(cursor..)?.find(term) {
+        let start = cursor + found;
+        let end = start + term.len();
+        if term_match_allowed(haystack, start, end, term) {
+            return Some(start);
+        }
+        cursor = start.saturating_add(1);
+        if cursor <= start {
+            break;
+        }
+    }
+    None
+}
+
+fn term_occurs(haystack: &str, term: &str) -> bool {
+    find_term_from(haystack, term, 0).is_some()
+}
+
 fn count_nonoverlapping(haystack: &str, needle: &str) -> u64 {
     if needle.is_empty() {
         return 0;
     }
     let mut count = 0;
     let mut from = 0;
-    while let Some(found) = haystack[from..].find(needle) {
+    while let Some(start) = find_term_from(haystack, needle, from) {
         count += 1;
-        from += found + needle.len();
+        from = start + needle.len();
     }
     count
 }
@@ -206,7 +255,7 @@ fn leftmost_term_range(
 ) -> Option<OrigRange> {
     let mut best: Option<OrigRange> = None;
     for term in terms {
-        let Some(byte) = folded.find(term.as_str()) else {
+        let Some(byte) = find_term_from(folded, term, 0) else {
             continue;
         };
         let start_folded = folded[..byte].chars().count();
@@ -358,8 +407,7 @@ fn highlight_ranges(snippet: &str, terms: &[String]) -> Vec<HighlightRange> {
     let mut ranges = Vec::new();
     for term in terms {
         let mut from = 0;
-        while let Some(found) = folded[from..].find(term.as_str()) {
-            let start_byte_folded = from + found;
+        while let Some(start_byte_folded) = find_term_from(&folded, term, from) {
             let end_byte_folded = start_byte_folded + term.len();
             let start_fchar = folded[..start_byte_folded].chars().count();
             let end_fchar = folded[..end_byte_folded].chars().count();
@@ -567,6 +615,251 @@ mod tests {
             far.hits[0].snippet.contains("Brandschutzklappe")
                 || far.hits[0].snippet.contains("Nachtrag")
         );
+    }
+
+    #[test]
+    fn ascii_digit_terms_match_at_digit_boundaries_only() {
+        assert_eq!(count_nonoverlapping("720", "720"), 1);
+        assert_eq!(count_nonoverlapping("720,00", "720"), 1);
+        assert_eq!(count_nonoverlapping("720.00", "720"), 1);
+        assert_eq!(count_nonoverlapping("720 €", "720"), 1);
+        assert_eq!(count_nonoverlapping("EUR 720", "720"), 1);
+        assert_eq!(count_nonoverlapping("Betrag 720", "720"), 1);
+        assert_eq!(count_nonoverlapping("41720", "720"), 0);
+        assert_eq!(count_nonoverlapping("17205", "720"), 0);
+        assert_eq!(count_nonoverlapping("7200", "720"), 0);
+        assert_eq!(count_nonoverlapping("1720", "720"), 0);
+        assert_eq!(count_nonoverlapping("41720 720 720,00", "720"), 2);
+
+        for (text, scan_id) in [
+            ("720", 81_u64),
+            ("720,00", 82),
+            ("720.00", 83),
+            ("720 €", 84),
+            ("EUR 720", 85),
+            ("Betrag 720", 86),
+        ] {
+            let state = ready_state(
+                scan_id,
+                vec![(
+                    "doc.pdf",
+                    "C:\\root\\doc.pdf",
+                    searchable("C:\\root\\doc.pdf", "doc.pdf", text),
+                )],
+            );
+            let result = search_ok(&state, scan_id, "720");
+            assert_eq!(result.total_hit_count, 1, "{text}");
+            assert!(result.hits[0].snippet.contains("720"), "{text}");
+        }
+
+        for (text, scan_id) in [("41720", 87_u64), ("17205", 88), ("7200", 89), ("1720", 90)] {
+            let state = ready_state(
+                scan_id,
+                vec![(
+                    "doc.pdf",
+                    "C:\\root\\doc.pdf",
+                    searchable("C:\\root\\doc.pdf", "doc.pdf", text),
+                )],
+            );
+            assert_eq!(search_ok(&state, scan_id, "720").total_hit_count, 0, "{text}");
+        }
+    }
+
+    #[test]
+    fn numeric_snippet_anchor_skips_earlier_embedded_digits() {
+        let text = format!(
+            "Blatt 2014 enthält 41720. {} Betrag 720,00 € auf Blatt 2023. {}",
+            "zwischen ".repeat(40),
+            "danach ".repeat(40),
+        );
+        let state = ready_state(
+            91,
+            vec![(
+                "liste.xlsx",
+                "C:\\root\\liste.xlsx",
+                searchable_with("C:\\root\\liste.xlsx", "liste.xlsx", &text, ContentFormat::Xlsx),
+            )],
+        );
+        let result = search_ok(&state, 91, "720");
+        assert_eq!(result.total_hit_count, 1);
+        assert_eq!(result.hits[0].match_count, 1);
+        assert!(result.hits[0].snippet.contains("720"), "{:?}", result.hits[0].snippet);
+        assert!(
+            result.hits[0].snippet.contains("2023") || result.hits[0].snippet.contains("Betrag"),
+            "{:?}",
+            result.hits[0].snippet
+        );
+        assert!(!result.hits[0].snippet.contains("41720"), "{:?}", result.hits[0].snippet);
+        let marked: Vec<String> = result.hits[0]
+            .highlights
+            .iter()
+            .map(|range| slice_utf16(&result.hits[0].snippet, range.start, range.end))
+            .collect();
+        assert!(marked.iter().any(|part| part.contains("720")), "{marked:?}");
+        assert!(marked.iter().all(|part| !part.contains("41720")), "{marked:?}");
+    }
+
+    #[test]
+    fn numeric_highlights_do_not_mark_embedded_digits_nearby() {
+        let state = ready_state(
+            92,
+            vec![(
+                "mix.pdf",
+                "C:\\root\\mix.pdf",
+                searchable("C:\\root\\mix.pdf", "mix.pdf", "41720 und 720 und 7200"),
+            )],
+        );
+        let result = search_ok(&state, 92, "720");
+        assert_eq!(result.hits[0].match_count, 1);
+        let marked: Vec<String> = result.hits[0]
+            .highlights
+            .iter()
+            .map(|range| slice_utf16(&result.hits[0].snippet, range.start, range.end))
+            .collect();
+        assert_eq!(marked, vec!["720".to_string()]);
+    }
+
+    #[test]
+    fn mixed_text_substring_and_numeric_digit_boundary_and() {
+        let text = "Rechnungsliste 41720 später Betrag 720,00";
+        let state = ready_state(
+            93,
+            vec![(
+                "brief.docx",
+                "C:\\root\\brief.docx",
+                searchable_with("C:\\root\\brief.docx", "brief.docx", text, ContentFormat::Docx),
+            )],
+        );
+        let result = search_ok(&state, 93, "Rechnung 720");
+        assert_eq!(result.total_hit_count, 1);
+        assert!(result.hits[0].snippet.contains("Rechnungsliste") || result.hits[0].snippet.contains("720"));
+        assert_eq!(search_ok(&state, 93, "Rechnung 41720").total_hit_count, 1);
+        assert_eq!(search_ok(&state, 93, "Rechnung 7200").total_hit_count, 0);
+        assert_eq!(search_ok(&state, 93, "klappe").total_hit_count, 0);
+    }
+
+    #[test]
+    fn numeric_digit_boundary_is_shared_across_pdf_docx_xlsx() {
+        let state = ready_state(
+            94,
+            vec![
+                (
+                    "a.pdf",
+                    "C:\\root\\a.pdf",
+                    searchable("C:\\root\\a.pdf", "a.pdf", "nur 41720 im PDF"),
+                ),
+                (
+                    "brief.docx",
+                    "C:\\root\\brief.docx",
+                    searchable_with(
+                        "C:\\root\\brief.docx",
+                        "brief.docx",
+                        "Betrag 720,00 in Word",
+                        ContentFormat::Docx,
+                    ),
+                ),
+                (
+                    "tabelle.xlsx",
+                    "C:\\root\\tabelle.xlsx",
+                    searchable_with(
+                        "C:\\root\\tabelle.xlsx",
+                        "tabelle.xlsx",
+                        "7200 in Excel",
+                        ContentFormat::Xlsx,
+                    ),
+                ),
+            ],
+        );
+        let result = search_ok(&state, 94, "720");
+        assert_eq!(result.total_hit_count, 1);
+        assert_eq!(result.hits[0].name, "brief.docx");
+        assert_eq!(result.hits[0].format, ContentFormat::Docx);
+
+        let all_valid = ready_state(
+            95,
+            vec![
+                (
+                    "a.pdf",
+                    "C:\\root\\a.pdf",
+                    searchable("C:\\root\\a.pdf", "a.pdf", "720"),
+                ),
+                (
+                    "brief.docx",
+                    "C:\\root\\brief.docx",
+                    searchable_with("C:\\root\\brief.docx", "brief.docx", "EUR 720", ContentFormat::Docx),
+                ),
+                (
+                    "tabelle.xlsx",
+                    "C:\\root\\tabelle.xlsx",
+                    searchable_with("C:\\root\\tabelle.xlsx", "tabelle.xlsx", "720.00", ContentFormat::Xlsx),
+                ),
+            ],
+        );
+        let hits = search_ok(&all_valid, 95, "720");
+        assert_eq!(hits.total_hit_count, 3);
+        assert_eq!(hits.returned_hit_count, 3);
+        assert!(hits.hits.iter().any(|hit| hit.format == ContentFormat::Pdf));
+        assert!(hits.hits.iter().any(|hit| hit.format == ContentFormat::Docx));
+        assert!(hits.hits.iter().any(|hit| hit.format == ContentFormat::Xlsx));
+    }
+
+    #[test]
+    fn xlsx_styled_date_text_is_found_by_german_and_iso() {
+        let state = ready_state(
+            96,
+            vec![(
+                "datum.xlsx",
+                "C:\\root\\datum.xlsx",
+                searchable_with(
+                    "C:\\root\\datum.xlsx",
+                    "datum.xlsx",
+                    "Blatt\n17.05.2025 2025-05-17 45794",
+                    ContentFormat::Xlsx,
+                ),
+            )],
+        );
+        assert_eq!(search_ok(&state, 96, "17.05.2025").total_hit_count, 1);
+        assert_eq!(search_ok(&state, 96, "2025-05-17").total_hit_count, 1);
+    }
+
+    #[test]
+    fn xlsx_unstyled_41720_is_not_found_as_date() {
+        let state = ready_state(
+            97,
+            vec![(
+                "zahl.xlsx",
+                "C:\\root\\zahl.xlsx",
+                searchable_with(
+                    "C:\\root\\zahl.xlsx",
+                    "zahl.xlsx",
+                    "Blatt\n41720",
+                    ContentFormat::Xlsx,
+                ),
+            )],
+        );
+        assert_eq!(search_ok(&state, 97, "22.03.2014").total_hit_count, 0);
+        assert_eq!(search_ok(&state, 97, "720").total_hit_count, 0);
+        assert_eq!(search_ok(&state, 97, "41720").total_hit_count, 1);
+    }
+
+    #[test]
+    fn xlsx_styled_41720_is_found_as_date_and_720_does_not_match() {
+        let state = ready_state(
+            98,
+            vec![(
+                "datum.xlsx",
+                "C:\\root\\datum.xlsx",
+                searchable_with(
+                    "C:\\root\\datum.xlsx",
+                    "datum.xlsx",
+                    "Blatt\n22.03.2014 2014-03-22 41720",
+                    ContentFormat::Xlsx,
+                ),
+            )],
+        );
+        assert_eq!(search_ok(&state, 98, "22.03.2014").total_hit_count, 1);
+        assert_eq!(search_ok(&state, 98, "720").total_hit_count, 0);
+        assert_eq!(search_ok(&state, 98, "41720").total_hit_count, 1);
     }
 
     #[test]
@@ -896,7 +1189,7 @@ mod tests {
     }
 
     #[test]
-    fn search_counts_pdf_and_docx_not_xlsx_and_still_finds_pdf() {
+    fn search_counts_pdf_docx_and_xlsx_and_still_finds_pdf() {
         let state = AppState::new();
         state.store_snapshot(
             44,
@@ -927,10 +1220,21 @@ mod tests {
                 },
             )
             .expect("docx stub");
+        state
+            .insert_content_entry(
+                44,
+                searchable_with(
+                    "C:\\root\\tabelle.xlsx",
+                    "tabelle.xlsx",
+                    "andere Tabelle",
+                    ContentFormat::Xlsx,
+                ),
+            )
+            .expect("xlsx");
         state.mark_content_complete(44).expect("complete");
         let result = search_ok(&state, 44, "Brandschutzklappe Nachtrag");
-        assert_eq!(result.total_document_count, 2);
-        assert_eq!(result.processed_document_count, 2);
+        assert_eq!(result.total_document_count, 3);
+        assert_eq!(result.processed_document_count, 3);
         assert_eq!(result.total_hit_count, 1);
         assert_eq!(result.hits[0].name, "a.pdf");
         assert_eq!(result.hits[0].format, ContentFormat::Pdf);
@@ -938,14 +1242,14 @@ mod tests {
     }
 
     #[test]
-    fn mixed_pdf_and_docx_hits_share_one_200_cap() {
+    fn mixed_pdf_docx_and_xlsx_hits_share_one_200_cap() {
         let mut files = Vec::new();
         let total = MAX_CONTENT_SEARCH_HITS + 7;
         for i in 0..total {
-            let (name, format) = if i % 2 == 0 {
-                (format!("hit {i:03}.pdf"), ContentFormat::Pdf)
-            } else {
-                (format!("hit {i:03}.docx"), ContentFormat::Docx)
+            let (name, format) = match i % 3 {
+                0 => (format!("hit {i:03}.pdf"), ContentFormat::Pdf),
+                1 => (format!("hit {i:03}.docx"), ContentFormat::Docx),
+                _ => (format!("hit {i:03}.xlsx"), ContentFormat::Xlsx),
             };
             let path = format!("C:\\root\\{name}");
             files.push((
@@ -966,10 +1270,11 @@ mod tests {
         assert_eq!(result.hits.len(), MAX_CONTENT_SEARCH_HITS);
         assert!(result.hits.iter().any(|hit| hit.format == ContentFormat::Pdf));
         assert!(result.hits.iter().any(|hit| hit.format == ContentFormat::Docx));
+        assert!(result.hits.iter().any(|hit| hit.format == ContentFormat::Xlsx));
     }
 
     #[test]
-    fn mixed_pdf_and_docx_hit_order_ignores_format() {
+    fn mixed_pdf_docx_and_xlsx_hit_order_ignores_format() {
         let state = ready_state(
             62,
             vec![
@@ -981,6 +1286,16 @@ mod tests {
                         "Datei 10.docx",
                         "Inhalt",
                         ContentFormat::Docx,
+                    ),
+                ),
+                (
+                    "Datei 2.xlsx",
+                    "C:\\root\\d\\Datei 2.xlsx",
+                    searchable_with(
+                        "C:\\root\\d\\Datei 2.xlsx",
+                        "Datei 2.xlsx",
+                        "Inhalt",
+                        ContentFormat::Xlsx,
                     ),
                 ),
                 (
@@ -1011,6 +1326,7 @@ mod tests {
             vec![
                 ("Datei 2.docx", "C:\\root\\a\\Datei 2.docx", ContentFormat::Docx),
                 ("Datei 2.pdf", "C:\\root\\b\\Datei 2.pdf", ContentFormat::Pdf),
+                ("Datei 2.xlsx", "C:\\root\\d\\Datei 2.xlsx", ContentFormat::Xlsx),
                 ("Datei 10.docx", "C:\\root\\c\\Datei 10.docx", ContentFormat::Docx),
             ]
         );
