@@ -665,6 +665,42 @@ button:disabled {
   cursor: pointer;
 }
 
+.inventory-overview-year-groups {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inventory-overview-year-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 6px 0;
+  min-width: 0;
+  border-bottom: 1px solid #eef1f4;
+}
+
+.inventory-overview-year-group:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.inventory-overview-year-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px 12px;
+  margin: 6px 0 0;
+  font-size: 0.85rem;
+}
+
+.inventory-overview-year-facts dt {
+  color: #5b6570;
+}
+
+.inventory-overview-year-facts dd {
+  margin: 0;
+}
+
 .tree-filter-empty {
   margin: 12px;
 }

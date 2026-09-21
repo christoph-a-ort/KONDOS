@@ -6,6 +6,7 @@ import {
   type InventoryNodeRef,
   type RepeatedNameGroup,
 } from "./inventoryAnalysis";
+import type { ConsecutiveYearRun, InventoryStructureContext, YearFolderGroup } from "./inventoryStructureContext";
 import type { ScanResult } from "../model";
 
 export const IST_OVERVIEW_TITLE = "IST-Überblick";
@@ -29,7 +30,13 @@ export const SECTION_EMPTY_FOLDERS = "Leere Ordner";
 export const SECTION_SINGLE_FILE_FOLDERS = "Ordner mit genau einer direkt enthaltenen Datei";
 export const SECTION_REPEATED_FOLDERS = "Wiederkehrende Ordnernamen";
 export const SECTION_REPEATED_FILES = "Wiederkehrende Dateinamen";
+export const SECTION_YEAR_STRUCTURES = "Jahresstrukturen";
 export const FILE_TYPE_TOTAL_LABEL = "Gesamt";
+export const EMPTY_YEAR_STRUCTURES = "Keine wiederkehrende Jahresstruktur erkannt.";
+export const YEAR_FOLDERS_PRESENT_LABEL = "Vorhandene Jahresordner";
+export const YEAR_SPAN_LABEL = "Beobachtete Spanne";
+export const YEAR_MISSING_LABEL = "Nicht vorhandene Jahresordner innerhalb der Spanne";
+export const YEAR_RUNS_LABEL = "Zusammenhängende Folgen";
 
 export const DEFAULT_SECTION_OPEN = {
   fileTypes: true,
@@ -39,6 +46,7 @@ export const DEFAULT_SECTION_OPEN = {
   singleFile: false,
   repeatedFolders: false,
   repeatedFiles: false,
+  yearStructures: false,
 } as const;
 
 export interface InventoryOverviewRow {
@@ -60,6 +68,16 @@ export interface InventoryOverviewNameGroup {
   summary: string;
   paths: string[];
   pathLabels: string[];
+}
+
+export interface InventoryOverviewYearGroup {
+  parentName: string;
+  parentPath: string;
+  parentPathLabel: string;
+  yearsLabel: string;
+  spanLabel: string;
+  missingYearsLabel: string | null;
+  consecutiveRunsLabel: string | null;
 }
 
 export interface InventoryOverviewView {
@@ -100,6 +118,9 @@ export interface InventoryOverviewView {
   repeatedFileCount: number;
   repeatedFilesEmpty: string | null;
   repeatedFilesHint: string;
+  yearGroups: InventoryOverviewYearGroup[];
+  yearGroupCount: number;
+  yearGroupsEmpty: string | null;
 }
 
 export function inventoryAnalysisFromScan(result: ScanResult | null): InventoryAnalysis | null {
@@ -202,6 +223,32 @@ function nameGroups(groups: readonly RepeatedNameGroup[], rootPath: string): Inv
   }));
 }
 
+export function formatYearList(years: readonly number[]): string {
+  return years.map((year) => String(year)).join(" · ");
+}
+
+export function formatYearSpan(minYear: number, maxYear: number): string {
+  return `${minYear}–${maxYear}`;
+}
+
+export function formatConsecutiveRuns(runs: readonly ConsecutiveYearRun[]): string {
+  return runs.map((run) => formatYearSpan(run.start, run.end)).join(" · ");
+}
+
+function yearGroupRow(group: YearFolderGroup): InventoryOverviewYearGroup {
+  const hasGaps = group.missingYears.length > 0;
+  return {
+    parentName: group.parent.name,
+    parentPath: group.parent.path,
+    parentPathLabel: group.parentRelativePath,
+    yearsLabel: formatYearList(group.years),
+    spanLabel: formatYearSpan(group.minYear, group.maxYear),
+    missingYearsLabel: hasGaps ? formatYearList(group.missingYears) : null,
+    consecutiveRunsLabel:
+      hasGaps && group.consecutiveRuns.length > 0 ? formatConsecutiveRuns(group.consecutiveRuns) : null,
+  };
+}
+
 const emptyView: InventoryOverviewView = {
   available: false,
   title: IST_OVERVIEW_TITLE,
@@ -240,11 +287,15 @@ const emptyView: InventoryOverviewView = {
   repeatedFileCount: 0,
   repeatedFilesEmpty: null,
   repeatedFilesHint: REPEATED_FILES_HINT,
+  yearGroups: [],
+  yearGroupCount: 0,
+  yearGroupsEmpty: null,
 };
 
 export function buildInventoryOverviewView(
   analysis: InventoryAnalysis | null,
   rootPath = "",
+  structure: InventoryStructureContext | null = null,
 ): InventoryOverviewView {
   if (analysis === null) {
     return emptyView;
@@ -257,6 +308,7 @@ export function buildInventoryOverviewView(
     .slice(0, DIRECT_FILE_RANK_LIMIT)
     .map((folder) => folderRow(folder, rootPath, folder.directFileCount));
   const nestedCount = subdirectoryCount(analysis.directoryCount);
+  const yearGroups = (structure?.yearGroups ?? []).map(yearGroupRow);
 
   return {
     available: true,
@@ -301,5 +353,8 @@ export function buildInventoryOverviewView(
     repeatedFileCount: analysis.repeatedFileNames.length,
     repeatedFilesEmpty: analysis.repeatedFileNames.length === 0 ? EMPTY_REPEATED_FILES : null,
     repeatedFilesHint: REPEATED_FILES_HINT,
+    yearGroups,
+    yearGroupCount: yearGroups.length,
+    yearGroupsEmpty: yearGroups.length === 0 ? EMPTY_YEAR_STRUCTURES : null,
   };
 }

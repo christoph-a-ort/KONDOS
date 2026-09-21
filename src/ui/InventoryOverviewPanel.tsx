@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import type { InventoryAnalysis } from "./inventoryAnalysis";
+import type { InventoryStructureContext } from "./inventoryStructureContext";
 import {
   DEFAULT_SECTION_OPEN,
   FILE_TYPE_TOTAL_LABEL,
@@ -9,18 +10,29 @@ import {
   SECTION_REPEATED_FILES,
   SECTION_REPEATED_FOLDERS,
   SECTION_SINGLE_FILE_FOLDERS,
+  SECTION_YEAR_STRUCTURES,
+  YEAR_FOLDERS_PRESENT_LABEL,
+  YEAR_MISSING_LABEL,
+  YEAR_RUNS_LABEL,
+  YEAR_SPAN_LABEL,
   buildInventoryOverviewView,
   sectionSummary,
   type InventoryOverviewRow,
+  type InventoryOverviewYearGroup,
 } from "./inventoryOverview";
 
 interface InventoryOverviewPanelProps {
   analysis: InventoryAnalysis | null;
+  structure?: InventoryStructureContext | null;
   rootPath?: string | null;
 }
 
-export function InventoryOverviewPanel({ analysis, rootPath = null }: InventoryOverviewPanelProps) {
-  const view = buildInventoryOverviewView(analysis, rootPath ?? "");
+export function InventoryOverviewPanel({
+  analysis,
+  structure = null,
+  rootPath = null,
+}: InventoryOverviewPanelProps) {
+  const view = buildInventoryOverviewView(analysis, rootPath ?? "", structure);
 
   return (
     <details
@@ -168,6 +180,21 @@ export function InventoryOverviewPanel({ analysis, rootPath = null }: InventoryO
               </div>
             )}
           </OverviewSection>
+
+          <OverviewSection
+            title={sectionSummary(SECTION_YEAR_STRUCTURES, view.yearGroupCount)}
+            defaultOpen={DEFAULT_SECTION_OPEN.yearStructures}
+          >
+            {view.yearGroupsEmpty !== null ? (
+              <p className="muted">{view.yearGroupsEmpty}</p>
+            ) : (
+              <ul className="inventory-overview-year-groups">
+                {view.yearGroups.map((group) => (
+                  <YearGroupCard key={group.parentPath} group={group} />
+                ))}
+              </ul>
+            )}
+          </OverviewSection>
         </div>
       ) : (
         <p className="muted inventory-overview-empty">{view.noScanMessage}</p>
@@ -196,6 +223,35 @@ function OverviewSection({
       <summary>{title}</summary>
       <div className="inventory-overview-section-body">{children}</div>
     </details>
+  );
+}
+
+function YearGroupCard({ group }: { group: InventoryOverviewYearGroup }) {
+  return (
+    <li className="inventory-overview-year-group">
+      <span className="inventory-overview-name">{group.parentName}</span>
+      <span className="inventory-overview-path" title={group.parentPathLabel}>
+        {group.parentPathLabel}
+      </span>
+      <dl className="inventory-overview-year-facts">
+        <dt>{YEAR_FOLDERS_PRESENT_LABEL}</dt>
+        <dd>{group.yearsLabel}</dd>
+        <dt>{YEAR_SPAN_LABEL}</dt>
+        <dd>{group.spanLabel}</dd>
+        {group.missingYearsLabel !== null ? (
+          <>
+            <dt>{YEAR_MISSING_LABEL}</dt>
+            <dd>{group.missingYearsLabel}</dd>
+          </>
+        ) : null}
+        {group.consecutiveRunsLabel !== null ? (
+          <>
+            <dt>{YEAR_RUNS_LABEL}</dt>
+            <dd>{group.consecutiveRunsLabel}</dd>
+          </>
+        ) : null}
+      </dl>
+    </li>
   );
 }
 

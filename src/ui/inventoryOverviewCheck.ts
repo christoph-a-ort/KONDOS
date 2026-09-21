@@ -1,6 +1,10 @@
 import { type DirectoryNode, type FileNode, type FsNode, type ScanResult, type ScanWarning } from "../model";
 import { formatByteSize } from "./treeFormat";
+import { buildDisplayFilterView, emptyDisplayFilterDraft } from "./displayFilter";
+import { deriveVisibleRows } from "./treeRows";
+import { DEFAULT_TREE_SORT } from "./treeSort";
 import { analyzeInventory } from "./inventoryAnalysis";
+import { analyzeStructureContext } from "./inventoryStructureContext";
 import {
   DEFAULT_SECTION_OPEN,
   DIRECT_FILE_RANK_LIMIT,
@@ -8,14 +12,17 @@ import {
   EMPTY_REPEATED_FILES,
   EMPTY_REPEATED_FOLDERS,
   EMPTY_SINGLE_FILE_FOLDERS,
+  EMPTY_YEAR_STRUCTURES,
   FILE_TYPE_TOTAL_LABEL,
   IST_OVERVIEW_NO_SCAN,
   IST_OVERVIEW_TITLE,
   REPEATED_FILES_HINT,
   SECTION_BUSY_FOLDERS,
+  SECTION_YEAR_STRUCTURES,
   START_FOLDER_LABEL,
   UNCONFIRMED_EMPTY_HINT,
   UNCONFIRMED_EMPTY_TITLE,
+  YEAR_MISSING_LABEL,
   buildInventoryOverviewView,
   depthLimitedNote,
   displayInventoryPath,
@@ -67,6 +74,10 @@ function bannedWords(text: string): boolean {
     "duplicate",
     "ki-analyse",
     "inventoryanalysis",
+    "fehlende jahre",
+    "fehlen 20",
+    "empfehlung",
+    "soll-struktur",
   ].some((word) => lower.includes(word));
 }
 
@@ -129,7 +140,8 @@ export function runInventoryOverviewCheck(): void {
     { path: "C:/bestand/loop", code: "skipped", message: "Dateisystemverweis wird nicht gefolgt." },
   ]);
   const analysis = analyzeInventory(mixedResult);
-  const view = buildInventoryOverviewView(analysis, mixed.path);
+  const mixedStructure = analyzeStructureContext(mixedResult);
+  const view = buildInventoryOverviewView(analysis, mixed.path, mixedStructure);
 
   assert(view.available, "ui: scan makes overview available");
   assert(view.directoryCount === 10, "ui: directoryCount includes root");
@@ -171,9 +183,15 @@ export function runInventoryOverviewCheck(): void {
       !DEFAULT_SECTION_OPEN.singleFile &&
       !DEFAULT_SECTION_OPEN.repeatedFolders &&
       !DEFAULT_SECTION_OPEN.repeatedFiles &&
-      !DEFAULT_SECTION_OPEN.unconfirmed,
+      !DEFAULT_SECTION_OPEN.unconfirmed &&
+      !DEFAULT_SECTION_OPEN.yearStructures,
     "ui: remaining sections closed by default",
   );
+  assert(SECTION_YEAR_STRUCTURES === "Jahresstrukturen", "ui: year section title");
+  assert(sectionSummary(SECTION_YEAR_STRUCTURES, 4) === "Jahresstrukturen (4)", "ui: year section count");
+  assert(view.yearGroupCount === 0 && view.yearGroupsEmpty === EMPTY_YEAR_STRUCTURES, "ui: mixed fixture has no year groups");
+  assert(YEAR_MISSING_LABEL === "Nicht vorhandene Jahresordner innerhalb der Spanne", "ui: missing years wording is neutral");
+  assert(!YEAR_MISSING_LABEL.toLocaleLowerCase().includes("fehlende jahre"), "ui: no fehlende Jahre");
   assert(sectionSummary("Leere Ordner", 0) === "Leere Ordner (0)", "ui: zero count in summary");
   assert(sectionSummary("Wiederkehrende Dateinamen", 1) === "Wiederkehrende Dateinamen (1)", "ui: nonzero count in summary");
   assert(view.busyFolders.length <= DIRECT_FILE_RANK_LIMIT, "ui: busy folder rank limited");
@@ -191,7 +209,7 @@ export function runInventoryOverviewCheck(): void {
   assert(view.repeatedFilesHint === REPEATED_FILES_HINT, "ui: no-content-identity hint");
   assert(!bannedWords(JSON.stringify(view)), "ui: no rating or duplicate wording");
 
-  const barren = buildInventoryOverviewView(analyzeInventory(resultOf(dir("C:/n", "n", []))), "C:/n");
+  const barren = buildInventoryOverviewView(analyzeInventory(resultOf(dir("C:/n", "n", []))), "C:/n", analyzeStructureContext(resultOf(dir("C:/n", "n", []))));
   assert(barren.fileTypesEmpty !== null, "ui: empty types");
   assert(barren.busyFoldersEmpty !== null, "ui: empty busy folders");
   assert(barren.emptyFoldersEmpty === null && barren.emptyFolders.length === 1, "ui: empty root listed");
@@ -199,6 +217,7 @@ export function runInventoryOverviewCheck(): void {
   assert(barren.singleFileEmpty === EMPTY_SINGLE_FILE_FOLDERS, "ui: empty single-file");
   assert(barren.repeatedFoldersEmpty === EMPTY_REPEATED_FOLDERS, "ui: empty repeated folders");
   assert(barren.repeatedFilesEmpty === EMPTY_REPEATED_FILES, "ui: empty repeated files");
+  assert(barren.yearGroupCount === 0 && barren.yearGroupsEmpty === EMPTY_YEAR_STRUCTURES, "ui: empty year structures");
   assert(barren.unconfirmedFolders.length === 0, "ui: hide unconfirmed when none");
   assert(barren.depthLimitedNote === null, "ui: no depthLimited note on empty");
 
@@ -224,11 +243,100 @@ export function runInventoryOverviewCheck(): void {
 
   const firstScan = resultOf(dir("C:/a", "a", [file("C:/a/one.txt", "one.txt", { sizeBytes: 8 })]));
   const secondScan = resultOf(dir("C:/b", "b", [file("C:/b/two.pdf", "two.pdf", { sizeBytes: 4 }), file("C:/b/three.pdf", "three.pdf", { sizeBytes: 4 })]));
-  const firstView = buildInventoryOverviewView(inventoryAnalysisFromScan(firstScan), "C:/a");
-  const secondView = buildInventoryOverviewView(inventoryAnalysisFromScan(secondScan), "C:/b");
+  const firstView = buildInventoryOverviewView(inventoryAnalysisFromScan(firstScan), "C:/a", analyzeStructureContext(firstScan));
+  const secondView = buildInventoryOverviewView(inventoryAnalysisFromScan(secondScan), "C:/b", analyzeStructureContext(secondScan));
   assert(firstView.fileCountLabel === "1" && secondView.fileCountLabel === "2", "ui: new scan replaces analysis");
   assert(secondView.fileTypes[0]?.label === ".pdf", "ui: second scan types");
   assert(inventoryAnalysisFromScan(firstScan) !== inventoryAnalysisFromScan(secondScan), "ui: analyses are distinct objects");
+  assert(firstView.yearGroupCount === 0 && secondView.yearGroupCount === 0, "ui: scans without year groups stay empty");
+
+  const yearRoot = dir("C:/bank", "bank", [
+    dir(
+      "C:/bank/Kontoauszuege",
+      "Kontoauszuege",
+      [
+        dir(
+          "C:/bank/Kontoauszuege/PDF",
+          "PDF",
+          [
+            dir("C:/bank/Kontoauszuege/PDF/2020", "2020", [], { depth: 3 }),
+            dir("C:/bank/Kontoauszuege/PDF/2021", "2021", [], { depth: 3 }),
+            dir("C:/bank/Kontoauszuege/PDF/2022", "2022", [], { depth: 3 }),
+          ],
+          { depth: 2 },
+        ),
+      ],
+      { depth: 1 },
+    ),
+    dir(
+      "C:/bank/VersorgerA",
+      "VersorgerA",
+      [
+        dir("C:/bank/VersorgerA/2023", "2023", [], { depth: 2 }),
+        dir("C:/bank/VersorgerA/2024", "2024", [], { depth: 2 }),
+        dir("C:/bank/VersorgerA/2025", "2025", [], { depth: 2 }),
+      ],
+      { depth: 1 },
+    ),
+    dir(
+      "C:/bank/VersorgerB",
+      "VersorgerB",
+      [
+        dir("C:/bank/VersorgerB/2023", "2023", [], { depth: 2 }),
+        dir("C:/bank/VersorgerB/2025", "2025", [], { depth: 2 }),
+      ],
+      { depth: 1 },
+    ),
+    dir(
+      "C:/bank/Luecken",
+      "Luecken",
+      [
+        dir("C:/bank/Luecken/2020", "2020", [], { depth: 2 }),
+        dir("C:/bank/Luecken/2021", "2021", [], { depth: 2 }),
+        dir("C:/bank/Luecken/2023", "2023", [], { depth: 2 }),
+        dir("C:/bank/Luecken/2024", "2024", [], { depth: 2 }),
+      ],
+      { depth: 1 },
+    ),
+  ]);
+  const yearResult = resultOf(yearRoot);
+  const yearAnalysis = analyzeInventory(yearResult);
+  const yearStructure = analyzeStructureContext(yearResult);
+  const yearView = buildInventoryOverviewView(yearAnalysis, yearRoot.path, yearStructure);
+  assert(yearView.yearGroupCount === 4, "ui: four year groups");
+  assert(yearView.yearGroupsEmpty === null, "ui: year groups not empty");
+  assert(yearView.yearGroups[0]?.parentName === "Kontoauszuege" || yearView.yearGroups.some((item) => item.parentName === "PDF"), "ui: parent name visible");
+  const pdfGroup = yearView.yearGroups.find((item) => item.parentName === "PDF");
+  assert(pdfGroup?.parentPathLabel === "Kontoauszuege\\PDF", "ui: relative parent path");
+  assert(pdfGroup?.yearsLabel === "2020 · 2021 · 2022", "ui: present years");
+  assert(pdfGroup?.spanLabel === "2020–2022", "ui: observed span");
+  assert(pdfGroup?.missingYearsLabel === null, "ui: no missing-year row when span is complete");
+  assert(pdfGroup?.consecutiveRunsLabel === null, "ui: no redundant consecutive row");
+  assert(!pdfGroup?.parentPathLabel.includes("C:"), "ui: year parent path is relative");
+  const luecken = yearView.yearGroups.find((item) => item.parentName === "Luecken");
+  assert(luecken?.missingYearsLabel === "2022", "ui: missing years listed neutrally");
+  assert(luecken?.consecutiveRunsLabel === "2020–2021 · 2023–2024", "ui: consecutive runs only when gaps exist");
+  const wasser = yearView.yearGroups.find((item) => item.parentName === "VersorgerB");
+  assert(wasser?.yearsLabel === "2023 · 2025" && wasser.spanLabel === "2023–2025", "ui: gapped group span");
+  assert(wasser?.missingYearsLabel === "2024" && wasser.consecutiveRunsLabel === null, "ui: gap without extra consecutive runs");
+  assert(yearView.yearGroups[0]?.parentPath === "C:/bank/Kontoauszuege/PDF", "ui: groups keep context order");
+  assert(yearView.yearGroups.map((item) => item.parentName).join(",") === "PDF,Luecken,VersorgerA,VersorgerB", "ui: deterministic year group order");
+  assert(!bannedWords(JSON.stringify(yearView)), "ui: year view has no rating wording");
+  assert(!JSON.stringify(yearView).toLocaleLowerCase().includes("fehlende jahre"), "ui: year view has no fehlende Jahre");
+
+  const filteredYear = buildDisplayFilterView(yearRoot, { ...emptyDisplayFilterDraft(), extensions: [".pdf"] }, DEFAULT_TREE_SORT);
+  assert(filteredYear.constrained, "ui: year filter is constrained");
+  const yearViewAgain = buildInventoryOverviewView(analyzeInventory(yearResult), yearRoot.path, analyzeStructureContext(yearResult));
+  assert(JSON.stringify(yearView.yearGroups) === JSON.stringify(yearViewAgain.yearGroups), "ui: filter does not change year groups");
+  const collapsedYear = deriveVisibleRows(yearRoot, new Set(["C:/bank"]));
+  assert(collapsedYear.length < yearAnalysis.directoryCount, "ui: expand hides children");
+  assert(yearView.yearGroupCount === analyzeStructureContext(yearResult).yearGroups.length, "ui: expand does not change year groups");
+
+  const laterScan = resultOf(dir("C:/neu", "neu", [dir("C:/neu/2024", "2024", [], { depth: 1 })]));
+  const laterView = buildInventoryOverviewView(analyzeInventory(laterScan), "C:/neu", analyzeStructureContext(laterScan));
+  assert(laterView.yearGroupCount === 0, "ui: new scan replaces previous year groups");
+  const idleAfter = buildInventoryOverviewView(null);
+  assert(idleAfter.yearGroupCount === 0 && idleAfter.available === false, "ui: no leftover year context without scan");
 
   const sameResult = mixedResult;
   const once = analyzeInventory(sameResult);

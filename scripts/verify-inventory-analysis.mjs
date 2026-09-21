@@ -31,6 +31,10 @@ assert(analysisSrc.includes("unconfirmedEmptyLookingFolders"), "core: conservati
 assert(!appSrc.includes("inventoryAnalysis"), "App does not own inventory analysis");
 assert(treeViewSrc.includes("useMemo(() => analyzeInventory(result), [result])"), "TreeView memos analysis on ScanResult");
 assert(!treeViewSrc.includes("analyzeInventory(viewRoot)"), "analysis ignores display tree");
+assert(treeViewSrc.includes("useMemo(() => analyzeStructureContext(result), [result])"), "TreeView memos structure context on ScanResult");
+assert(!treeViewSrc.includes("analyzeStructureContext(viewRoot)"), "structure context ignores display tree");
+assert(treeViewSrc.includes("structure={structureContext}"), "overview receives structure context");
+assert(treeViewSrc.includes("structure={null}"), "no-scan overview has no leftover structure");
 assert(treeViewSrc.includes("InventoryOverviewPanel"), "IST overview panel is wired");
 assert(treeViewSrc.includes("analysis={null}"), "no-scan overview is empty");
 assert(overviewSrc.includes("IST-Überblick"), "user-facing title");
@@ -43,6 +47,12 @@ assert(overviewSrc.includes("Ordner nach Anzahl direkt enthaltener Dateien"), "n
 assert(!overviewSrc.includes("Ordner mit vielen direkt enthaltenen Dateien"), "old ranking title removed");
 assert(overviewSrc.includes("Startordner"), "root display label");
 assert(overviewSrc.includes("fileTypes: true") && overviewSrc.includes("busyFolders: true"), "default open sections");
+assert(overviewSrc.includes("yearStructures: false"), "year structures closed by default");
+assert(overviewSrc.includes("Jahresstrukturen"), "year section title");
+assert(overviewSrc.includes("Keine wiederkehrende Jahresstruktur erkannt."), "year empty copy");
+assert(overviewSrc.includes("Nicht vorhandene Jahresordner innerhalb der Spanne"), "neutral missing-year wording");
+assert(!overviewSrc.toLocaleLowerCase().includes("fehlende jahre"), "overview copy has no fehlende Jahre");
+assert(overviewUi.includes("SECTION_YEAR_STRUCTURES"), "panel renders year structures");
 assert(overviewUi.includes("davon Unterordner"), "subdirectory row");
 assert(overviewUi.includes("FILE_TYPE_TOTAL_LABEL"), "file type totals");
 assert(treeViewSrc.includes("rootPath={result.root.path}"), "overview uses scan root for display paths");
