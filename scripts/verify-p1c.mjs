@@ -429,6 +429,12 @@ assert(fallback.includeSize === true && fallback.sort.column === "name", "prefs:
 assert(!("searchQuery" in fallback), "prefs: search not stored");
 assert(loadWorkbenchPrefs({ getItem: () => "{not json", setItem() {} }).maxDepth === DEFAULT_DEPTH, "prefs: broken json");
 assert(sanitizeWorkbenchPrefs({ maxDepth: 8 }).maxDepth === 8, "prefs: stored 8 remains 8");
+for (const depth of [2, 8, 10, 16, 32]) {
+  assert(sanitizeWorkbenchPrefs({ maxDepth: depth }).maxDepth === depth, `prefs: stored ${depth} remains`);
+}
+assert(sanitizeWorkbenchPrefs({ maxDepth: 0 }).maxDepth === MIN_DEPTH, "prefs: stored 0 clamps");
+assert(sanitizeWorkbenchPrefs({ maxDepth: 33 }).maxDepth === MAX_DEPTH, "prefs: stored 33 clamps");
+assert(loadWorkbenchPrefs({ getItem: () => null, setItem() {} }).maxDepth === DEFAULT_DEPTH, "prefs: missing uses 16");
 assert(clampDepth(0) === MIN_DEPTH, "prefs: clamp 0 to min");
 assert(clampDepth(16) === 16, "prefs: clamp 16");
 assert(clampDepth(32) === MAX_DEPTH, "prefs: clamp 32");

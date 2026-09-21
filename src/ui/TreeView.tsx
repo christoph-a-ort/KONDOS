@@ -33,6 +33,8 @@ import {
   emptyNodeDetailModel,
   type NodeDetailModel,
 } from "./nodeDetails";
+import { analyzeInventory } from "./inventoryAnalysis";
+import { InventoryOverviewPanel } from "./InventoryOverviewPanel";
 import { collectViewWorkStats, formatViewWorkStats } from "./viewStats";
 import { resolveWarningJump } from "./warningNavigation";
 import {
@@ -136,6 +138,7 @@ export function TreeView({
           onKeyDown={() => {}}
         />
         <p className="muted">Noch keine Analyse durchgeführt.</p>
+        <InventoryOverviewPanel analysis={null} rootPath={null} />
         <div className="tree-viewport tree-viewport-empty" />
         <TreePathBar
           path={null}
@@ -313,6 +316,7 @@ function PopulatedTreeView({
       : searchCountLabel(searchQuery, matchIds.length, currentMatchIndex);
   const canNavigateMatches =
     searchMode === "content" ? contentSearch.canNavigate : matchIds.length > 0;
+  const inventoryAnalysis = useMemo(() => analyzeInventory(result), [result]);
   const viewWorkStats = useMemo(() => collectViewWorkStats(viewRoot), [viewRoot]);
   const detailModel = useMemo(
     () => buildNodeDetails(result.root, selectedId, result.warnings, appliedExtensions.length > 0),
@@ -831,6 +835,11 @@ function PopulatedTreeView({
         ) : null}
         {filterSummary !== null ? <TreeFilterChip>{filterSummary}</TreeFilterChip> : null}
       </p>
+      <InventoryOverviewPanel
+        key={resultScanId ?? result.root.id}
+        analysis={inventoryAnalysis}
+        rootPath={result.root.path}
+      />
       <div className="tree-toolbar">
         <button type="button" disabled={actionsDisabled} onClick={handleExpandAll}>
           Alles aufklappen

@@ -137,6 +137,15 @@ function runPrefsCheck(): void {
 
   const keepEight = sanitizeWorkbenchPrefs({ maxDepth: 8 });
   assert(keepEight.maxDepth === 8, "prefs: stored 8 remains 8");
+  for (const depth of [2, 8, 10, 16, 32] as const) {
+    assert(sanitizeWorkbenchPrefs({ maxDepth: depth }).maxDepth === depth, `prefs: stored ${depth} remains ${depth}`);
+    const stored = new MemoryStorage();
+    stored.setItem(WORKBENCH_PREFS_KEY, JSON.stringify(sanitizeWorkbenchPrefs({ maxDepth: depth })));
+    assert(loadWorkbenchPrefs(stored).maxDepth === depth, `prefs: load ${depth} remains ${depth}`);
+  }
+  assert(sanitizeWorkbenchPrefs({ maxDepth: 0 }).maxDepth === MIN_DEPTH, "prefs: stored 0 clamps to min");
+  assert(sanitizeWorkbenchPrefs({ maxDepth: 33 }).maxDepth === MAX_DEPTH, "prefs: stored 33 clamps to max");
+  assert(loadWorkbenchPrefs({ getItem: () => null, setItem: () => {} }).maxDepth === DEFAULT_DEPTH, "prefs: missing uses default 16");
 
   const legacyOnly = new MemoryStorage();
   legacyOnly.setItem(LEGACY_WORKBENCH_PREFS_KEY, JSON.stringify(saved));

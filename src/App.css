@@ -124,6 +124,7 @@ header p,
 .tree-panel > .tree-stats,
 .tree-panel > .tree-toolbar,
 .tree-panel > .display-filter,
+.tree-panel > .inventory-overview,
 .tree-panel > .tree-search-row,
 .tree-panel > .content-search-panel,
 .tree-panel > .tree-path,
@@ -235,6 +236,7 @@ button:disabled {
 
 .tree-panel > .tree-toolbar,
 .tree-panel > .display-filter,
+.tree-panel > .inventory-overview,
 .tree-panel > .tree-search-row,
 .tree-panel > .content-search-panel,
 .tree-panel > .tree-path,
@@ -516,6 +518,151 @@ button:disabled {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.inventory-overview {
+  margin: 0 0 8px;
+  border: 1px solid #d5dbe3;
+  border-radius: 8px;
+  background: #f7f8fa;
+}
+
+.inventory-overview > summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  font-weight: 600;
+  list-style-position: inside;
+}
+
+.inventory-overview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 10px 10px;
+  max-height: min(42vh, 440px);
+  overflow: auto;
+}
+
+.inventory-overview-empty {
+  margin: 0 10px 10px;
+}
+
+.inventory-overview-stats {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px 16px;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.inventory-overview-stats dt {
+  color: #5b6570;
+}
+
+.inventory-overview-stats dd {
+  margin: 0;
+}
+
+.inventory-overview-note {
+  margin: 0;
+}
+
+.inventory-overview-section {
+  margin: 0;
+  border: 1px solid #e2e6eb;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.inventory-overview-section > summary {
+  cursor: pointer;
+  padding: 6px 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  list-style-position: inside;
+}
+
+.inventory-overview-section-body {
+  padding: 0 8px 8px;
+}
+
+.inventory-overview-scroll {
+  max-height: 9.5rem;
+  overflow: auto;
+  border: 1px solid #e2e6eb;
+  border-radius: 6px;
+}
+
+.inventory-overview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.inventory-overview-table th,
+.inventory-overview-table td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid #eef1f4;
+}
+
+.inventory-overview-table th {
+  color: #5b6570;
+  font-weight: 600;
+}
+
+.inventory-overview-table tfoot th,
+.inventory-overview-table tfoot td {
+  border-bottom: none;
+  border-top: 1px solid #d5dbe3;
+  font-weight: 600;
+}
+
+.inventory-overview-list,
+.inventory-overview-paths {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 8.5rem;
+  overflow: auto;
+}
+
+.inventory-overview-list li,
+.inventory-overview-paths li {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 3px 0;
+  min-width: 0;
+}
+
+.inventory-overview-name {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.inventory-overview-count {
+  font-variant-numeric: tabular-nums;
+  color: #3d4650;
+}
+
+.inventory-overview-path,
+.inventory-overview-paths li {
+  color: #6b7380;
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inventory-overview-nested {
+  margin: 0 0 4px;
+}
+
+.inventory-overview-nested > summary {
+  cursor: pointer;
 }
 
 .tree-filter-empty {
