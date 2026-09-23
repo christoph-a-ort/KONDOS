@@ -7,6 +7,9 @@ import {
   MIN_YEAR_GROUP_SIZE,
   YEAR_FOLDER_MAX,
   YEAR_FOLDER_MIN,
+  MIN_CHILD_DIRECTORY_STRUCTURE_SIZE,
+  MIN_REPEATED_STRUCTURE_PARENTS,
+  MIN_FOLDER_CHAIN_LENGTH,
   analyzeStructureContext,
   folderContextByPath,
   isYearFolderName,
@@ -338,4 +341,720 @@ export function runInventoryStructureContextCheck(): void {
   assert(!blob.includes("unvollstaendig") && !blob.includes("unvollständig"), "no incompleteness rating");
   assert(!blob.includes("chaotisch") && !blob.includes("soll"), "no SOLL or chaos rating");
   assert(!blob.includes("duplikat"), "no duplicate label");
+
+  runRepeatedChildDirectoryStructureCheck();
+  runFolderChainCheck();
+}
+
+function customerShape(parentPath: string, parentName: string, depth: number): DirectoryNode {
+  return dir(
+    parentPath,
+    parentName,
+    [
+      dir(`${parentPath}/Angebote`, "Angebote", [], { depth: depth + 1 }),
+      dir(`${parentPath}/Rechnungen`, "Rechnungen", [], { depth: depth + 1 }),
+      dir(`${parentPath}/Schriftverkehr`, "Schriftverkehr", [], { depth: depth + 1 }),
+    ],
+    { depth },
+  );
+}
+
+function runRepeatedChildDirectoryStructureCheck(): void {
+  assert(MIN_CHILD_DIRECTORY_STRUCTURE_SIZE === 2, "structure minimum is 2 child directories");
+  assert(MIN_REPEATED_STRUCTURE_PARENTS === 2, "structure group minimum is 2 parents");
+  const identicalThree = analyzeStructureContext(
+    resultOf(
+      dir("C:/kunden", "kunden", [customerShape("C:/kunden/A", "A", 1), customerShape("C:/kunden/B", "B", 1)]),
+    ),
+  );
+  assert(identicalThree.repeatedChildDirectoryStructures.length === 1, "A: one group for two identical parents");
+  const groupA = identicalThree.repeatedChildDirectoryStructures[0];
+  assert(groupA?.childDirectoryCount === 3, "A: three child directories");
+  assert(groupA?.parentCount === 2, "A: two parents");
+  assert(
+    groupA?.childDirectoryNames.join(",") === "Angebote,Rechnungen,Schriftverkehr",
+    "A: original child names",
+  );
+  assert(groupA?.parents.map((item) => item.folder.name).join(",") === "A,B", "A: parents A then B");
+
+  const casing = analyzeStructureContext(
+    resultOf(
+      dir("C:/kunden", "kunden", [
+        dir(
+          "C:/kunden/A",
+          "A",
+          [
+            dir("C:/kunden/A/Angebote", "Angebote", [], { depth: 2 }),
+            dir("C:/kunden/A/Rechnungen", "Rechnungen", [], { depth: 2 }),
+            dir("C:/kunden/A/Schriftverkehr", "Schriftverkehr", [], { depth: 2 }),
+          ],
+          { depth: 1 },
+        ),
+        dir(
+          "C:/kunden/B",
+          "B",
+          [
+            dir("C:/kunden/B/angebote", "angebote", [], { depth: 2 }),
+            dir("C:/kunden/B/RECHNUNGEN", "RECHNUNGEN", [], { depth: 2 }),
+            dir("C:/kunden/B/schriftverkehr", "schriftverkehr", [], { depth: 2 }),
+          ],
+          { depth: 1 },
+        ),
+      ]),
+    ),
+  );
+  assert(casing.repeatedChildDirectoryStructures.length === 1, "B: case-insensitive same group");
+  assert(casing.repeatedChildDirectoryStructures[0]?.parentCount === 2, "B: two parents");
+  assert(
+    casing.repeatedChildDirectoryStructures[0]?.signature ===
+      identicalThree.repeatedChildDirectoryStructures[0]?.signature,
+    "B: same signature as canonical names",
+  );
+
+  const loneParent = analyzeStructureContext(
+    resultOf(dir("C:/kunden", "kunden", [customerShape("C:/kunden/A", "A", 1)])),
+  );
+  assert(loneParent.repeatedChildDirectoryStructures.length === 0, "C: single parent is not a group");
+
+  const singleChild = analyzeStructureContext(
+    resultOf(
+      dir("C:/docs", "docs", [
+        dir("C:/docs/A", "A", [dir("C:/docs/A/PDF", "PDF", [], { depth: 2 })], { depth: 1 }),
+        dir("C:/docs/B", "B", [dir("C:/docs/B/PDF", "PDF", [], { depth: 2 })], { depth: 1 }),
+      ]),
+    ),
+  );
+  assert(singleChild.repeatedChildDirectoryStructures.length === 0, "D: one direct child is not a structure group");
+
+  const twoVsThree = analyzeStructureContext(
+    resultOf(
+      dir("C:/kunden", "kunden", [
+        customerShape("C:/kunden/A", "A", 1),
+        dir(
+          "C:/kunden/C",
+          "C",
+          [
+            dir("C:/kunden/C/Angebote", "Angebote", [], { depth: 2 }),
+            dir("C:/kunden/C/Rechnungen", "Rechnungen", [], { depth: 2 }),
+          ],
+          { depth: 1 },
+        ),
+      ]),
+    ),
+  );
+  assert(twoVsThree.repeatedChildDirectoryStructures.length === 0, "E: 2 vs 3 children is not the same structure");
+
+  const reordered = analyzeStructureContext(
+    resultOf(
+      dir("C:/kunden", "kunden", [
+        dir(
+          "C:/kunden/A",
+          "A",
+          [
+            dir("C:/kunden/A/Schriftverkehr", "Schriftverkehr", [], { depth: 2 }),
+            dir("C:/kunden/A/Angebote", "Angebote", [], { depth: 2 }),
+            dir("C:/kunden/A/Rechnungen", "Rechnungen", [], { depth: 2 }),
+          ],
+          { depth: 1 },
+        ),
+        dir(
+          "C:/kunden/B",
+          "B",
+          [
+            dir("C:/kunden/B/Rechnungen", "Rechnungen", [], { depth: 2 }),
+            dir("C:/kunden/B/Schriftverkehr", "Schriftverkehr", [], { depth: 2 }),
+            dir("C:/kunden/B/Angebote", "Angebote", [], { depth: 2 }),
+          ],
+          { depth: 1 },
+        ),
+      ]),
+    ),
+  );
+  assert(reordered.repeatedChildDirectoryStructures.length === 1, "F: order of children does not matter");
+  assert(
+    reordered.repeatedChildDirectoryStructures[0]?.childDirectoryNames.join(",") ===
+      "Angebote,Rechnungen,Schriftverkehr",
+    "F: display names sorted",
+  );
+
+  const independent = analyzeStructureContext(
+    resultOf(
+      dir("C:/bestand", "bestand", [
+        customerShape("C:/bestand/A", "A", 1),
+        customerShape("C:/bestand/B", "B", 1),
+        dir(
+          "C:/bestand/Gas",
+          "Gas",
+          [
+            dir("C:/bestand/Gas/2023", "2023", [], { depth: 2 }),
+            dir("C:/bestand/Gas/2024", "2024", [], { depth: 2 }),
+            dir("C:/bestand/Gas/2025", "2025", [], { depth: 2 }),
+          ],
+          { depth: 1 },
+        ),
+        dir(
+          "C:/bestand/Wasser",
+          "Wasser",
+          [
+            dir("C:/bestand/Wasser/2023", "2023", [], { depth: 2 }),
+            dir("C:/bestand/Wasser/2024", "2024", [], { depth: 2 }),
+            dir("C:/bestand/Wasser/2025", "2025", [], { depth: 2 }),
+          ],
+          { depth: 1 },
+        ),
+      ]),
+    ),
+  );
+  assert(independent.repeatedChildDirectoryStructures.length === 2, "G: two independent groups");
+  const customerGroup = independent.repeatedChildDirectoryStructures.find((item) =>
+    item.childDirectoryNames.includes("Angebote"),
+  );
+  const yearNameGroup = independent.repeatedChildDirectoryStructures.find((item) =>
+    item.childDirectoryNames.includes("2023"),
+  );
+  assert(customerGroup?.parentCount === 2 && yearNameGroup?.parentCount === 2, "G: each group has two parents");
+  assert(customerGroup?.parents.map((item) => item.folder.name).join(",") === "A,B", "G: customer parents A,B");
+  assert(
+    yearNameGroup?.parents.map((item) => item.folder.name).join(",") === "Gas,Wasser",
+    "G: year-name parents Gas,Wasser",
+  );
+
+  const depthLimitedParent = analyzeStructureContext(
+    resultOf(
+      dir("C:/kunden", "kunden", [
+        customerShape("C:/kunden/A", "A", 1),
+        dir(
+          "C:/kunden/B",
+          "B",
+          [
+            dir("C:/kunden/B/Angebote", "Angebote", [], { depth: 2 }),
+            dir("C:/kunden/B/Rechnungen", "Rechnungen", [], { depth: 2 }),
+            dir("C:/kunden/B/Schriftverkehr", "Schriftverkehr", [], { depth: 2 }),
+          ],
+          { depth: 1, listing: "depthLimited" },
+        ),
+      ]),
+    ),
+  );
+  assert(depthLimitedParent.repeatedChildDirectoryStructures.length === 0, "H: depthLimited parent is not grouped");
+
+  const incompleteParent = analyzeStructureContext(
+    resultOf(
+      dir("C:/kunden", "kunden", [
+        customerShape("C:/kunden/A", "A", 1),
+        dir(
+          "C:/kunden/B",
+          "B",
+          [
+            dir("C:/kunden/B/Angebote", "Angebote", [], { depth: 2 }),
+            dir("C:/kunden/B/Rechnungen", "Rechnungen", [], { depth: 2 }),
+            dir("C:/kunden/B/Schriftverkehr", "Schriftverkehr", [], { depth: 2 }),
+          ],
+          { depth: 1, listing: "incomplete" },
+        ),
+      ]),
+    ),
+  );
+  assert(incompleteParent.repeatedChildDirectoryStructures.length === 0, "I: incomplete parent is not grouped");
+
+  const years = analyzeStructureContext(
+    resultOf(
+      dir("C:/versorger", "versorger", [
+        dir(
+          "C:/versorger/Gas",
+          "Gas",
+          [
+            dir("C:/versorger/Gas/2023", "2023", [], { depth: 2 }),
+            dir("C:/versorger/Gas/2024", "2024", [], { depth: 2 }),
+            dir("C:/versorger/Gas/2025", "2025", [], { depth: 2 }),
+          ],
+          { depth: 1 },
+        ),
+        dir(
+          "C:/versorger/Wasser",
+          "Wasser",
+          [
+            dir("C:/versorger/Wasser/2023", "2023", [], { depth: 2 }),
+            dir("C:/versorger/Wasser/2024", "2024", [], { depth: 2 }),
+            dir("C:/versorger/Wasser/2025", "2025", [], { depth: 2 }),
+          ],
+          { depth: 1 },
+        ),
+      ]),
+    ),
+  );
+  assert(years.yearGroups.length === 2, "J: year groups remain two parent groups");
+  assert(years.yearGroups[0]?.years.join(",") === "2023,2024,2025", "J: Gas years unchanged");
+  assert(years.yearGroups[1]?.years.join(",") === "2023,2024,2025", "J: Wasser years unchanged");
+  assert(years.repeatedChildDirectoryStructures.length === 1, "J: same years also form a general structure group");
+  assert(
+    years.repeatedChildDirectoryStructures[0]?.childDirectoryNames.join(",") === "2023,2024,2025",
+    "J: general structure names are the years",
+  );
+
+  const mixedDepth = analyzeStructureContext(
+    resultOf(
+      dir("C:/root", "root", [
+        customerShape("C:/root/A", "A", 1),
+        dir(
+          "C:/root/tief",
+          "tief",
+          [customerShape("C:/root/tief/B", "B", 2)],
+          { depth: 1 },
+        ),
+      ]),
+    ),
+  );
+  assert(mixedDepth.repeatedChildDirectoryStructures.length === 1, "K: same structure at different depths");
+  assert(
+    mixedDepth.repeatedChildDirectoryStructures[0]?.parents.map((item) => item.depth).join(",") === "1,2",
+    "K: depths 1 then 2 by relative path",
+  );
+
+  const orderFirst = analyzeStructureContext(
+    resultOf(
+      dir("C:/bestand", "bestand", [
+        customerShape("C:/bestand/B", "B", 1),
+        customerShape("C:/bestand/A", "A", 1),
+        dir(
+          "C:/bestand/X",
+          "X",
+          [dir("C:/bestand/X/Eins", "Eins", [], { depth: 2 }), dir("C:/bestand/X/Zwei", "Zwei", [], { depth: 2 })],
+          { depth: 1 },
+        ),
+        dir(
+          "C:/bestand/Y",
+          "Y",
+          [dir("C:/bestand/Y/Eins", "Eins", [], { depth: 2 }), dir("C:/bestand/Y/Zwei", "Zwei", [], { depth: 2 })],
+          { depth: 1 },
+        ),
+      ]),
+    ),
+  );
+  const orderSecond = analyzeStructureContext(
+    resultOf(
+      dir("C:/bestand", "bestand", [
+        dir(
+          "C:/bestand/Y",
+          "Y",
+          [dir("C:/bestand/Y/Zwei", "Zwei", [], { depth: 2 }), dir("C:/bestand/Y/Eins", "Eins", [], { depth: 2 })],
+          { depth: 1 },
+        ),
+        customerShape("C:/bestand/A", "A", 1),
+        dir(
+          "C:/bestand/X",
+          "X",
+          [dir("C:/bestand/X/Zwei", "Zwei", [], { depth: 2 }), dir("C:/bestand/X/Eins", "Eins", [], { depth: 2 })],
+          { depth: 1 },
+        ),
+        customerShape("C:/bestand/B", "B", 1),
+      ]),
+    ),
+  );
+  assert(serialized(orderFirst) === serialized(orderSecond), "L: deterministic regardless of input order");
+  assert(
+    orderFirst.repeatedChildDirectoryStructures[0]?.childDirectoryCount === 3,
+    "L: larger structure first",
+  );
+  assert(
+    orderFirst.repeatedChildDirectoryStructures[0]?.parents.map((item) => item.relativePath).join(",") === "A,B",
+    "L: parents sorted by relative path",
+  );
+  assert(
+    orderFirst.repeatedChildDirectoryStructures[1]?.childDirectoryNames.join(",") === "Eins,Zwei",
+    "L: smaller structure second",
+  );
+
+  const filterRoot = dir("C:/kunden", "kunden", [
+    customerShape("C:/kunden/A", "A", 1),
+    customerShape("C:/kunden/B", "B", 1),
+    dir("C:/kunden/sonst", "sonst", [file("C:/kunden/sonst/x.pdf", "x.pdf", { depth: 2 })], { depth: 1 }),
+  ]);
+  const filterResult = resultOf(filterRoot);
+  const unfiltered = analyzeStructureContext(filterResult);
+  const filteredView = buildDisplayFilterView(
+    filterRoot,
+    { ...emptyDisplayFilterDraft(), extensions: [".pdf"] },
+    DEFAULT_TREE_SORT,
+  );
+  assert(filteredView.constrained, "M: display filter is constrained");
+  assert(
+    analyzeStructureContext(filterResult).repeatedChildDirectoryStructures.length ===
+      unfiltered.repeatedChildDirectoryStructures.length,
+    "M: ignores display filter",
+  );
+  const collapsedRows = deriveVisibleRows(filterRoot, new Set(["C:/kunden"]));
+  assert(collapsedRows.length < 10, "M: collapsed view hides children");
+  assert(
+    analyzeStructureContext(filterResult).repeatedChildDirectoryStructures[0]?.parentCount === 2,
+    "M: ignores expand state",
+  );
+
+  const structureBlob = serialized(unfiltered).toLocaleLowerCase();
+  assert(!structureBlob.includes("redundant"), "no redundancy rating");
+  assert(!structureBlob.includes("zusammenführen") && !structureBlob.includes("loeschen"), "no action rating");
+}
+
+function linearNamed(
+  parts: readonly { name: string; extras?: Partial<DirectoryNode>; extraChildren?: FsNode[] }[],
+  base: string,
+  depth: number,
+): DirectoryNode {
+  const head = parts[0];
+  if (head === undefined) {
+    throw new Error("linearNamed requires at least one folder");
+  }
+  const path = `${base}/${head.name}`;
+  const rest = parts.slice(1);
+  const children: FsNode[] = [...(head.extraChildren ?? [])];
+  if (rest.length > 0) {
+    children.unshift(linearNamed(rest, path, depth + 1));
+  }
+  return dir(path, head.name, children, { depth, ...head.extras });
+}
+
+function withOtherChild(rootPath: string, rootName: string, primary: DirectoryNode): DirectoryNode {
+  return dir(rootPath, rootName, [
+    primary,
+    dir(`${rootPath}/sonst`, "sonst", [], { depth: 1 }),
+  ]);
+}
+
+function chainNames(context: InventoryStructureContext, index = 0): string {
+  return context.folderChains[index]?.folders.map((item) => item.name).join(">") ?? "";
+}
+
+function runFolderChainCheck(): void {
+  assert(MIN_FOLDER_CHAIN_LENGTH === 3, "chain minimum is 3 folders");
+
+  const three = analyzeStructureContext(
+    resultOf(
+      withOtherChild(
+        "C:/bestand",
+        "bestand",
+        linearNamed(
+          [
+            { name: "A" },
+            { name: "B" },
+            { name: "C", extraChildren: [file("C:/bestand/A/B/C/x.pdf", "x.pdf", { depth: 3 })] },
+          ],
+          "C:/bestand",
+          1,
+        ),
+      ),
+    ),
+  );
+  assert(three.folderChains.length === 1, "A: one chain");
+  assert(three.folderChains[0]?.folderCount === 3, "A: three folders");
+  assert(chainNames(three) === "A>B>C", "A: A>B>C");
+  assert(three.folderChains[0]?.start.name === "A" && three.folderChains[0]?.end.name === "C", "A: start A end C");
+  assert(three.folderChains[0]?.endDirectFileCount === 1, "A: end has one direct file");
+  assert(three.folderChains[0]?.endDirectDirectoryCount === 0, "A: end has no direct directories");
+  assert(three.folderChains[0]?.endListing === "read", "A: end listing read");
+
+  const two = analyzeStructureContext(
+    resultOf(
+      withOtherChild("C:/bestand", "bestand", linearNamed([{ name: "A" }, { name: "B" }], "C:/bestand", 1)),
+    ),
+  );
+  assert(two.folderChains.length === 0, "B: two folders are not a chain");
+
+  const four = analyzeStructureContext(
+    resultOf(
+      withOtherChild(
+        "C:/bestand",
+        "bestand",
+        linearNamed([{ name: "A" }, { name: "B" }, { name: "C" }, { name: "D" }], "C:/bestand", 1),
+      ),
+    ),
+  );
+  assert(four.folderChains.length === 1, "C: exactly one maximal chain");
+  assert(four.folderChains[0]?.folderCount === 4, "C: four folders");
+  assert(chainNames(four) === "A>B>C>D", "C: A>B>C>D");
+  assert(
+    four.folderChains.every((item) => item.folders.map((folder) => folder.name).join(">") !== "B>C>D"),
+    "C: no subchain",
+  );
+
+  const fileStopsShort = analyzeStructureContext(
+    resultOf(
+      withOtherChild(
+        "C:/bestand",
+        "bestand",
+        linearNamed(
+          [
+            { name: "A" },
+            {
+              name: "B",
+              extraChildren: [file("C:/bestand/A/B/n.pdf", "n.pdf", { depth: 2 })],
+            },
+            { name: "C" },
+          ],
+          "C:/bestand",
+          1,
+        ),
+      ),
+    ),
+  );
+  assert(fileStopsShort.folderChains.length === 0, "D: file in B stops before min length");
+
+  const fileEndsChain = analyzeStructureContext(
+    resultOf(
+      withOtherChild(
+        "C:/bestand",
+        "bestand",
+        linearNamed(
+          [
+            { name: "W" },
+            { name: "A" },
+            { name: "B", extraChildren: [file("C:/bestand/W/A/B/n.pdf", "n.pdf", { depth: 3 })] },
+          ],
+          "C:/bestand",
+          1,
+        ),
+      ),
+    ),
+  );
+  assert(fileEndsChain.folderChains.length === 1, "D: longer chain still reported");
+  assert(chainNames(fileEndsChain) === "W>A>B", "D: ends at B with file");
+  assert(fileEndsChain.folderChains[0]?.endDirectFileCount === 1, "D: end file count");
+
+  const twoDirsShort = analyzeStructureContext(
+    resultOf(
+      withOtherChild(
+        "C:/bestand",
+        "bestand",
+        dir(
+          "C:/bestand/A",
+          "A",
+          [
+            dir(
+              "C:/bestand/A/B",
+              "B",
+              [
+                dir("C:/bestand/A/B/Eins", "Eins", [], { depth: 3 }),
+                dir("C:/bestand/A/B/Zwei", "Zwei", [], { depth: 3 }),
+              ],
+              { depth: 2 },
+            ),
+          ],
+          { depth: 1 },
+        ),
+      ),
+    ),
+  );
+  assert(twoDirsShort.folderChains.length === 0, "E: two children stop before min length");
+
+  const twoDirsEnd = analyzeStructureContext(
+    resultOf(
+      withOtherChild(
+        "C:/bestand",
+        "bestand",
+        dir(
+          "C:/bestand/W",
+          "W",
+          [
+            dir(
+              "C:/bestand/W/A",
+              "A",
+              [
+                dir(
+                  "C:/bestand/W/A/B",
+                  "B",
+                  [
+                    dir("C:/bestand/W/A/B/Eins", "Eins", [], { depth: 4 }),
+                    dir("C:/bestand/W/A/B/Zwei", "Zwei", [], { depth: 4 }),
+                  ],
+                  { depth: 3 },
+                ),
+              ],
+              { depth: 2 },
+            ),
+          ],
+          { depth: 1 },
+        ),
+      ),
+    ),
+  );
+  assert(twoDirsEnd.folderChains.length === 1, "E: chain ends at folder with two children");
+  assert(chainNames(twoDirsEnd) === "W>A>B", "E: W>A>B");
+  assert(twoDirsEnd.folderChains[0]?.endDirectDirectoryCount === 2, "E: end directory count");
+
+  const depthLimitedEnd = analyzeStructureContext(
+    resultOf(
+      withOtherChild(
+        "C:/bestand",
+        "bestand",
+        linearNamed(
+          [
+            { name: "W" },
+            { name: "A" },
+            { name: "B", extras: { listing: "depthLimited" } },
+            { name: "C" },
+          ],
+          "C:/bestand",
+          1,
+        ),
+      ),
+    ),
+  );
+  assert(depthLimitedEnd.folderChains.length === 1, "F: depthLimited may be the end");
+  assert(chainNames(depthLimitedEnd) === "W>A>B", "F: does not continue past depthLimited");
+  assert(depthLimitedEnd.folderChains[0]?.endListing === "depthLimited", "F: end listing preserved");
+  assert(depthLimitedEnd.folderChains[0]?.endDirectDirectoryCount === 1, "F: visible child is not a continuation");
+
+  const incompleteEnd = analyzeStructureContext(
+    resultOf(
+      withOtherChild(
+        "C:/bestand",
+        "bestand",
+        linearNamed(
+          [
+            { name: "W" },
+            { name: "A" },
+            { name: "B", extras: { listing: "incomplete" } },
+            { name: "C" },
+          ],
+          "C:/bestand",
+          1,
+        ),
+      ),
+    ),
+  );
+  assert(incompleteEnd.folderChains.length === 1, "G: incomplete may be the end");
+  assert(chainNames(incompleteEnd) === "W>A>B", "G: does not continue past incomplete");
+  assert(incompleteEnd.folderChains[0]?.endListing === "incomplete", "G: end listing preserved");
+
+  const independent = analyzeStructureContext(
+    resultOf(
+      dir("C:/bestand", "bestand", [
+        linearNamed([{ name: "A" }, { name: "B" }, { name: "C" }], "C:/bestand", 1),
+        linearNamed([{ name: "X" }, { name: "Y" }, { name: "Z" }], "C:/bestand", 1),
+      ]),
+    ),
+  );
+  assert(independent.folderChains.length === 2, "H: two independent chains");
+  assert(chainNames(independent, 0) === "A>B>C", "H: A chain first by path");
+  assert(chainNames(independent, 1) === "X>Y>Z", "H: X chain second");
+
+  const fromRoot = analyzeStructureContext(
+    resultOf(dir("C:/root", "root", [linearNamed([{ name: "A" }, { name: "B" }], "C:/root", 1)])),
+  );
+  assert(fromRoot.folderChains.length === 1, "I: chain from root");
+  assert(chainNames(fromRoot) === "root>A>B", "I: includes Startordner node");
+  assert(fromRoot.folderChains[0]?.startRelativePath === "Startordner", "I: root display path");
+  assert(fromRoot.folderChains[0]?.startDepth === 0, "I: root depth 0");
+
+  const mixedDepth = analyzeStructureContext(
+    resultOf(
+      dir("C:/root", "root", [
+        linearNamed([{ name: "A" }, { name: "B" }, { name: "C" }], "C:/root", 1),
+        dir(
+          "C:/root/tief",
+          "tief",
+          [
+            linearNamed([{ name: "P" }, { name: "Q" }, { name: "R" }], "C:/root/tief", 2),
+            dir("C:/root/tief/andere", "andere", [], { depth: 2 }),
+          ],
+          { depth: 1 },
+        ),
+      ]),
+    ),
+  );
+  assert(mixedDepth.folderChains.length === 2, "J: chains at mixed depths");
+  assert(mixedDepth.folderChains.some((item) => item.startDepth === 1), "J: depth 1 start");
+  assert(mixedDepth.folderChains.some((item) => item.startDepth === 2), "J: depth 2 start");
+
+  const ordered = analyzeStructureContext(
+    resultOf(
+      dir("C:/bestand", "bestand", [
+        linearNamed([{ name: "KurzZ" }, { name: "Z2" }, { name: "Z3" }], "C:/bestand", 1),
+        linearNamed([{ name: "Lang" }, { name: "L2" }, { name: "L3" }, { name: "L4" }], "C:/bestand", 1),
+        linearNamed([{ name: "KurzA" }, { name: "A2" }, { name: "A3" }], "C:/bestand", 1),
+      ]),
+    ),
+  );
+  const orderedAgain = analyzeStructureContext(
+    resultOf(
+      dir("C:/bestand", "bestand", [
+        linearNamed([{ name: "Lang" }, { name: "L2" }, { name: "L3" }, { name: "L4" }], "C:/bestand", 1),
+        linearNamed([{ name: "KurzA" }, { name: "A2" }, { name: "A3" }], "C:/bestand", 1),
+        linearNamed([{ name: "KurzZ" }, { name: "Z2" }, { name: "Z3" }], "C:/bestand", 1),
+      ]),
+    ),
+  );
+  assert(ordered.folderChains.map((item) => item.start.name).join(",") === "Lang,KurzA,KurzZ", "K: longer first then path");
+  assert(ordered.folderChains[0]?.folderCount === 4, "K: longest first");
+  assert(serialized(ordered) === serialized(orderedAgain), "K: deterministic regardless of input order");
+
+  const filterRoot = dir("C:/bestand", "bestand", [
+    linearNamed(
+      [
+        { name: "A" },
+        { name: "B" },
+        { name: "C", extraChildren: [file("C:/bestand/A/B/C/x.pdf", "x.pdf", { depth: 3 })] },
+      ],
+      "C:/bestand",
+      1,
+    ),
+    dir("C:/bestand/sonst", "sonst", [file("C:/bestand/sonst/x.pdf", "x.pdf", { depth: 2 })], { depth: 1 }),
+  ]);
+  const filterResult = resultOf(filterRoot);
+  const unfiltered = analyzeStructureContext(filterResult);
+  const filteredView = buildDisplayFilterView(
+    filterRoot,
+    { ...emptyDisplayFilterDraft(), extensions: [".pdf"] },
+    DEFAULT_TREE_SORT,
+  );
+  assert(filteredView.constrained, "L: display filter is constrained");
+  assert(
+    analyzeStructureContext(filterResult).folderChains.length === unfiltered.folderChains.length,
+    "L: ignores display filter",
+  );
+  const collapsedRows = deriveVisibleRows(filterRoot, new Set(["C:/bestand"]));
+  assert(collapsedRows.length < 8, "L: collapsed view hides children");
+  assert(analyzeStructureContext(filterResult).folderChains[0]?.folderCount === 3, "L: ignores expand state");
+
+  const years = analyzeStructureContext(
+    resultOf(
+      dir("C:/versorger", "versorger", [
+        dir(
+          "C:/versorger/Gas",
+          "Gas",
+          [
+            dir("C:/versorger/Gas/2023", "2023", [], { depth: 2 }),
+            dir("C:/versorger/Gas/2024", "2024", [], { depth: 2 }),
+            dir("C:/versorger/Gas/2025", "2025", [], { depth: 2 }),
+          ],
+          { depth: 1 },
+        ),
+        dir(
+          "C:/versorger/Wasser",
+          "Wasser",
+          [
+            dir("C:/versorger/Wasser/2023", "2023", [], { depth: 2 }),
+            dir("C:/versorger/Wasser/2024", "2024", [], { depth: 2 }),
+            dir("C:/versorger/Wasser/2025", "2025", [], { depth: 2 }),
+          ],
+          { depth: 1 },
+        ),
+      ]),
+    ),
+  );
+  assert(years.yearGroups.length === 2, "M: year groups remain two parent groups");
+  assert(years.yearGroups[0]?.years.join(",") === "2023,2024,2025", "M: Gas years unchanged");
+  assert(years.folderChains.length === 0, "M: year siblings are not a chain");
+
+  const repeated = analyzeStructureContext(
+    resultOf(dir("C:/kunden", "kunden", [customerShape("C:/kunden/A", "A", 1), customerShape("C:/kunden/B", "B", 1)])),
+  );
+  assert(repeated.repeatedChildDirectoryStructures.length === 1, "N: Häppchen 1 group remains");
+  assert(repeated.repeatedChildDirectoryStructures[0]?.parentCount === 2, "N: two parents remain");
+  assert(repeated.folderChains.length === 0, "N: customer siblings are not a chain");
+
+  const chainBlob = serialized(three).toLocaleLowerCase();
+  assert(!chainBlob.includes("unnötig") && !chainBlob.includes("unnoetig"), "O: no depth rating");
+  assert(!chainBlob.includes("überflüssig") && !chainBlob.includes("ueberfluessig"), "O: no surplus rating");
+  assert(!chainBlob.includes("zusammenlegen") && !chainBlob.includes("vereinfachen"), "O: no merge rating");
+  assert(!chainBlob.includes("verschieben") && !chainBlob.includes("löschen") && !chainBlob.includes("loeschen"), "O: no action rating");
 }

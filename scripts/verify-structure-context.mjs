@@ -33,6 +33,16 @@ assert(contextSrc.includes("displayInventoryPath"), "core: reuses relative path 
 assert(contextSrc.includes("missingYears"), "core: missingYears field");
 assert(contextSrc.includes("consecutiveRuns"), "core: consecutiveRuns field");
 assert(contextSrc.includes("a_data"), "core: companion-structure note present");
+assert(contextSrc.includes("repeatedChildDirectoryStructures"), "core: repeated child directory structures");
+assert(contextSrc.includes("MIN_CHILD_DIRECTORY_STRUCTURE_SIZE = 2"), "core: min 2 child directories");
+assert(contextSrc.includes("MIN_REPEATED_STRUCTURE_PARENTS = 2"), "core: min 2 parents");
+assert(contextSrc.includes("MIN_FOLDER_CHAIN_LENGTH = 3"), "core: chain minimum 3");
+assert(contextSrc.includes("folderChains"), "core: folderChains field");
+assert(contextSrc.includes('listing !== "read"'), "core: only fully read parents");
+assert(!overviewUi.includes("repeatedChildDirectoryStructures"), "overview UI not yet showing structure groups");
+assert(!overviewSrc.includes("repeatedChildDirectoryStructures"), "overview view not yet mapping structure groups");
+assert(!overviewUi.includes("folderChains"), "overview UI not yet showing folder chains");
+assert(!overviewSrc.includes("folderChains"), "overview view not yet mapping folder chains");
 assert(!contextSrc.toLocaleLowerCase().includes("duplikat"), "core: no Duplikat");
 assert(!contextSrc.includes("openai") && !contextSrc.toLocaleLowerCase().includes("soll-struktur"), "core: no KI/SOLL");
 assert(treeViewSrc.includes("useMemo(() => analyzeStructureContext(result), [result])"), "TreeView memos structure context");
@@ -41,6 +51,7 @@ assert(overviewSrc.includes("YearFolderGroup") || overviewSrc.includes("yearGrou
 assert(!appSrc.includes("inventoryStructureContext"), "App does not own structure context");
 assert(analysisSrc.includes("repeatedFolderNames"), "P1-H repeated folders remain");
 assert(checkSrc.includes("runInventoryStructureContextCheck"), "ts check exists");
+assert(checkSrc.includes("runFolderChainCheck"), "ts chain checks exist");
 assert(workbenchSrc.includes("runInventoryStructureContextCheck"), "ts check is wired");
 assert(!contextSrc.includes("start_scan"), "no scan IPC");
 assert(!contextSrc.includes("ContentCache") && !contextSrc.includes("contentCache"), "no ContentCache");
@@ -48,6 +59,9 @@ assert(!contextSrc.includes("ContentCache") && !contextSrc.includes("contentCach
 const YEAR_FOLDER_MIN = 1900;
 const YEAR_FOLDER_MAX = 2100;
 const MIN_YEAR_GROUP_SIZE = 2;
+const MIN_CHILD_DIRECTORY_STRUCTURE_SIZE = 2;
+const MIN_REPEATED_STRUCTURE_PARENTS = 2;
+const MIN_FOLDER_CHAIN_LENGTH = 3;
 const YEAR_FOLDER_NAME = /^[0-9]{4}$/;
 const START_FOLDER_LABEL = "Startordner";
 
@@ -127,6 +141,106 @@ function consecutiveRunsOf(years) {
   return runs;
 }
 
+function uniqueChildDirectoryEntries(children) {
+  const byKey = new Map();
+  const sorted = children.slice().sort((a, b) => compareText(a.name, b.name));
+  for (const child of sorted) {
+    const key = child.name.toLocaleLowerCase();
+    if (!byKey.has(key)) byKey.set(key, child.name);
+  }
+  return [...byKey.entries()]
+    .map(([key, original]) => ({ key, original }))
+    .sort((a, b) => compareText(a.key, b.key) || compareText(a.original, b.original));
+}
+
+function buildRepeatedChildDirectoryStructures(folders) {
+  const buckets = new Map();
+  for (const folder of folders) {
+    if (folder.listing !== "read") continue;
+    const entries = uniqueChildDirectoryEntries(folder.childDirectories);
+    if (entries.length < MIN_CHILD_DIRECTORY_STRUCTURE_SIZE) continue;
+    const signature = entries.map((item) => item.key).join("\n");
+    const existing = buckets.get(signature);
+    if (existing === undefined) buckets.set(signature, [folder]);
+    else existing.push(folder);
+  }
+  const groups = [];
+  for (const [signature, members] of buckets) {
+    if (members.length < MIN_REPEATED_STRUCTURE_PARENTS) continue;
+    const parents = members
+      .map((item) => ({ folder: item.folder, relativePath: item.relativePath, depth: item.depth }))
+      .sort((a, b) => compareText(a.relativePath, b.relativePath));
+    const first = parents[0];
+    const firstFolder = members.find((item) => item.folder.path === first.folder.path) ?? members[0];
+    const childDirectoryNames = uniqueChildDirectoryEntries(firstFolder.childDirectories).map((item) => item.original);
+    groups.push({
+      signature,
+      childDirectoryNames,
+      childDirectoryCount: childDirectoryNames.length,
+      parents,
+      parentCount: parents.length,
+    });
+  }
+  groups.sort((left, right) => {
+    if (left.childDirectoryCount !== right.childDirectoryCount) return right.childDirectoryCount - left.childDirectoryCount;
+    if (left.parentCount !== right.parentCount) return right.parentCount - left.parentCount;
+    return compareText(left.signature, right.signature);
+  });
+  return groups;
+}
+
+function canContinueFolderChain(folder) {
+  return folder.listing === "read" && folder.childFiles.length === 0 && folder.childDirectories.length === 1;
+}
+
+function parentContinuesIntoFolder(folder, byPath) {
+  if (folder.parent === null) return false;
+  const parent = byPath.get(folder.parent.path);
+  if (parent === undefined || !canContinueFolderChain(parent)) return false;
+  return parent.childDirectories[0]?.path === folder.folder.path;
+}
+
+function buildFolderChains(folders) {
+  const byPath = new Map(folders.map((item) => [item.folder.path, item]));
+  const chains = [];
+  for (const folder of folders) {
+    if (parentContinuesIntoFolder(folder, byPath) || !canContinueFolderChain(folder)) continue;
+    const walk = [folder];
+    const seen = new Set([folder.folder.path]);
+    let current = folder;
+    while (canContinueFolderChain(current)) {
+      const nextPath = current.childDirectories[0]?.path;
+      if (nextPath === undefined || seen.has(nextPath)) break;
+      const next = byPath.get(nextPath);
+      if (next === undefined) break;
+      seen.add(nextPath);
+      walk.push(next);
+      current = next;
+    }
+    if (walk.length < MIN_FOLDER_CHAIN_LENGTH) continue;
+    const start = walk[0];
+    const end = walk[walk.length - 1];
+    chains.push({
+      folderCount: walk.length,
+      folders: walk.map((item) => item.folder),
+      start: start.folder,
+      end: end.folder,
+      startRelativePath: start.relativePath,
+      endRelativePath: end.relativePath,
+      startDepth: start.depth,
+      endDepth: end.depth,
+      endDirectFileCount: end.childFiles.length,
+      endDirectDirectoryCount: end.childDirectories.length,
+      endListing: end.listing,
+    });
+  }
+  chains.sort((left, right) => {
+    if (left.folderCount !== right.folderCount) return right.folderCount - left.folderCount;
+    return compareText(left.startRelativePath, right.startRelativePath) || compareText(left.start.path, right.start.path);
+  });
+  return chains;
+}
+
 function analyzeStructureContext(result) {
   const rootPath = result.root.path;
   const folders = [];
@@ -178,7 +292,13 @@ function analyzeStructureContext(result) {
   folders.sort((left, right) => compareText(left.folder.path, right.folder.path));
   yearFolders.sort((left, right) => left.year - right.year || compareText(left.folder.path, right.folder.path));
   yearGroups.sort((left, right) => compareText(left.parent.path, right.parent.path));
-  return { folders, yearFolders, yearGroups };
+  return {
+    folders,
+    yearFolders,
+    yearGroups,
+    repeatedChildDirectoryStructures: buildRepeatedChildDirectoryStructures(folders),
+    folderChains: buildFolderChains(folders),
+  };
 }
 
 function file(id, name, extras = {}) {
@@ -303,5 +423,109 @@ assert(yearCtx?.parent?.name === "pdf", "parent context");
 assert(yearCtx?.siblingDirectories.map((item) => item.name).join(",") === "2021", "sibling context");
 assert(yearCtx?.relativePath === "2020", "relative path");
 assert(pdf.folders.find((item) => item.folder.path === "C:/pdf")?.relativePath === START_FOLDER_LABEL, "root relative path");
+
+function customer(parentPath, parentName) {
+  return dir(parentPath, parentName, [
+    dir(`${parentPath}/Angebote`, "Angebote", [], { depth: 2 }),
+    dir(`${parentPath}/Rechnungen`, "Rechnungen", [], { depth: 2 }),
+    dir(`${parentPath}/Schriftverkehr`, "Schriftverkehr", [], { depth: 2 }),
+  ], { depth: 1 });
+}
+
+const sameShape = analyzeStructureContext(
+  resultOf(dir("C:/kunden", "kunden", [customer("C:/kunden/A", "A"), customer("C:/kunden/B", "B")])),
+);
+assert(sameShape.repeatedChildDirectoryStructures.length === 1, "P1-J A: one group");
+assert(sameShape.repeatedChildDirectoryStructures[0]?.childDirectoryNames.join(",") === "Angebote,Rechnungen,Schriftverkehr", "P1-J A: names");
+assert(sameShape.repeatedChildDirectoryStructures[0]?.parentCount === 2, "P1-J A: two parents");
+
+const limitedParent = analyzeStructureContext(
+  resultOf(
+    dir("C:/kunden", "kunden", [
+      customer("C:/kunden/A", "A"),
+      dir("C:/kunden/B", "B", [
+        dir("C:/kunden/B/Angebote", "Angebote", [], { depth: 2 }),
+        dir("C:/kunden/B/Rechnungen", "Rechnungen", [], { depth: 2 }),
+        dir("C:/kunden/B/Schriftverkehr", "Schriftverkehr", [], { depth: 2 }),
+      ], { depth: 1, listing: "depthLimited" }),
+    ]),
+  ),
+);
+assert(limitedParent.repeatedChildDirectoryStructures.length === 0, "P1-J H: depthLimited excluded");
+
+const yearShape = analyzeStructureContext(
+  resultOf(
+    dir("C:/v", "v", [
+      dir("C:/v/Gas", "Gas", [dir("C:/v/Gas/2023", "2023", [], { depth: 2 }), dir("C:/v/Gas/2024", "2024", [], { depth: 2 })], { depth: 1 }),
+      dir("C:/v/Wasser", "Wasser", [dir("C:/v/Wasser/2023", "2023", [], { depth: 2 }), dir("C:/v/Wasser/2024", "2024", [], { depth: 2 })], { depth: 1 }),
+    ]),
+  ),
+);
+assert(yearShape.yearGroups.length === 2, "P1-J J: year groups unchanged");
+assert(yearShape.repeatedChildDirectoryStructures.length === 1, "P1-J J: years also form a general group");
+
+function linear(parts, base, depth) {
+  const head = parts[0];
+  const path = `${base}/${head.name}`;
+  const rest = parts.slice(1);
+  const children = [...(head.extraChildren ?? [])];
+  if (rest.length > 0) children.unshift(linear(rest, path, depth + 1));
+  return dir(path, head.name, children, { depth, ...head.extras });
+}
+
+const chainThree = analyzeStructureContext(
+  resultOf(
+    dir("C:/bestand", "bestand", [
+      linear([{ name: "A" }, { name: "B" }, { name: "C" }], "C:/bestand", 1),
+      dir("C:/bestand/sonst", "sonst", [], { depth: 1 }),
+    ]),
+  ),
+);
+assert(chainThree.folderChains.length === 1, "P1-J chain A: one chain");
+assert(chainThree.folderChains[0]?.folderCount === 3, "P1-J chain A: length 3");
+assert(chainThree.folderChains[0]?.folders.map((item) => item.name).join(">") === "A>B>C", "P1-J chain A: names");
+
+const chainTwo = analyzeStructureContext(
+  resultOf(
+    dir("C:/bestand", "bestand", [
+      linear([{ name: "A" }, { name: "B" }], "C:/bestand", 1),
+      dir("C:/bestand/sonst", "sonst", [], { depth: 1 }),
+    ]),
+  ),
+);
+assert(chainTwo.folderChains.length === 0, "P1-J chain B: two folders are not a chain");
+
+const chainFour = analyzeStructureContext(
+  resultOf(
+    dir("C:/bestand", "bestand", [
+      linear([{ name: "A" }, { name: "B" }, { name: "C" }, { name: "D" }], "C:/bestand", 1),
+      dir("C:/bestand/sonst", "sonst", [], { depth: 1 }),
+    ]),
+  ),
+);
+assert(chainFour.folderChains.length === 1, "P1-J chain C: one maximal chain");
+assert(chainFour.folderChains[0]?.folderCount === 4, "P1-J chain C: length 4");
+
+const chainLimited = analyzeStructureContext(
+  resultOf(
+    dir("C:/bestand", "bestand", [
+      linear(
+        [{ name: "W" }, { name: "A" }, { name: "B", extras: { listing: "depthLimited" } }, { name: "C" }],
+        "C:/bestand",
+        1,
+      ),
+      dir("C:/bestand/sonst", "sonst", [], { depth: 1 }),
+    ]),
+  ),
+);
+assert(chainLimited.folderChains[0]?.folders.map((item) => item.name).join(">") === "W>A>B", "P1-J chain F: stops at depthLimited");
+assert(chainLimited.folderChains[0]?.endListing === "depthLimited", "P1-J chain F: listing kept");
+
+const chainRoot = analyzeStructureContext(
+  resultOf(dir("C:/root", "root", [linear([{ name: "A" }, { name: "B" }], "C:/root", 1)])),
+);
+assert(chainRoot.folderChains[0]?.startRelativePath === START_FOLDER_LABEL, "P1-J chain I: root is Startordner");
+assert(sameShape.folderChains.length === 0, "P1-J chain N: customer structure is not a chain");
+assert(yearShape.folderChains.length === 0, "P1-J chain M: year siblings are not a chain");
 
 console.log("structure context checks passed");
