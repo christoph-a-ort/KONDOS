@@ -1,6 +1,7 @@
 import { createDefaultScanConfig, isDirectory, type DirectoryNode, type FileNode, type FsNode } from "../model";
 import { runInventoryAnalysisCheck } from "./inventoryAnalysisCheck";
 import { runInventoryOverviewCheck } from "./inventoryOverviewCheck";
+import { runInventoryRepeatedNameContextCheck } from "./inventoryRepeatedNameContextCheck";
 import { runInventoryStructureContextCheck } from "./inventoryStructureContextCheck";
 import { runP1cCheck } from "./p1cCheck";
 import { runP1dCheck } from "./p1dCheck";
@@ -295,6 +296,7 @@ export function runTreeWorkbenchCheck(): void {
   runInventoryAnalysisCheck();
   runInventoryOverviewCheck();
   runInventoryStructureContextCheck();
+  runInventoryRepeatedNameContextCheck();
 }
 
 function runTreeSearchCheck(nested: DirectoryNode): void {
