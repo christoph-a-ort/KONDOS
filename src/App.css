@@ -701,6 +701,24 @@ button:disabled {
   margin: 0;
 }
 
+.inventory-overview-patterns {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.inventory-overview-pattern-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inventory-overview-pattern-heading {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
 .tree-filter-empty {
   margin: 12px;
 }

@@ -32,8 +32,13 @@ assert(!appSrc.includes("inventoryAnalysis"), "App does not own inventory analys
 assert(treeViewSrc.includes("useMemo(() => analyzeInventory(result), [result])"), "TreeView memos analysis on ScanResult");
 assert(!treeViewSrc.includes("analyzeInventory(viewRoot)"), "analysis ignores display tree");
 assert(treeViewSrc.includes("useMemo(() => analyzeStructureContext(result), [result])"), "TreeView memos structure context on ScanResult");
+assert(treeViewSrc.includes("analyzeFileStructureContext(result, structureContext)"), "TreeView memos file structure context");
+assert(treeViewSrc.includes("analyzeExactFolderFileStructures(structureContext)"), "TreeView memos exact folder structures");
+assert(treeViewSrc.includes("analyzeFileNameSyntax(fileStructureContext)"), "TreeView memos file-name syntax");
 assert(!treeViewSrc.includes("analyzeStructureContext(viewRoot)"), "structure context ignores display tree");
 assert(treeViewSrc.includes("structure={structureContext}"), "overview receives structure context");
+assert(treeViewSrc.includes("exactFolderStructures={exactFolderStructures}"), "overview receives exact structures");
+assert(treeViewSrc.includes("fileNameSyntax={fileNameSyntax}"), "overview receives file-name syntax");
 assert(treeViewSrc.includes("structure={null}"), "no-scan overview has no leftover structure");
 assert(treeViewSrc.includes("InventoryOverviewPanel"), "IST overview panel is wired");
 assert(treeViewSrc.includes("analysis={null}"), "no-scan overview is empty");
@@ -53,6 +58,8 @@ assert(overviewSrc.includes("Keine wiederkehrende Jahresstruktur erkannt."), "ye
 assert(overviewSrc.includes("Nicht vorhandene Jahresordner innerhalb der Spanne"), "neutral missing-year wording");
 assert(!overviewSrc.toLocaleLowerCase().includes("fehlende jahre"), "overview copy has no fehlende Jahre");
 assert(overviewUi.includes("SECTION_YEAR_STRUCTURES"), "panel renders year structures");
+assert(overviewUi.includes("patterns.title"), "panel renders Muster after years");
+assert(overviewUi.includes("DEFAULT_PATTERN_SECTION_OPEN"), "panel uses pattern defaults");
 assert(overviewUi.includes("davon Unterordner"), "subdirectory row");
 assert(overviewUi.includes("FILE_TYPE_TOTAL_LABEL"), "file type totals");
 assert(treeViewSrc.includes("rootPath={result.root.path}"), "overview uses scan root for display paths");
@@ -61,6 +68,9 @@ assert(checkSrc.includes("runInventoryAnalysisCheck"), "ts analysis check exists
 assert(overviewCheck.includes("runInventoryOverviewCheck"), "ts overview check exists");
 assert(read("src/ui/treeWorkbenchCheck.ts").includes("runInventoryAnalysisCheck"), "analysis check is wired");
 assert(read("src/ui/treeWorkbenchCheck.ts").includes("runInventoryOverviewCheck"), "overview check is wired");
+assert(read("src/ui/treeWorkbenchCheck.ts").includes("runInventoryPatternOverviewCheck"), "pattern check is wired");
+assert(read("src/ui/inventoryPatternOverview.ts").includes('SECTION_PATTERNS = "Muster"'), "pattern section title");
+assert(read("src/ui/inventoryPatternOverview.ts").includes("patterns: false"), "Muster closed by default");
 
 const NO_EXTENSION_KEY = "";
 const NO_EXTENSION_LABEL = "Ohne Dateiendung";

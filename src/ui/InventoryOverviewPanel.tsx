@@ -1,5 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import type { InventoryAnalysis } from "./inventoryAnalysis";
+import type { InventoryExactFolderFileStructureContext } from "./inventoryExactFolderFileStructure";
+import type { InventoryFileNameSyntaxContext } from "./inventoryFileNameSyntax";
 import type { InventoryStructureContext } from "./inventoryStructureContext";
 import {
   DEFAULT_SECTION_OPEN,
@@ -20,19 +22,34 @@ import {
   type InventoryOverviewRow,
   type InventoryOverviewYearGroup,
 } from "./inventoryOverview";
+import {
+  DEFAULT_PATTERN_SECTION_OPEN,
+  SECTION_DATE_FORMS,
+  SECTION_FILE_NAME_FEATURES,
+  buildInventoryPatternOverviewView,
+  type InventoryPatternOverviewView,
+  type PatternExactNameGroupView,
+  type PatternExtensionMultisetGroupView,
+  type PatternSameStemGroupView,
+} from "./inventoryPatternOverview";
 
 interface InventoryOverviewPanelProps {
   analysis: InventoryAnalysis | null;
   structure?: InventoryStructureContext | null;
+  exactFolderStructures?: InventoryExactFolderFileStructureContext | null;
+  fileNameSyntax?: InventoryFileNameSyntaxContext | null;
   rootPath?: string | null;
 }
 
 export function InventoryOverviewPanel({
   analysis,
   structure = null,
+  exactFolderStructures = null,
+  fileNameSyntax = null,
   rootPath = null,
 }: InventoryOverviewPanelProps) {
   const view = buildInventoryOverviewView(analysis, rootPath ?? "", structure);
+  const patterns = buildInventoryPatternOverviewView(exactFolderStructures, fileNameSyntax);
 
   return (
     <details
@@ -195,10 +212,172 @@ export function InventoryOverviewPanel({
               </ul>
             )}
           </OverviewSection>
+
+          <OverviewSection title={patterns.title} defaultOpen={DEFAULT_PATTERN_SECTION_OPEN.patterns}>
+            <PatternSectionBody patterns={patterns} />
+          </OverviewSection>
         </div>
       ) : (
         <p className="muted inventory-overview-empty">{view.noScanMessage}</p>
       )}
+    </details>
+  );
+}
+
+function PatternSectionBody({ patterns }: { patterns: InventoryPatternOverviewView }) {
+  if (!patterns.available) {
+    return null;
+  }
+
+  return (
+    <div className="inventory-overview-patterns">
+      <p className="muted">{patterns.observationHint}</p>
+
+      <div className="inventory-overview-pattern-block">
+        <p className="inventory-overview-pattern-heading">{SECTION_FILE_NAME_FEATURES}</p>
+        <dl className="inventory-overview-year-facts">
+          <dt>Dateien analysiert</dt>
+          <dd>{patterns.fileCountLabel}</dd>
+          <dt>Dateien mit Ziffernblöcken</dt>
+          <dd>{patterns.filesWithDigitBlocksLabel}</dd>
+          <dt>Dateien mit führendem Ziffernblock</dt>
+          <dd>{patterns.filesWithLeadingDigitBlockLabel}</dd>
+          <dt>Dateien mit erkannten Datumsformen</dt>
+          <dd>{patterns.filesWithDatePatternsLabel}</dd>
+          <dt>Dateien mit sechsstelligen Ziffernblöcken</dt>
+          <dd>{patterns.filesWithSixDigitBlocksLabel}</dd>
+        </dl>
+        <p className="muted">{patterns.sixDigitHint}</p>
+
+        <OverviewSection title={SECTION_DATE_FORMS} defaultOpen={DEFAULT_PATTERN_SECTION_OPEN.dateForms}>
+          <p className="muted">{patterns.dateFormsHint}</p>
+          {patterns.dateFormsEmpty !== null ? (
+            <p className="muted">{patterns.dateFormsEmpty}</p>
+          ) : (
+            <dl className="inventory-overview-year-facts">
+              {patterns.dateForms.map((row) => (
+                <Fragment key={row.format}>
+                  <dt>{row.label}</dt>
+                  <dd>{row.countLabel}</dd>
+                </Fragment>
+              ))}
+            </dl>
+          )}
+        </OverviewSection>
+      </div>
+
+      <OverviewSection title={patterns.sameStemTitle} defaultOpen={DEFAULT_PATTERN_SECTION_OPEN.sameStem}>
+        {patterns.sameStemEmpty !== null ? (
+          <p className="muted">{patterns.sameStemEmpty}</p>
+        ) : (
+          <div className="inventory-overview-groups">
+            {patterns.sameStemGroups.map((group) => (
+              <SameStemGroupCard key={group.key} group={group} />
+            ))}
+          </div>
+        )}
+      </OverviewSection>
+
+      <OverviewSection title={patterns.exactNameTitle} defaultOpen={DEFAULT_PATTERN_SECTION_OPEN.exactFileNames}>
+        {patterns.exactNameEmpty !== null ? (
+          <p className="muted">{patterns.exactNameEmpty}</p>
+        ) : (
+          <div className="inventory-overview-groups">
+            {patterns.exactNameGroups.map((group) => (
+              <ExactNameGroupCard key={group.key} group={group} />
+            ))}
+          </div>
+        )}
+      </OverviewSection>
+
+      <OverviewSection
+        title={patterns.extensionMultisetTitle}
+        defaultOpen={DEFAULT_PATTERN_SECTION_OPEN.extensionMultisets}
+      >
+        <p className="muted">{patterns.extensionMultisetHint}</p>
+        {patterns.extensionMultisetEmpty !== null ? (
+          <p className="muted">{patterns.extensionMultisetEmpty}</p>
+        ) : (
+          <div className="inventory-overview-groups">
+            {patterns.extensionMultisetGroups.map((group) => (
+              <ExtensionMultisetGroupCard key={group.key} group={group} />
+            ))}
+          </div>
+        )}
+      </OverviewSection>
+    </div>
+  );
+}
+
+function SameStemGroupCard({ group }: { group: PatternSameStemGroupView }) {
+  return (
+    <details className="inventory-overview-nested">
+      <summary>{group.summary}</summary>
+      <dl className="inventory-overview-year-facts">
+        <dt>Dateistamm</dt>
+        <dd>{group.stemLabel}</dd>
+        <dt>Endungen</dt>
+        <dd>{group.extensionsLabel}</dd>
+        <dt>Vorkommen</dt>
+        <dd>{group.occurrenceCountLabel}</dd>
+      </dl>
+      <ul className="inventory-overview-paths">
+        {group.occurrences.map((item) => (
+          <li key={item.path} title={item.pathLabel}>
+            {item.pathLabel}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function ExactNameGroupCard({ group }: { group: PatternExactNameGroupView }) {
+  return (
+    <details className="inventory-overview-nested">
+      <summary>{group.summary}</summary>
+      <dl className="inventory-overview-year-facts">
+        <dt>Direkte Dateinamen</dt>
+        <dd>{group.fileNamesLabel}</dd>
+        <dt>Ordner</dt>
+        <dd>{group.folderCountLabel}</dd>
+      </dl>
+      <ul className="inventory-overview-list">
+        {group.folders.map((folder) => (
+          <li key={folder.path}>
+            <span className="inventory-overview-name">{folder.name}</span>
+            <span className="inventory-overview-path" title={folder.pathLabel}>
+              {folder.pathLabel}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function ExtensionMultisetGroupCard({ group }: { group: PatternExtensionMultisetGroupView }) {
+  return (
+    <details className="inventory-overview-nested">
+      <summary>{group.summary}</summary>
+      <dl className="inventory-overview-year-facts">
+        <dt>Endungsverteilung</dt>
+        <dd>{group.extensionsLabel}</dd>
+        <dt>Direkte Dateien</dt>
+        <dd>{group.directFileCountLabel}</dd>
+        <dt>Ordner</dt>
+        <dd>{group.folderCountLabel}</dd>
+      </dl>
+      <ul className="inventory-overview-list">
+        {group.folders.map((folder) => (
+          <li key={folder.path}>
+            <span className="inventory-overview-name">{folder.name}</span>
+            <span className="inventory-overview-path" title={folder.pathLabel}>
+              {folder.pathLabel}
+            </span>
+          </li>
+        ))}
+      </ul>
     </details>
   );
 }

@@ -1,4 +1,4 @@
-// P1-M slice 2: syntactic file-name features. Not imported by the app.
+// P1-M slice 2: syntactic file-name features. Wired into IST overview via H3.
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -36,10 +36,10 @@ assert(!contextSrc.toLocaleLowerCase().includes("scandatum"), "no scan-date clai
 assert(!contextSrc.toLocaleLowerCase().includes("rechnungdatum"), "no invoice-date claim");
 assert(checkSrc.includes("runInventoryFileNameSyntaxCheck"), "ts checks exist");
 assert(workbenchSrc.includes("runInventoryFileNameSyntaxCheck"), "wired via workbench");
-assert(!overviewUi.includes("analyzeFileNameSyntax"), "no overview UI yet");
-assert(!overviewSrc.includes("analyzeFileNameSyntax"), "no overview mapping yet");
-assert(!treeViewSrc.includes("analyzeFileNameSyntax"), "no TreeView wiring yet");
-assert(!appCss.includes("file-name-syntax"), "no CSS for P1-M H2 UI");
+assert(treeViewSrc.includes("analyzeFileNameSyntax"), "TreeView wires H2");
+assert(treeViewSrc.includes("analyzeFileNameSyntax(fileStructureContext)"), "TreeView memos H2 on file structure");
+assert(overviewUi.includes("fileNameSyntax"), "overview panel accepts H2 context");
+assert(overviewUi.includes("SECTION_FILE_NAME_FEATURES"), "overview shows file-name features");
 assert(!fileContextSrc.includes("analyzeFileNameSyntax"), "P1-L H1 not owning P1-M H2");
 assert(!exactSrc.includes("analyzeFileNameSyntax"), "P1-M H1 not owning P1-M H2");
 assert(!contextSrc.includes("start_scan"), "no scan IPC");

@@ -1,4 +1,4 @@
-// P1-M slice 1: exact folder direct-file structures. Not imported by the app.
+// P1-M slice 1: exact folder direct-file structures. Wired into IST overview via H3.
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -38,10 +38,10 @@ assert(!contextSrc.includes("jaccard") && !contextSrc.includes("levenshtein"), "
 assert(!contextSrc.includes("Hash") && !contextSrc.includes("hash"), "no hashing");
 assert(checkSrc.includes("runInventoryExactFolderFileStructureCheck"), "ts checks exist");
 assert(workbenchSrc.includes("runInventoryExactFolderFileStructureCheck"), "wired via workbench");
-assert(!overviewUi.includes("analyzeExactFolderFileStructures"), "no overview UI yet");
-assert(!overviewSrc.includes("analyzeExactFolderFileStructures"), "no overview mapping yet");
-assert(!treeViewSrc.includes("analyzeExactFolderFileStructures"), "no TreeView wiring yet");
-assert(!appCss.includes("exact-folder-file"), "no CSS for P1-M UI");
+assert(treeViewSrc.includes("analyzeExactFolderFileStructures"), "TreeView wires H1");
+assert(treeViewSrc.includes("analyzeExactFolderFileStructures(structureContext)"), "TreeView memos H1 on structure");
+assert(overviewUi.includes("exactFolderStructures"), "overview panel accepts H1 context");
+assert(overviewUi.includes("exactNameTitle"), "overview shows exact name patterns");
 assert(!structureSrc.includes("analyzeExactFolderFileStructures"), "P1-I/J not owning P1-M");
 assert(!analysisSrc.includes("analyzeExactFolderFileStructures"), "P1-H not owning P1-M");
 assert(!fileContextSrc.includes("analyzeExactFolderFileStructures"), "P1-L H1 not owning P1-M");

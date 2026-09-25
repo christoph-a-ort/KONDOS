@@ -34,6 +34,9 @@ import {
   type NodeDetailModel,
 } from "./nodeDetails";
 import { analyzeInventory } from "./inventoryAnalysis";
+import { analyzeExactFolderFileStructures } from "./inventoryExactFolderFileStructure";
+import { analyzeFileNameSyntax } from "./inventoryFileNameSyntax";
+import { analyzeFileStructureContext } from "./inventoryFileStructureContext";
 import { analyzeStructureContext } from "./inventoryStructureContext";
 import { InventoryOverviewPanel } from "./InventoryOverviewPanel";
 import { collectViewWorkStats, formatViewWorkStats } from "./viewStats";
@@ -139,7 +142,13 @@ export function TreeView({
           onKeyDown={() => {}}
         />
         <p className="muted">Noch keine Analyse durchgeführt.</p>
-        <InventoryOverviewPanel analysis={null} structure={null} rootPath={null} />
+        <InventoryOverviewPanel
+          analysis={null}
+          structure={null}
+          exactFolderStructures={null}
+          fileNameSyntax={null}
+          rootPath={null}
+        />
         <div className="tree-viewport tree-viewport-empty" />
         <TreePathBar
           path={null}
@@ -319,6 +328,18 @@ function PopulatedTreeView({
     searchMode === "content" ? contentSearch.canNavigate : matchIds.length > 0;
   const inventoryAnalysis = useMemo(() => analyzeInventory(result), [result]);
   const structureContext = useMemo(() => analyzeStructureContext(result), [result]);
+  const fileStructureContext = useMemo(
+    () => analyzeFileStructureContext(result, structureContext),
+    [result, structureContext],
+  );
+  const exactFolderStructures = useMemo(
+    () => analyzeExactFolderFileStructures(structureContext),
+    [structureContext],
+  );
+  const fileNameSyntax = useMemo(
+    () => analyzeFileNameSyntax(fileStructureContext),
+    [fileStructureContext],
+  );
   const viewWorkStats = useMemo(() => collectViewWorkStats(viewRoot), [viewRoot]);
   const detailModel = useMemo(
     () => buildNodeDetails(result.root, selectedId, result.warnings, appliedExtensions.length > 0),
@@ -841,6 +862,8 @@ function PopulatedTreeView({
         key={resultScanId ?? result.root.id}
         analysis={inventoryAnalysis}
         structure={structureContext}
+        exactFolderStructures={exactFolderStructures}
+        fileNameSyntax={fileNameSyntax}
         rootPath={result.root.path}
       />
       <div className="tree-toolbar">

@@ -1,4 +1,4 @@
-// P1-L slice 1: general file structure context. Not imported by the app.
+// P1-L slice 1: general file structure context. Wired into product flow for P1-M H3.
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -38,11 +38,12 @@ assert(contextSrc.includes("parentIsFolderChainEnd"), "core: chain end");
 assert(contextSrc.includes("siblingFileCount"), "core: sibling files");
 assert(checkSrc.includes("runInventoryFileStructureContextCheck"), "ts checks exist");
 assert(workbenchSrc.includes("runInventoryFileStructureContextCheck"), "wired via workbench");
-assert(!overviewUi.includes("analyzeFileStructureContext"), "no overview UI yet");
-assert(!overviewSrc.includes("analyzeFileStructureContext"), "no overview mapping yet");
-assert(!treeViewSrc.includes("analyzeFileStructureContext"), "no TreeView wiring yet");
+assert(treeViewSrc.includes("analyzeFileStructureContext"), "TreeView wires P1-L H1 for H3");
+assert(treeViewSrc.includes("analyzeFileStructureContext(result, structureContext)"), "TreeView memos P1-L H1");
+assert(!overviewUi.includes("analyzeFileStructureContext"), "overview panel does not own P1-L analyze call");
+assert(!overviewSrc.includes("analyzeFileStructureContext"), "P1-H overview mapping does not own P1-L");
 assert(!treeViewSrc.includes("[P1-L TEMP]"), "no temp console");
-assert(!appCss.includes("file-structure-context"), "no CSS for P1-L UI");
+assert(!appCss.includes("file-structure-context"), "no dedicated P1-L CSS world");
 assert(!analysisSrc.includes("analyzeFileStructureContext"), "P1-H not owning P1-L");
 assert(!structureSrc.includes("analyzeFileStructureContext"), "P1-I/J not owning P1-L");
 assert(!repeatedSrc.includes("analyzeFileStructureContext"), "P1-K not owning P1-L");
