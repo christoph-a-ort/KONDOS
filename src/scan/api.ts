@@ -12,6 +12,7 @@ import {
   type ScanProgress,
   type ScanResult,
 } from "../model";
+import type { InventoryReportModel } from "../ui/inventoryReportModel";
 
 export async function pickDirectory(): Promise<string | null> {
   const selected = await open({
@@ -66,6 +67,13 @@ export function openWithDefault(scanId: number, nodeId: string): Promise<void> {
 
 export function suggestExportFilename(format: ExportFormat, scanId: number): Promise<string> {
   return invoke<string>("suggest_export_filename", { format, scanId });
+}
+
+export function exportInventoryReportXlsx(
+  path: string,
+  report: InventoryReportModel,
+): Promise<{ path: string }> {
+  return invoke("export_inventory_report_xlsx", { path, report });
 }
 
 export function subscribeScanProgress(

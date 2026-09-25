@@ -179,6 +179,53 @@ impl AppState {
         })
     }
 
+    /// Occupancy lock for IST-Bericht XLSX export.
+    ///
+    /// - `Some(scan_id)`: same snapshot checks as [`Self::try_begin_export`].
+    /// - `None`: Exporting when Idle, without requiring a snapshot (offline/synthetic report).
+    pub fn try_begin_report_export(
+        &self,
+        scan_id: Option<u64>,
+    ) -> Result<ReportExportGuard<'_>, AppError> {
+        let mut occupancy = lock_occupancy(&self.occupancy);
+        match &*occupancy {
+            Occupancy::Scanning(_) => {
+                return Err(AppError::export_failed(
+                    "Die Analyse läuft noch. Der Export ist erst nach Abschluss möglich.",
+                ));
+            }
+            Occupancy::Exporting => {
+                return Err(AppError::export_failed(
+                    "Es läuft bereits ein Export. Bitte warten.",
+                ));
+            }
+            Occupancy::PreparingContent(_) => {
+                return Err(AppError::export_failed(
+                    "Dateiinhalte werden gerade vorbereitet. Der Export ist erst danach möglich.",
+                ));
+            }
+            Occupancy::Idle => {}
+        }
+
+        if let Some(scan_id) = scan_id {
+            let snapshot = lock_snapshot(&self.snapshot);
+            let Some(current) = snapshot.as_ref() else {
+                return Err(AppError::export_failed(
+                    "Es liegt kein gültiges Analyseergebnis vor.",
+                ));
+            };
+            if current.scan_id != scan_id {
+                return Err(AppError::export_failed(
+                    "Das Analyseergebnis ist nicht mehr aktuell.",
+                ));
+            }
+            drop(snapshot);
+        }
+
+        *occupancy = Occupancy::Exporting;
+        Ok(ReportExportGuard { state: self })
+    }
+
     pub fn try_begin_prepare(&self, scan_id: u64) -> Result<PrepareGuard<'_>, AppError> {
         let mut occupancy = lock_occupancy(&self.occupancy);
         match &*occupancy {
@@ -419,6 +466,17 @@ impl Drop for ExportGuard<'_> {
     }
 }
 
+/// Holds Exporting occupancy for report XLSX without retaining a ScanResult Arc.
+pub struct ReportExportGuard<'a> {
+    state: &'a AppState,
+}
+
+impl Drop for ReportExportGuard<'_> {
+    fn drop(&mut self) {
+        self.state.finish_occupancy(OccupancyFinish::Export);
+    }
+}
+
 pub struct PrepareGuard<'a> {
     state: &'a AppState,
     id: u64,
@@ -546,6 +604,25 @@ mod tests {
         state.store_snapshot(1, empty_result());
         let _first = state.try_begin_export(1).expect("first export");
         assert!(state.try_begin_export(1).is_err());
+    }
+
+    #[test]
+    fn report_export_without_scan_id_when_idle() {
+        let state = AppState::new();
+        let guard = state.try_begin_report_export(None).expect("idle report export");
+        assert!(state.is_exporting());
+        assert!(state.try_begin_report_export(None).is_err());
+        drop(guard);
+        assert!(!state.is_exporting());
+    }
+
+    #[test]
+    fn report_export_with_scan_id_requires_snapshot() {
+        let state = AppState::new();
+        assert!(state.try_begin_report_export(Some(9)).is_err());
+        state.store_snapshot(3, empty_result());
+        let _guard = state.try_begin_report_export(Some(3)).expect("matching id");
+        assert!(state.is_exporting());
     }
 
     #[test]
