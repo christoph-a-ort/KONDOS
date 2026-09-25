@@ -67,7 +67,7 @@ mod tests {
 
     #[test]
     fn default_and_max_depth_are_valid() {
-        assert_eq!(DEFAULT_DEPTH, 16);
+        assert_eq!(DEFAULT_DEPTH, 10);
         assert_eq!(MIN_DEPTH, 1);
         assert_eq!(MAX_DEPTH, 32);
         for depth in [MIN_DEPTH, DEFAULT_DEPTH, MAX_DEPTH] {

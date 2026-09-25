@@ -1,6 +1,6 @@
 export const MIN_DEPTH = 1;
 export const MAX_DEPTH = 32;
-export const DEFAULT_DEPTH = 16;
+export const DEFAULT_DEPTH = 10;
 
 export const SCAN_PROGRESS_EVENT = "scan://progress";
 export const CONTENT_PROGRESS_EVENT = "content://progress";

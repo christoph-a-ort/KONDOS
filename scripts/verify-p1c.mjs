@@ -26,7 +26,7 @@ const DEFAULT_TREE_SORT = { column: "name", direction: "asc" };
 const WORKBENCH_PREFS_KEY = "dottyfm.workbench-prefs.v1";
 const LEGACY_WORKBENCH_PREFS_KEY = "kondos.workbench-prefs.v1";
 const MAX_DEPTH = 32;
-const DEFAULT_DEPTH = 16;
+const DEFAULT_DEPTH = 10;
 const MIN_DEPTH = 1;
 const COLUMN_MIN_WIDTH = { name: 180, size: 88, modified: 140, created: 140 };
 const DEFAULT_COLUMN_WIDTHS = { name: 280, size: 100, modified: 156, created: 156 };
@@ -434,7 +434,7 @@ for (const depth of [2, 8, 10, 16, 32]) {
 }
 assert(sanitizeWorkbenchPrefs({ maxDepth: 0 }).maxDepth === MIN_DEPTH, "prefs: stored 0 clamps");
 assert(sanitizeWorkbenchPrefs({ maxDepth: 33 }).maxDepth === MAX_DEPTH, "prefs: stored 33 clamps");
-assert(loadWorkbenchPrefs({ getItem: () => null, setItem() {} }).maxDepth === DEFAULT_DEPTH, "prefs: missing uses 16");
+assert(loadWorkbenchPrefs({ getItem: () => null, setItem() {} }).maxDepth === DEFAULT_DEPTH, "prefs: missing uses 10");
 assert(clampDepth(0) === MIN_DEPTH, "prefs: clamp 0 to min");
 assert(clampDepth(16) === 16, "prefs: clamp 16");
 assert(clampDepth(32) === MAX_DEPTH, "prefs: clamp 32");

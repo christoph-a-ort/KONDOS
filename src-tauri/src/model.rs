@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub const MIN_DEPTH: u8 = 1;
 pub const MAX_DEPTH: u8 = 32;
-pub const DEFAULT_DEPTH: u8 = 16;
+pub const DEFAULT_DEPTH: u8 = 10;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

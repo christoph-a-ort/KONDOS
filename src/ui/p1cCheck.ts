@@ -77,8 +77,9 @@ function runPrefsCheck(): void {
   assert(empty.rootPath === defaults.rootPath, "prefs: empty storage uses defaults");
   assert(empty.maxDepth === createDefaultScanConfig().maxDepth, "prefs: default depth");
   assert(createDefaultScanConfig().maxDepth === DEFAULT_DEPTH, "prefs: default depth constant");
-  assert(DEFAULT_DEPTH === 16 && MAX_DEPTH === 32 && MIN_DEPTH === 1, "prefs: depth bounds");
+  assert(DEFAULT_DEPTH === 10 && MAX_DEPTH === 32 && MIN_DEPTH === 1, "prefs: depth bounds");
   assert(clampDepth(0) === MIN_DEPTH, "prefs: clamp 0 to min");
+  assert(clampDepth(10) === 10, "prefs: clamp 10");
   assert(clampDepth(16) === 16, "prefs: clamp 16");
   assert(clampDepth(32) === 32, "prefs: clamp 32");
   assert(clampDepth(33) === MAX_DEPTH, "prefs: clamp 33 to max");
@@ -145,7 +146,7 @@ function runPrefsCheck(): void {
   }
   assert(sanitizeWorkbenchPrefs({ maxDepth: 0 }).maxDepth === MIN_DEPTH, "prefs: stored 0 clamps to min");
   assert(sanitizeWorkbenchPrefs({ maxDepth: 33 }).maxDepth === MAX_DEPTH, "prefs: stored 33 clamps to max");
-  assert(loadWorkbenchPrefs({ getItem: () => null, setItem: () => {} }).maxDepth === DEFAULT_DEPTH, "prefs: missing uses default 16");
+  assert(loadWorkbenchPrefs({ getItem: () => null, setItem: () => {} }).maxDepth === DEFAULT_DEPTH, "prefs: missing uses default 10");
 
   const legacyOnly = new MemoryStorage();
   legacyOnly.setItem(LEGACY_WORKBENCH_PREFS_KEY, JSON.stringify(saved));
