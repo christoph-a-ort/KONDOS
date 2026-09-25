@@ -39,12 +39,15 @@ import {
 } from "./ui/treeColumns";
 import { type TreeSort } from "./ui/treeSort";
 import {
-  hadStoredWorkbenchPrefs,
-  loadWorkbenchPrefs,
+  canPersistWorkbenchPrefs,
+  defaultWorkbenchPrefs,
+  hydrateWorkbenchPrefs,
+  persistWorkbenchPrefs,
   prefsToScanConfig,
-  saveWorkbenchPrefs,
   workbenchPrefsFromState,
+  type WorkbenchPrefsJsonStore,
 } from "./ui/workbenchPrefs";
+import { isTauriRuntime, loadWorkbenchPrefsJson, saveWorkbenchPrefsJson } from "./ui/workbenchPrefsApi";
 import "./App.css";
 import dottyFmLogo from "./assets/dottyfm-logo.png";
 
@@ -52,11 +55,21 @@ function formatLabel(format: ExportFormat): string {
   return format.toUpperCase();
 }
 
+function createJsonPrefsStore(): WorkbenchPrefsJsonStore | null {
+  if (!isTauriRuntime()) {
+    return null;
+  }
+  return {
+    load: () => loadWorkbenchPrefsJson(),
+    save: (json) => saveWorkbenchPrefsJson(json),
+  };
+}
+
 function App() {
-  const [initialPrefs] = useState(() => loadWorkbenchPrefs());
-  const [preferStoredWidths] = useState(() => hadStoredWorkbenchPrefs());
-  const [config, setConfig] = useState<ScanConfig>(() => prefsToScanConfig(initialPrefs));
-  const [extensionInput, setExtensionInput] = useState(() => initialPrefs.extensionInput);
+  const [prefsReady, setPrefsReady] = useState(false);
+  const [preferStoredWidths, setPreferStoredWidths] = useState(false);
+  const [config, setConfig] = useState<ScanConfig>(() => prefsToScanConfig(defaultWorkbenchPrefs()));
+  const [extensionInput, setExtensionInput] = useState(() => defaultWorkbenchPrefs().extensionInput);
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState<ScanProgress | null>(null);
   const [result, setResult] = useState<ScanResult | null>(null);
@@ -68,10 +81,10 @@ function App() {
   );
   const [exportFormat, setExportFormat] = useState<ExportFormat>("txt");
   const [columnVisibility, setColumnVisibility] = useState<ColumnVisibility>(
-    () => initialPrefs.columnVisibility,
+    () => defaultWorkbenchPrefs().columnVisibility,
   );
-  const [columnWidths, setColumnWidths] = useState<ColumnWidths>(() => initialPrefs.columnWidths);
-  const [treeSort, setTreeSort] = useState<TreeSort>(() => initialPrefs.sort);
+  const [columnWidths, setColumnWidths] = useState<ColumnWidths>(() => defaultWorkbenchPrefs().columnWidths);
+  const [treeSort, setTreeSort] = useState<TreeSort>(() => defaultWorkbenchPrefs().sort);
   const [exportBusy, setExportBusy] = useState(false);
   const [preparingContent, setPreparingContent] = useState(false);
   const [dropActive, setDropActive] = useState(false);
@@ -87,6 +100,8 @@ function App() {
   const resultRef = useRef(result);
   const resultScanIdRef = useRef(resultScanId);
   const handleDroppedPathsRef = useRef<(paths: string[]) => void>(() => {});
+  const jsonStoreRef = useRef<WorkbenchPrefsJsonStore | null>(createJsonPrefsStore());
+  const skipPersistAfterHydrateRef = useRef(true);
 
   scanningRef.current = scanning;
   exportBusyRef.current = exportBusy;
@@ -95,6 +110,32 @@ function App() {
   extensionInputRef.current = extensionInput;
   resultRef.current = result;
   resultScanIdRef.current = resultScanId;
+
+  useEffect(() => {
+    let disposed = false;
+
+    void (async () => {
+      const hydration = await hydrateWorkbenchPrefs(jsonStoreRef.current);
+      if (disposed) {
+        return;
+      }
+      setConfig(prefsToScanConfig(hydration.prefs));
+      setExtensionInput(hydration.prefs.extensionInput);
+      setColumnVisibility(hydration.prefs.columnVisibility);
+      setColumnWidths(hydration.prefs.columnWidths);
+      setTreeSort(hydration.prefs.sort);
+      setPreferStoredWidths(hydration.preferStoredWidths);
+      if (hydration.notice !== null) {
+        setError(hydration.notice);
+      }
+      skipPersistAfterHydrateRef.current = true;
+      setPrefsReady(true);
+    })();
+
+    return () => {
+      disposed = true;
+    };
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -158,16 +199,24 @@ function App() {
   }, [result]);
 
   useEffect(() => {
-    saveWorkbenchPrefs(
-      workbenchPrefsFromState({
-        config,
-        extensionInput,
-        columnVisibility,
-        columnWidths,
-        sort: treeSort,
-      }),
-    );
-  }, [config, extensionInput, columnVisibility, columnWidths, treeSort]);
+    if (!canPersistWorkbenchPrefs(prefsReady)) {
+      return;
+    }
+    if (skipPersistAfterHydrateRef.current) {
+      skipPersistAfterHydrateRef.current = false;
+      return;
+    }
+    const prefs = workbenchPrefsFromState({
+      config,
+      extensionInput,
+      columnVisibility,
+      columnWidths,
+      sort: treeSort,
+    });
+    void persistWorkbenchPrefs(prefs, jsonStoreRef.current).catch((cause) => {
+      setError(toUserError(cause));
+    });
+  }, [prefsReady, config, extensionInput, columnVisibility, columnWidths, treeSort]);
 
   function clearExportNotice() {
     setExportNotice(null);
@@ -405,6 +454,26 @@ function App() {
     } finally {
       setExportBusy(false);
     }
+  }
+
+  if (!prefsReady) {
+    return (
+      <div className="app">
+        <header className="app-header">
+          <div className="app-header-text">
+            <h1>DottyFM</h1>
+            <p>Ordner- und Dateistrukturen erfassen, anzeigen und exportieren.</p>
+          </div>
+          <img
+            className="dottyfm-logo"
+            src={dottyFmLogo}
+            alt=""
+            aria-hidden="true"
+          />
+        </header>
+        <p className="status-line">Einstellungen werden geladen…</p>
+      </div>
+    );
   }
 
   return (

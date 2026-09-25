@@ -92,7 +92,7 @@ function visibleIds(root: FsNode, expanded: string[], sort: TreeSort = DEFAULT_T
     .join(",");
 }
 
-export function runTreeWorkbenchCheck(): void {
+export async function runTreeWorkbenchCheck(): Promise<void> {
   const visibility = { ...DEFAULT_COLUMN_VISIBILITY };
   assert(visibleColumns(visibility).join(",") === "name,size,modified", "default columns");
   visibility.created = true;
@@ -295,7 +295,7 @@ export function runTreeWorkbenchCheck(): void {
 
   assert(isDirectory(nested), "root directory");
   runTreeSearchCheck(nested);
-  runP1cCheck();
+  await runP1cCheck();
   runP1dCheck();
   runP1e1Check();
   runInventoryAnalysisCheck();

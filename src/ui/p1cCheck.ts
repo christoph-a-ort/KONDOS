@@ -18,17 +18,23 @@ import {
 } from "./displayFilter";
 import { collectExpandableDirectoryIds, defaultExpandedIds, deriveVisibleRows, findNodeById, selectedIdAfterPointer } from "./treeRows";
 import { collectMatchIds } from "./treeSearch";
-import { DEFAULT_TREE_SORT } from "./treeSort";
 import {
+  canPersistWorkbenchPrefs,
   defaultWorkbenchPrefs,
   hadStoredWorkbenchPrefs,
+  hydrateWorkbenchPrefs,
   loadWorkbenchPrefs,
+  persistWorkbenchPrefs,
+  prefsToScanConfig,
   sanitizeWorkbenchPrefs,
   saveWorkbenchPrefs,
+  workbenchPrefsFromState,
   WORKBENCH_PREFS_KEY,
   LEGACY_WORKBENCH_PREFS_KEY,
+  type WorkbenchPrefsJsonStore,
   type WorkbenchStorage,
 } from "./workbenchPrefs";
+import { DEFAULT_TREE_SORT } from "./treeSort";
 
 function file(id: string, name: string, extras: Partial<FileNode> = {}): FileNode {
   return { id, name, path: id, depth: 1, kind: "file", ...extras };
@@ -62,10 +68,150 @@ class MemoryStorage implements WorkbenchStorage {
   }
 }
 
-export function runP1cCheck(): void {
+export async function runP1cCheck(): Promise<void> {
   runPrefsCheck();
+  await runPrefsHydrationCheck();
   runScanFromHereCheck();
   runDisplayFilterCheck();
+}
+
+class MemoryJsonStore implements WorkbenchPrefsJsonStore {
+  file: string | null = null;
+  failLoad: Error | null = null;
+  failSave: Error | null = null;
+  saveCount = 0;
+
+  async load(): Promise<string | null> {
+    if (this.failLoad) {
+      throw this.failLoad;
+    }
+    return this.file;
+  }
+
+  async save(json: string): Promise<void> {
+    if (this.failSave) {
+      throw this.failSave;
+    }
+    this.saveCount += 1;
+    this.file = json;
+  }
+}
+
+async function runPrefsHydrationCheck(): Promise<void> {
+  assert(DEFAULT_DEPTH === 10, "hydrate: program default depth is 10");
+  assert(!canPersistWorkbenchPrefs(false), "hydrate: persist blocked before ready");
+  assert(canPersistWorkbenchPrefs(true), "hydrate: persist allowed after ready");
+
+  const noJson = new MemoryJsonStore();
+  const emptyStorage = new MemoryStorage();
+  const missing = await hydrateWorkbenchPrefs(noJson, emptyStorage);
+  assert(missing.source === "default", "hydrate: no file no LS → default");
+  assert(missing.prefs.maxDepth === DEFAULT_DEPTH, "hydrate: default maxDepth 10");
+  assert(missing.corruptedJson === false, "hydrate: missing is not corrupt");
+  assert(noJson.saveCount === 0, "hydrate: missing does not write");
+
+  const jsonTwo = new MemoryJsonStore();
+  jsonTwo.file = JSON.stringify(sanitizeWorkbenchPrefs({ maxDepth: 2, rootPath: "X:/Fixture" }));
+  const loadedTwo = await hydrateWorkbenchPrefs(jsonTwo, emptyStorage);
+  assert(loadedTwo.source === "json", "hydrate: json source");
+  assert(loadedTwo.prefs.maxDepth === 2, "hydrate: stored 2 remains 2");
+  assert(loadedTwo.prefs.rootPath === "X:/Fixture", "hydrate: other fields kept");
+
+  const jsonTen = new MemoryJsonStore();
+  jsonTen.file = JSON.stringify(sanitizeWorkbenchPrefs({ maxDepth: 10 }));
+  const loadedTen = await hydrateWorkbenchPrefs(jsonTen, emptyStorage);
+  assert(loadedTen.prefs.maxDepth === 10, "hydrate: stored 10 remains 10");
+
+  assert(sanitizeWorkbenchPrefs({ maxDepth: 0 }).maxDepth === MIN_DEPTH, "hydrate: invalid low clamps");
+  assert(sanitizeWorkbenchPrefs({ maxDepth: 99 }).maxDepth === MAX_DEPTH, "hydrate: invalid high clamps");
+
+  const migrateCurrent = new MemoryJsonStore();
+  const currentLs = new MemoryStorage();
+  currentLs.setItem(
+    WORKBENCH_PREFS_KEY,
+    JSON.stringify(sanitizeWorkbenchPrefs({ maxDepth: 7, rootPath: "X:/Current" })),
+  );
+  const fromCurrent = await hydrateWorkbenchPrefs(migrateCurrent, currentLs);
+  assert(fromCurrent.source === "localStorage", "hydrate: current LS migration");
+  assert(fromCurrent.prefs.maxDepth === 7, "hydrate: migrated depth 7");
+  assert(migrateCurrent.file !== null && migrateCurrent.file.includes('"maxDepth":7'), "hydrate: wrote JSON from current");
+  assert(currentLs.getItem(WORKBENCH_PREFS_KEY) !== null, "hydrate: LS not deleted after migration");
+
+  const migrateLegacy = new MemoryJsonStore();
+  const legacyLs = new MemoryStorage();
+  legacyLs.setItem(
+    LEGACY_WORKBENCH_PREFS_KEY,
+    JSON.stringify(sanitizeWorkbenchPrefs({ maxDepth: 8, rootPath: "X:/Legacy" })),
+  );
+  const fromLegacy = await hydrateWorkbenchPrefs(migrateLegacy, legacyLs);
+  assert(fromLegacy.source === "legacy", "hydrate: legacy migration");
+  assert(fromLegacy.prefs.maxDepth === 8, "hydrate: legacy depth");
+  assert(migrateLegacy.file !== null, "hydrate: wrote JSON from legacy");
+  assert(legacyLs.getItem(LEGACY_WORKBENCH_PREFS_KEY) !== null, "hydrate: legacy key kept");
+
+  const preferJson = new MemoryJsonStore();
+  preferJson.file = JSON.stringify(sanitizeWorkbenchPrefs({ maxDepth: 10, rootPath: "X:/Json" }));
+  const conflictingLs = new MemoryStorage();
+  conflictingLs.setItem(
+    WORKBENCH_PREFS_KEY,
+    JSON.stringify(sanitizeWorkbenchPrefs({ maxDepth: 2, rootPath: "X:/LS" })),
+  );
+  const winner = await hydrateWorkbenchPrefs(preferJson, conflictingLs);
+  assert(winner.source === "json", "hydrate: JSON wins over LS");
+  assert(winner.prefs.maxDepth === 10, "hydrate: JSON 10 not overwritten by LS 2");
+  assert(winner.prefs.rootPath === "X:/Json", "hydrate: JSON root wins");
+  assert(preferJson.saveCount === 0, "hydrate: JSON authority does not rewrite on load");
+
+  const full = sanitizeWorkbenchPrefs({
+    rootPath: "X:/Full",
+    maxDepth: 10,
+    excludeHidden: false,
+    extensionInput: ".pdf",
+    includeSize: false,
+    includeCreatedAt: true,
+    includeModifiedAt: false,
+    columnVisibility: { size: false, modified: true, created: true },
+    columnWidths: { name: 300, size: 120, modified: 150, created: 150 },
+    sort: { column: "size", direction: "desc" },
+  });
+  const fullStore = new MemoryJsonStore();
+  fullStore.file = JSON.stringify(full);
+  const fullHydrated = await hydrateWorkbenchPrefs(fullStore, emptyStorage);
+  assert(fullHydrated.prefs.excludeHidden === false, "hydrate: excludeHidden kept");
+  assert(fullHydrated.prefs.extensionInput.includes(".pdf"), "hydrate: extensionInput kept");
+  assert(fullHydrated.prefs.includeCreatedAt === true, "hydrate: includeCreatedAt kept");
+  assert(fullHydrated.prefs.columnVisibility.size === false, "hydrate: columnVisibility kept");
+  assert(fullHydrated.prefs.columnWidths.name === 300, "hydrate: columnWidths kept");
+  assert(fullHydrated.prefs.sort.column === "size", "hydrate: sort kept");
+
+  const corrupt = new MemoryJsonStore();
+  corrupt.failLoad = new Error("Die Workbench-Einstellungen sind kein gültiges JSON.");
+  const broken = await hydrateWorkbenchPrefs(corrupt, currentLs);
+  assert(broken.corruptedJson === true, "hydrate: corrupt flagged");
+  assert(broken.prefs.maxDepth === DEFAULT_DEPTH, "hydrate: corrupt uses defaults");
+  assert(broken.notice !== null, "hydrate: corrupt notice");
+  assert(corrupt.saveCount === 0, "hydrate: corrupt does not overwrite");
+
+  const change = workbenchPrefsFromState({
+    config: { ...prefsToScanConfig(sanitizeWorkbenchPrefs({ maxDepth: 2 })), maxDepth: 10 },
+    extensionInput: "",
+    columnVisibility: defaultWorkbenchPrefs().columnVisibility,
+    columnWidths: defaultWorkbenchPrefs().columnWidths,
+    sort: DEFAULT_TREE_SORT,
+  });
+  assert(change.maxDepth === 10, "hydrate: 2→10 state yields 10");
+  const persistStore = new MemoryJsonStore();
+  await persistWorkbenchPrefs(change, persistStore, emptyStorage);
+  assert(persistStore.file !== null && persistStore.file.includes('"maxDepth":10'), "hydrate: persist writes 10");
+  assert(emptyStorage.getItem(WORKBENCH_PREFS_KEY) === null, "hydrate: tauri persist does not write LS");
+
+  const browserOnly = await hydrateWorkbenchPrefs(null, currentLs);
+  assert(browserOnly.prefs.maxDepth === 7, "hydrate: browser-only uses LS");
+  await persistWorkbenchPrefs(sanitizeWorkbenchPrefs({ maxDepth: 10 }), null, currentLs);
+  assert(
+    JSON.parse(currentLs.getItem(WORKBENCH_PREFS_KEY) ?? "{}").maxDepth === 10,
+    "hydrate: browser-only persist writes LS",
+  );
 }
 
 function runPrefsCheck(): void {

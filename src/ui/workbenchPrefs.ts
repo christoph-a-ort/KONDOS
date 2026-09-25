@@ -186,6 +186,178 @@ export function saveWorkbenchPrefs(
   }
 }
 
+export type WorkbenchPrefsSource = "json" | "localStorage" | "legacy" | "default";
+
+export interface WorkbenchPrefsJsonStore {
+  load(): Promise<string | null>;
+  save(json: string): Promise<void>;
+}
+
+export interface WorkbenchPrefsHydration {
+  prefs: WorkbenchPrefs;
+  source: WorkbenchPrefsSource;
+  preferStoredWidths: boolean;
+  /** True when a prefs file existed but was unusable; file must not be overwritten immediately. */
+  corruptedJson: boolean;
+  notice: string | null;
+}
+
+/** Persist gate: never write prefs until hydration finished. */
+export function canPersistWorkbenchPrefs(prefsReady: boolean): boolean {
+  return prefsReady;
+}
+
+/**
+ * Resolve start prefs.
+ * - With `jsonStore` (Tauri): JSON file is authority; localStorage is migration-only.
+ * - Without `jsonStore` (browser-only dev): localStorage remains the store.
+ */
+export async function hydrateWorkbenchPrefs(
+  jsonStore: WorkbenchPrefsJsonStore | null,
+  storage: WorkbenchStorage | null = browserStorage(),
+): Promise<WorkbenchPrefsHydration> {
+  if (jsonStore === null) {
+    const prefs = loadWorkbenchPrefs(storage);
+    const preferStoredWidths = hadStoredWorkbenchPrefs(storage);
+    return {
+      prefs,
+      source: preferStoredWidths ? "localStorage" : "default",
+      preferStoredWidths,
+      corruptedJson: false,
+      notice: null,
+    };
+  }
+
+  let raw: string | null;
+  try {
+    raw = await jsonStore.load();
+  } catch (cause) {
+    return {
+      prefs: defaultWorkbenchPrefs(),
+      source: "default",
+      preferStoredWidths: false,
+      corruptedJson: true,
+      notice: prefsUserMessage(
+        cause,
+        "Die Workbench-Einstellungen konnten nicht geladen werden. Es werden Standardeinstellungen verwendet.",
+      ),
+    };
+  }
+
+  if (raw !== null) {
+    const parsed = parseStoredPrefs(raw);
+    if (parsed === null) {
+      return {
+        prefs: defaultWorkbenchPrefs(),
+        source: "default",
+        preferStoredWidths: false,
+        corruptedJson: true,
+        notice:
+          "Die Workbench-Einstellungen sind beschädigt. Es werden Standardeinstellungen verwendet. Die Datei bleibt zur Diagnose erhalten.",
+      };
+    }
+    return {
+      prefs: parsed,
+      source: "json",
+      preferStoredWidths: true,
+      corruptedJson: false,
+      notice: null,
+    };
+  }
+
+  const migrated = tryMigrateFromLocalStorage(storage);
+  if (migrated !== null) {
+    const json = JSON.stringify(migrated.prefs);
+    try {
+      await jsonStore.save(json);
+    } catch (cause) {
+      return {
+        prefs: migrated.prefs,
+        source: migrated.source,
+        preferStoredWidths: true,
+        corruptedJson: false,
+        notice: prefsUserMessage(
+          cause,
+          "Die Workbench-Einstellungen wurden geladen, konnten aber nicht dauerhaft gespeichert werden.",
+        ),
+      };
+    }
+    return {
+      prefs: migrated.prefs,
+      source: migrated.source,
+      preferStoredWidths: true,
+      corruptedJson: false,
+      notice: null,
+    };
+  }
+
+  return {
+    prefs: defaultWorkbenchPrefs(),
+    source: "default",
+    preferStoredWidths: false,
+    corruptedJson: false,
+    notice: null,
+  };
+}
+
+/** Persist after hydration. Tauri → JSON only. Browser-only → localStorage only. */
+export async function persistWorkbenchPrefs(
+  prefs: WorkbenchPrefs,
+  jsonStore: WorkbenchPrefsJsonStore | null,
+  storage: WorkbenchStorage | null = browserStorage(),
+): Promise<void> {
+  const sanitized = sanitizeWorkbenchPrefs(prefs);
+  const json = JSON.stringify(sanitized);
+  if (jsonStore !== null) {
+    await jsonStore.save(json);
+    return;
+  }
+  if (!saveWorkbenchPrefs(sanitized, storage)) {
+    throw new Error("Die Workbench-Einstellungen konnten nicht gespeichert werden.");
+  }
+}
+
+function tryMigrateFromLocalStorage(
+  storage: WorkbenchStorage | null,
+): { prefs: WorkbenchPrefs; source: "localStorage" | "legacy" } | null {
+  if (storage === null) {
+    return null;
+  }
+  try {
+    const current = storedRaw(storage, WORKBENCH_PREFS_KEY);
+    if (current !== null) {
+      const prefs = parseStoredPrefs(current);
+      return prefs === null ? null : { prefs, source: "localStorage" };
+    }
+    const legacy = storedRaw(storage, LEGACY_WORKBENCH_PREFS_KEY);
+    if (legacy === null) {
+      return null;
+    }
+    const prefs = parseStoredPrefs(legacy);
+    if (prefs === null) {
+      return null;
+    }
+    // Keep legacy key; also mirror into current key as non-authoritative backup.
+    saveWorkbenchPrefs(prefs, storage);
+    return { prefs, source: "legacy" };
+  } catch {
+    return null;
+  }
+}
+
+function prefsUserMessage(cause: unknown, fallback: string): string {
+  if (typeof cause === "object" && cause !== null && "message" in cause) {
+    const message = (cause as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim() !== "") {
+      return message;
+    }
+  }
+  if (typeof cause === "string" && cause.trim() !== "") {
+    return cause;
+  }
+  return fallback;
+}
+
 export function browserStorage(): WorkbenchStorage | null {
   try {
     if (typeof localStorage === "undefined") {

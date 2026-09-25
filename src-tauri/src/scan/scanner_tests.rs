@@ -251,27 +251,38 @@ fn depth_thirty_two_includes_level_thirty_two_but_not_thirty_three() {
 }
 
 #[test]
-fn default_depth_sixteen_includes_level_sixteen_but_not_seventeen() {
-    let tree = TempTree::new("depth-default-16");
-    tree.mkdir(&nested_dir_rel(16));
-    tree.write_file(&format!("{}/l16.txt", nested_dir_rel(15)), b"16");
-    tree.write_file(&format!("{}/l17.txt", nested_dir_rel(16)), b"17");
+fn default_depth_includes_level_at_default_but_not_beyond() {
+    let depth = DEFAULT_DEPTH;
+    let beyond = depth.saturating_add(1);
+    let tree = TempTree::new("depth-default");
+    tree.mkdir(&nested_dir_rel(depth));
+    tree.write_file(
+        &format!("{}/l{depth}.txt", nested_dir_rel(depth - 1)),
+        b"at-default",
+    );
+    tree.write_file(
+        &format!("{}/l{beyond}.txt", nested_dir_rel(depth)),
+        b"beyond",
+    );
     let result = tree.scan(|_| {});
     let nodes = flatten(&result.root);
+    let at_default = format!("l{depth}.txt");
+    let past_default = format!("l{beyond}.txt");
+    let dir_at_default = format!("d{depth}");
     assert!(
         nodes
             .iter()
-            .any(|n| n.name == "l16.txt" && n.depth == 16 && n.kind == "file")
+            .any(|n| n.name == at_default && n.depth == depth && n.kind == "file")
     );
     assert!(
         nodes
             .iter()
-            .any(|n| n.name == "d16" && n.depth == 16 && n.kind == "directory")
+            .any(|n| n.name == dir_at_default && n.depth == depth && n.kind == "directory")
     );
-    assert!(!nodes.iter().any(|n| n.name == "l17.txt"));
-    assert_eq!(nodes.iter().map(|n| n.depth).max(), Some(16));
+    assert!(!nodes.iter().any(|n| n.name == past_default));
+    assert_eq!(nodes.iter().map(|n| n.depth).max(), Some(depth));
     let mut cursor = &result.root;
-    for level in 1..=16 {
+    for level in 1..=depth {
         let name = format!("d{level}");
         cursor = as_dir(cursor)
             .iter()

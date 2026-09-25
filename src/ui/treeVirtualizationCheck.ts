@@ -60,7 +60,7 @@ export function buildSynthetic100kTree(): DirectoryNode {
   return directoryNode("/", "root", 0, directories);
 }
 
-export function runTreeVirtualizationCheck(): {
+export async function runTreeVirtualizationCheck(): Promise<{
   nodeCount: number;
   defaultVisibleRows: number;
   fullyExpandedVisibleRows: number;
@@ -70,8 +70,8 @@ export function runTreeVirtualizationCheck(): {
   renderedAtTop: number;
   renderedAtMiddle: number;
   fullTreeDom: boolean;
-} {
-  runTreeWorkbenchCheck();
+}> {
+  await runTreeWorkbenchCheck();
 
   const fixture = buildOrderFixture();
   const defaultRows = deriveVisibleRows(fixture, new Set(["root"]));

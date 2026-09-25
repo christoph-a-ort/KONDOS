@@ -153,6 +153,119 @@ function saveWorkbenchPrefs(prefs, storage) {
   return true;
 }
 
+function canPersistWorkbenchPrefs(prefsReady) {
+  return !!prefsReady;
+}
+
+async function hydrateWorkbenchPrefs(jsonStore, storage) {
+  if (jsonStore === null) {
+    const prefs = loadWorkbenchPrefs(storage);
+    const preferStoredWidths =
+      storedRaw(storage, WORKBENCH_PREFS_KEY) !== null ||
+      storedRaw(storage, LEGACY_WORKBENCH_PREFS_KEY) !== null;
+    return {
+      prefs,
+      source: preferStoredWidths ? "localStorage" : "default",
+      preferStoredWidths,
+      corruptedJson: false,
+      notice: null,
+    };
+  }
+  let raw;
+  try {
+    raw = await jsonStore.load();
+  } catch (cause) {
+    return {
+      prefs: defaultWorkbenchPrefs(),
+      source: "default",
+      preferStoredWidths: false,
+      corruptedJson: true,
+      notice: cause?.message || "load failed",
+    };
+  }
+  if (raw !== null) {
+    const parsed = parseStoredPrefs(raw);
+    if (parsed === null) {
+      return {
+        prefs: defaultWorkbenchPrefs(),
+        source: "default",
+        preferStoredWidths: false,
+        corruptedJson: true,
+        notice: "corrupt",
+      };
+    }
+    return {
+      prefs: parsed,
+      source: "json",
+      preferStoredWidths: true,
+      corruptedJson: false,
+      notice: null,
+    };
+  }
+  const current = storedRaw(storage, WORKBENCH_PREFS_KEY);
+  if (current !== null) {
+    const prefs = parseStoredPrefs(current);
+    if (prefs !== null) {
+      await jsonStore.save(JSON.stringify(prefs));
+      return {
+        prefs,
+        source: "localStorage",
+        preferStoredWidths: true,
+        corruptedJson: false,
+        notice: null,
+      };
+    }
+  }
+  const legacy = storedRaw(storage, LEGACY_WORKBENCH_PREFS_KEY);
+  if (legacy !== null) {
+    const prefs = parseStoredPrefs(legacy);
+    if (prefs !== null) {
+      saveWorkbenchPrefs(prefs, storage);
+      await jsonStore.save(JSON.stringify(prefs));
+      return {
+        prefs,
+        source: "legacy",
+        preferStoredWidths: true,
+        corruptedJson: false,
+        notice: null,
+      };
+    }
+  }
+  return {
+    prefs: defaultWorkbenchPrefs(),
+    source: "default",
+    preferStoredWidths: false,
+    corruptedJson: false,
+    notice: null,
+  };
+}
+
+async function persistWorkbenchPrefs(prefs, jsonStore, storage) {
+  const sanitized = sanitizeWorkbenchPrefs(prefs);
+  const json = JSON.stringify(sanitized);
+  if (jsonStore !== null) {
+    await jsonStore.save(json);
+    return;
+  }
+  saveWorkbenchPrefs(sanitized, storage);
+}
+
+class MemoryJsonStore {
+  constructor() {
+    this.file = null;
+    this.failLoad = null;
+    this.saveCount = 0;
+  }
+  async load() {
+    if (this.failLoad) throw this.failLoad;
+    return this.file;
+  }
+  async save(json) {
+    this.saveCount += 1;
+    this.file = json;
+  }
+}
+
 function fileExtensionKey(name) {
   const lastDot = name.lastIndexOf(".");
   if (lastDot <= 0 || lastDot === name.length - 1) return null;
@@ -457,6 +570,57 @@ const brokenLegacy = new MemoryStorage();
 brokenLegacy.setItem(LEGACY_WORKBENCH_PREFS_KEY, "{not json");
 assert(loadWorkbenchPrefs(brokenLegacy).rootPath === "", "prefs: invalid legacy does not break start");
 assert(brokenLegacy.getItem(WORKBENCH_PREFS_KEY) === null, "prefs: invalid legacy not copied");
+
+assert(!canPersistWorkbenchPrefs(false), "hydrate: persist blocked before ready");
+assert(canPersistWorkbenchPrefs(true), "hydrate: persist allowed after ready");
+
+const hydrateEmpty = new MemoryJsonStore();
+const hydrateEmptyLs = new MemoryStorage();
+const missingHydration = await hydrateWorkbenchPrefs(hydrateEmpty, hydrateEmptyLs);
+assert(missingHydration.source === "default" && missingHydration.prefs.maxDepth === DEFAULT_DEPTH, "hydrate: defaults");
+assert(hydrateEmpty.saveCount === 0, "hydrate: missing does not write");
+
+const hydrateTwo = new MemoryJsonStore();
+hydrateTwo.file = JSON.stringify(sanitizeWorkbenchPrefs({ maxDepth: 2, rootPath: "X:/Fixture" }));
+const twoHydration = await hydrateWorkbenchPrefs(hydrateTwo, hydrateEmptyLs);
+assert(twoHydration.source === "json" && twoHydration.prefs.maxDepth === 2, "hydrate: json 2 kept");
+
+const hydrateTen = new MemoryJsonStore();
+hydrateTen.file = JSON.stringify(sanitizeWorkbenchPrefs({ maxDepth: 10 }));
+assert((await hydrateWorkbenchPrefs(hydrateTen, hydrateEmptyLs)).prefs.maxDepth === 10, "hydrate: json 10 kept");
+
+const migrateStore = new MemoryJsonStore();
+const migrateLs = new MemoryStorage();
+migrateLs.setItem(WORKBENCH_PREFS_KEY, JSON.stringify(sanitizeWorkbenchPrefs({ maxDepth: 7, rootPath: "X:/Current" })));
+const migratedCurrent = await hydrateWorkbenchPrefs(migrateStore, migrateLs);
+assert(migratedCurrent.source === "localStorage" && migratedCurrent.prefs.maxDepth === 7, "hydrate: current migrate");
+assert(migrateStore.file.includes('"maxDepth":7'), "hydrate: wrote json from LS");
+assert(migrateLs.getItem(WORKBENCH_PREFS_KEY) !== null, "hydrate: LS kept");
+
+const legacyStore = new MemoryJsonStore();
+const legacyOnlyLs = new MemoryStorage();
+legacyOnlyLs.setItem(LEGACY_WORKBENCH_PREFS_KEY, JSON.stringify(sanitizeWorkbenchPrefs({ maxDepth: 8 })));
+assert((await hydrateWorkbenchPrefs(legacyStore, legacyOnlyLs)).source === "legacy", "hydrate: legacy migrate");
+assert(legacyStore.file !== null, "hydrate: legacy wrote json");
+
+const preferStore = new MemoryJsonStore();
+preferStore.file = JSON.stringify(sanitizeWorkbenchPrefs({ maxDepth: 10, rootPath: "X:/Json" }));
+const preferLs = new MemoryStorage();
+preferLs.setItem(WORKBENCH_PREFS_KEY, JSON.stringify(sanitizeWorkbenchPrefs({ maxDepth: 2, rootPath: "X:/LS" })));
+const prefer = await hydrateWorkbenchPrefs(preferStore, preferLs);
+assert(prefer.prefs.maxDepth === 10 && prefer.prefs.rootPath === "X:/Json", "hydrate: json wins over LS");
+assert(preferStore.saveCount === 0, "hydrate: json authority no rewrite");
+
+const corruptStore = new MemoryJsonStore();
+corruptStore.failLoad = new Error("invalid json");
+const corrupt = await hydrateWorkbenchPrefs(corruptStore, migrateLs);
+assert(corrupt.corruptedJson === true && corrupt.prefs.maxDepth === DEFAULT_DEPTH, "hydrate: corrupt defaults");
+assert(corruptStore.saveCount === 0, "hydrate: corrupt not overwritten");
+
+const persistStore = new MemoryJsonStore();
+await persistWorkbenchPrefs(sanitizeWorkbenchPrefs({ maxDepth: 10 }), persistStore, hydrateEmptyLs);
+assert(persistStore.file.includes('"maxDepth":10'), "hydrate: persist 2→10 writes 10");
+assert(hydrateEmptyLs.getItem(WORKBENCH_PREFS_KEY) === null, "hydrate: tauri persist skips LS");
 
 const folder = dir("C:/A", "A", [file("C:/A/x.pdf", "x.pdf")]);
 assert(!canScanFromHere(undefined) && !canScanFromHere(file("C:/A/x.pdf", "x.pdf")), "scan-from: none/file off");
