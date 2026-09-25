@@ -1,17 +1,31 @@
-//! Suggested IST-Bericht XLSX filename helper.
+//! Suggested IST-Bericht filename helper.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Suggested IST-Bericht filename helper (used by later R4 workflow).
+/// Suggested IST-Bericht XLSX filename helper (used by later R4 workflow).
 #[allow(dead_code)]
 pub fn suggested_report_file_name(root_name: &str) -> String {
     suggested_report_file_name_at(root_name, SystemTime::now())
 }
 
+/// Suggested IST-Bericht PDF filename helper (used by later R4 workflow).
+#[allow(dead_code)]
+pub fn suggested_report_pdf_file_name(root_name: &str) -> String {
+    suggested_report_pdf_file_name_at(root_name, SystemTime::now())
+}
+
 pub fn suggested_report_file_name_at(root_name: &str, when: SystemTime) -> String {
+    suggested_report_file_name_with_ext(root_name, when, "xlsx")
+}
+
+pub fn suggested_report_pdf_file_name_at(root_name: &str, when: SystemTime) -> String {
+    suggested_report_file_name_with_ext(root_name, when, "pdf")
+}
+
+fn suggested_report_file_name_with_ext(root_name: &str, when: SystemTime, ext: &str) -> String {
     let stem = sanitize_file_stem(root_name);
     let stamp = format_timestamp(when);
-    format!("DottyFM_IST-Bericht_{stem}_{stamp}.xlsx")
+    format!("DottyFM_IST-Bericht_{stem}_{stamp}.{ext}")
 }
 
 fn sanitize_file_stem(name: &str) -> String {
@@ -138,6 +152,16 @@ mod tests {
         assert!(name.ends_with(".xlsx"), "{name}");
         assert!(!name.contains('/'), "{name}");
         assert!(!name.contains('\\'), "{name}");
+    }
+
+    #[test]
+    fn suggested_pdf_name_uses_same_sanitizer() {
+        let name = suggested_report_pdf_file_name_at(
+            "Mustermann",
+            UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+        );
+        assert!(name.starts_with("DottyFM_IST-Bericht_Mustermann_"), "{name}");
+        assert!(name.ends_with(".pdf"), "{name}");
     }
 
     #[test]

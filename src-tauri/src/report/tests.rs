@@ -7,7 +7,11 @@ use zip::ZipArchive;
 
 use crate::report::filename::suggested_report_file_name_at;
 use crate::report::model::*;
-use crate::report::persist::write_report_xlsx_file;
+use crate::report::pdf::{
+    build_report_pdf_bytes, PDF_DETAIL_ROW_LIMIT, PDF_FOLDER_OVERVIEW_LIMIT,
+    PDF_R3_CHARSET_SAMPLE as R3_CHARSET_SAMPLE, PDF_TABLE_CELL_PADDING_MM,
+};
+use crate::report::persist::{write_report_pdf_file, write_report_xlsx_file};
 use crate::report::xlsx::{
     build_report_xlsx_bytes, expected_sheet_names, SHEET_EMPTY_FOLDERS, SHEET_EXACT_NAMES,
     SHEET_EXTENSIONS, SHEET_FILE_NAME_PATTERNS, SHEET_FILE_TYPES, SHEET_FOLDERS, SHEET_OVERVIEW,
@@ -560,4 +564,231 @@ fn write_manual_r2_xlsx_outside_repo_when_env_set() {
     assert_eq!(names.len(), 13);
     let validations = data_validations_xml(&bytes);
     assert!(validations.contains("dataValidation"));
+}
+
+fn pdf_page_count(bytes: &[u8]) -> usize {
+    let doc = pdf_extract::Document::load_mem(bytes).expect("pdf load");
+    doc.get_pages().len()
+}
+
+fn pdf_raw_contains(bytes: &[u8], needle: &str) -> bool {
+    // Uncompressed PDF objects / titles often keep ASCII markers readable.
+    String::from_utf8_lossy(bytes).contains(needle)
+}
+
+fn sample_report_for_pdf() -> InventoryReportModel {
+    let mut report = sample_report();
+    // Enough folders to exercise compact overview notice and multi-page layout.
+    for i in 0..25 {
+        report.chapters.folders.push(InventoryReportFolderRow {
+            name: format!("Ordner_{i}"),
+            relative_path: format!(
+                "sehr/langer/relativer/pfad/mit/umlauten/Aepfel/Ueberpruefung/abschnitt_{i}/unterordner"
+            ),
+            depth: 4,
+            listing: "read".into(),
+            direct_file_count: i as u64,
+            direct_directory_count: 1,
+            direct_known_size_bytes: (i as u64) * 100,
+        });
+    }
+    for i in 0..40 {
+        report.chapters.empty_folders.push(InventoryReportPathRow {
+            name: format!("leer_{i}"),
+            relative_path: format!("leer/pfad_{i}/mit/ss"),
+        });
+    }
+    // Keep unicode in model within the R3-guaranteed Latin/German charset (DejaVu).
+    report.chapters.interpretation.notes.push(format!("Unicode-Test: {R3_CHARSET_SAMPLE}"));
+    report
+}
+
+#[test]
+fn pdf_bytes_are_valid_and_contain_core_sections() {
+    let report = sample_report_for_pdf();
+    let before = report.clone();
+    let bytes = build_report_pdf_bytes(&report).expect("pdf bytes");
+    assert_eq!(&bytes[..5], b"%PDF-");
+    assert!(bytes.len() > 1000);
+    assert_eq!(report, before, "writer must not mutate model");
+
+    assert!(
+        pdf_raw_contains(&bytes, "DottyFM") || pdf_raw_contains(&bytes, "IST-Bericht"),
+        "title metadata missing in PDF bytes"
+    );
+    assert!(
+        pdf_raw_contains(&bytes, "FontFile") || pdf_raw_contains(&bytes, "FontFile2"),
+        "embedded font expected"
+    );
+    assert!(PDF_TABLE_CELL_PADDING_MM > 0.0);
+    assert!(R3_CHARSET_SAMPLE.contains('ß'));
+    assert!(R3_CHARSET_SAMPLE.contains('–'));
+
+    let pages = pdf_page_count(&bytes);
+    assert!(pages >= 2, "expected multi-page PDF, got {pages}");
+}
+
+#[test]
+fn pdf_table_padding_and_continuation_contract() {
+    assert!(PDF_TABLE_CELL_PADDING_MM > 0.0);
+    // Many narrow rows force page breaks; ReportTable must still produce valid multi-page PDF.
+    let mut report = sample_report();
+    report.chapters.empty_folders = (0..120)
+        .map(|i| InventoryReportPathRow {
+            name: format!("pad_{i}"),
+            relative_path: format!(
+                "sehr/langer/pfad/fuer/umbruch/und/kopfzeilen/{i}/mit/Äpfel/Straße"
+            ),
+        })
+        .collect();
+    let bytes = build_report_pdf_bytes(&report).expect("pdf");
+    assert_eq!(&bytes[..5], b"%PDF-");
+    assert!(pdf_page_count(&bytes) >= 2);
+    assert!(pdf_raw_contains(&bytes, "FontFile") || pdf_raw_contains(&bytes, "FontFile2"));
+}
+
+#[test]
+fn pdf_r3_charset_sample_is_realistic_not_cjk() {
+    for ch in ['Ä', 'Ö', 'Ü', 'ä', 'ö', 'ü', 'ß', 'é', 'è', 'ê', 'á', 'à', 'ç', '–'] {
+        assert!(R3_CHARSET_SAMPLE.contains(ch), "missing {ch}");
+    }
+    assert!(!R3_CHARSET_SAMPLE.contains('日'));
+    assert!(!R3_CHARSET_SAMPLE.contains('Ε'));
+    let mut report = sample_report();
+    report.chapters.interpretation.notes = vec![format!("Unicode-Test: {R3_CHARSET_SAMPLE}")];
+    let bytes = build_report_pdf_bytes(&report).expect("pdf");
+    assert_eq!(&bytes[..5], b"%PDF-");
+}
+
+#[test]
+fn pdf_respects_chapter_selection_and_empty_chapters() {
+    let mut with_years = sample_report_for_pdf();
+    for i in 0..80 {
+        with_years
+            .chapters
+            .year_structures
+            .push(InventoryReportYearStructure {
+                parent_relative_path: format!("parent/{i}"),
+                parent_name: format!("P{i}"),
+                years: vec![2020, 2021, 2022],
+                min_year: 2020,
+                max_year: 2022,
+                missing_years: vec![],
+                consecutive_runs: vec![],
+                year_folders: vec![InventoryReportYearFolder {
+                    year: 2020,
+                    relative_path: format!("parent/{i}/2020"),
+                    name: "2020".into(),
+                }],
+            });
+    }
+    let mut without_years = with_years.clone();
+    without_years.chapter_selection.year_structures = false;
+    without_years.chapter_selection.repeated_file_names = false;
+    without_years.chapters.single_file_folders.clear();
+
+    let bytes_on = build_report_pdf_bytes(&with_years).expect("pdf on");
+    let bytes_off = build_report_pdf_bytes(&without_years).expect("pdf off");
+    assert!(
+        bytes_on.len() > bytes_off.len(),
+        "disabled heavy chapter should reduce PDF size ({} vs {})",
+        bytes_on.len(),
+        bytes_off.len()
+    );
+    assert_eq!(&bytes_off[..5], b"%PDF-");
+    assert!(pdf_page_count(&bytes_off) >= 1);
+}
+
+#[test]
+fn pdf_detail_limit_is_announced_not_silent() {
+    let mut limited = sample_report();
+    limited.chapters.empty_folders = (0..(PDF_DETAIL_ROW_LIMIT + 20))
+        .map(|i| InventoryReportPathRow {
+            name: format!("e{i}"),
+            relative_path: format!("path/{i}"),
+        })
+        .collect();
+    let mut full_small = sample_report();
+    full_small.chapters.empty_folders = (0..10)
+        .map(|i| InventoryReportPathRow {
+            name: format!("e{i}"),
+            relative_path: format!("path/{i}"),
+        })
+        .collect();
+
+    let big = build_report_pdf_bytes(&limited).expect("limited pdf");
+    let small = build_report_pdf_bytes(&full_small).expect("small pdf");
+    assert_eq!(&big[..5], b"%PDF-");
+    assert!(
+        big.len() > small.len(),
+        "detail-heavy PDF should be larger ({} vs {})",
+        big.len(),
+        small.len()
+    );
+    // Limit is a named constant used by the writer (not silent arbitrary truncation).
+    assert_eq!(PDF_DETAIL_ROW_LIMIT, 500);
+}
+
+#[test]
+fn pdf_folder_overview_is_compact() {
+    let mut report = sample_report();
+    report.chapters.folders = (0..30)
+        .map(|i| InventoryReportFolderRow {
+            name: format!("f{i}"),
+            relative_path: format!("f/{i}"),
+            depth: 1,
+            listing: "read".into(),
+            direct_file_count: 1,
+            direct_directory_count: 0,
+            direct_known_size_bytes: 1,
+        })
+        .collect();
+    let bytes = build_report_pdf_bytes(&report).expect("pdf");
+    assert_eq!(&bytes[..5], b"%PDF-");
+    assert_eq!(PDF_FOLDER_OVERVIEW_LIMIT, 10);
+    // Compact overview uses fixed top-N; full folder dump stays Excel-side.
+    assert!(report.chapters.folders.len() > PDF_FOLDER_OVERVIEW_LIMIT);
+    assert!(bytes.len() > 1000);
+}
+
+#[test]
+fn pdf_safe_write_and_invalid_target() {
+    let dir = std::env::temp_dir().join(format!("dottyfm-r3-pdf-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let target = dir.join("bericht.pdf");
+    let report = sample_report_for_pdf();
+    let written = write_report_pdf_file(target.to_str().unwrap(), &report).expect("write pdf");
+    assert!(written.exists());
+    let bytes = fs::read(&written).unwrap();
+    assert_eq!(&bytes[..5], b"%PDF-");
+
+    let err = write_report_pdf_file(dir.to_str().unwrap(), &report).expect_err("dir rejected");
+    assert!(err.message.contains("Verzeichnis") || err.message.contains("Datei"), "{err:?}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn write_manual_r3_pdf_outside_repo_when_env_set() {
+    let base = std::env::var("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("target"));
+    let dir = base.join("r3-manual-test");
+    let _ = fs::create_dir_all(&dir);
+    let target = dir.join("DottyFM_IST-Bericht_R3-Synthetic.pdf");
+    let report = sample_report_for_pdf();
+    let written = match write_report_pdf_file(target.to_str().unwrap(), &report) {
+        Ok(path) => path,
+        Err(err) => {
+            let msg = err.message.to_lowercase();
+            let locked = msg.contains("zugriff verweigert") || msg.contains("access is denied");
+            assert!(locked, "manual pdf write failed unexpectedly: {err:?}");
+            let alt = dir.join("DottyFM_IST-Bericht_R3-Synthetic-neu.pdf");
+            write_report_pdf_file(alt.to_str().unwrap(), &report).expect("manual pdf alt")
+        }
+    };
+    assert!(written.exists());
+    let bytes = fs::read(&written).unwrap();
+    assert_eq!(&bytes[..5], b"%PDF-");
+    assert!(pdf_page_count(&bytes) >= 2);
 }

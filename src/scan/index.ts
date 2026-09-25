@@ -3,6 +3,7 @@ export {
   cancelScan,
   classifyScanRoot,
   copyExport,
+  exportInventoryReportPdf,
   exportInventoryReportXlsx,
   openInExplorer,
   openWithDefault,

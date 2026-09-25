@@ -76,6 +76,13 @@ export function exportInventoryReportXlsx(
   return invoke("export_inventory_report_xlsx", { path, report });
 }
 
+export function exportInventoryReportPdf(
+  path: string,
+  report: InventoryReportModel,
+): Promise<{ path: string }> {
+  return invoke("export_inventory_report_pdf", { path, report });
+}
+
 export function subscribeScanProgress(
   handler: (progress: ScanProgress) => void,
 ): Promise<UnlistenFn> {

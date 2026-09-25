@@ -1,3 +1,4 @@
+use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -5,12 +6,34 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::AppError;
 use crate::report::model::InventoryReportModel;
+use crate::report::pdf::{self, ReportPdfError};
 use crate::report::xlsx::{self, ReportXlsxError};
 
 /// Write inventory report XLSX via temp file then atomic replace.
 pub fn write_report_xlsx_file(
     path: &str,
     report: &InventoryReportModel,
+) -> Result<PathBuf, AppError> {
+    write_report_bytes(path, "xlsx", "XLSX", || {
+        xlsx::build_report_xlsx_bytes(report).map_err(BuildError::Xlsx)
+    })
+}
+
+/// Write inventory report PDF via the same safe-write path as XLSX.
+pub fn write_report_pdf_file(
+    path: &str,
+    report: &InventoryReportModel,
+) -> Result<PathBuf, AppError> {
+    write_report_bytes(path, "pdf", "PDF", || {
+        pdf::build_report_pdf_bytes(report).map_err(BuildError::Pdf)
+    })
+}
+
+fn write_report_bytes(
+    path: &str,
+    extension: &str,
+    label: &str,
+    build: impl FnOnce() -> Result<Vec<u8>, BuildError>,
 ) -> Result<PathBuf, AppError> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -21,64 +44,75 @@ pub fn write_report_xlsx_file(
     if requested.is_dir() {
         return Err(report_write_failed(
             requested,
+            label,
             "Bitte wählen Sie eine Datei, kein Verzeichnis.",
         ));
     }
 
-    let target = apply_xlsx_extension(requested);
+    let target = apply_extension(requested, extension);
     if target.is_dir() {
         return Err(report_write_failed(
             &target,
+            label,
             "Bitte wählen Sie eine Datei, kein Verzeichnis.",
         ));
     }
 
     let temp = temp_path_for(&target);
-    if let Err(err) = write_temp(&temp, report) {
-        let _ = fs::remove_file(&temp);
-        return Err(report_write_failed(&target, &io_cause_from_write(&err)));
+    match build() {
+        Ok(bytes) => {
+            if let Err(err) = write_temp_bytes(&temp, &bytes) {
+                let _ = fs::remove_file(&temp);
+                return Err(report_write_failed(&target, label, io_cause(&err)));
+            }
+        }
+        Err(err) => {
+            let _ = fs::remove_file(&temp);
+            return Err(report_write_failed(&target, label, &err.to_string()));
+        }
     }
 
     if let Err(err) = replace_file(&temp, &target) {
         let _ = fs::remove_file(&temp);
-        return Err(report_write_failed(&target, io_cause(&err)));
+        return Err(report_write_failed(&target, label, io_cause(&err)));
     }
 
     Ok(target)
 }
 
-fn write_temp(temp: &Path, report: &InventoryReportModel) -> Result<(), WriteTempError> {
-    let bytes = xlsx::build_report_xlsx_bytes(report).map_err(WriteTempError::Xlsx)?;
-    let mut file = File::create(temp).map_err(WriteTempError::Io)?;
-    file.write_all(&bytes).map_err(WriteTempError::Io)?;
-    file.flush().map_err(WriteTempError::Io)?;
-    file.sync_all().map_err(WriteTempError::Io)?;
+fn write_temp_bytes(temp: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut file = File::create(temp)?;
+    file.write_all(bytes)?;
+    file.flush()?;
+    file.sync_all()?;
     Ok(())
 }
 
-enum WriteTempError {
-    Io(io::Error),
+enum BuildError {
     Xlsx(ReportXlsxError),
+    Pdf(ReportPdfError),
 }
 
-fn io_cause_from_write(err: &WriteTempError) -> String {
-    match err {
-        WriteTempError::Io(io) => io_cause(io).to_string(),
-        WriteTempError::Xlsx(xlsx) => xlsx.to_string(),
+impl fmt::Display for BuildError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BuildError::Xlsx(err) => write!(f, "{err}"),
+            BuildError::Pdf(err) => write!(f, "{err}"),
+        }
     }
 }
 
-fn apply_xlsx_extension(path: &Path) -> PathBuf {
+fn apply_extension(path: &Path, extension: &str) -> PathBuf {
     match path.file_name().and_then(|name| name.to_str()) {
         Some(name) => {
             let next = if let Some(index) = name.rfind('.') {
                 if index > 0 && index < name.len() - 1 {
-                    format!("{}.xlsx", &name[..index])
+                    format!("{}.{}", &name[..index], extension)
                 } else {
-                    format!("{name}.xlsx")
+                    format!("{name}.{extension}")
                 }
             } else {
-                format!("{name}.xlsx")
+                format!("{name}.{extension}")
             };
             let trimmed = next.trim_end_matches([' ', '.']).to_string();
             match path.parent() {
@@ -86,7 +120,7 @@ fn apply_xlsx_extension(path: &Path) -> PathBuf {
                 _ => PathBuf::from(trimmed),
             }
         }
-        None => path.with_extension("xlsx"),
+        None => path.with_extension(extension),
     }
 }
 
@@ -95,7 +129,7 @@ fn temp_path_for(target: &Path) -> PathBuf {
     let name = target
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "report.xlsx".to_string());
+        .unwrap_or_else(|| "report.bin".to_string());
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
@@ -163,13 +197,13 @@ fn replace_existing(temp: &Path, target: &Path) -> io::Result<()> {
     fs::rename(temp, target)
 }
 
-fn report_write_failed(path: impl AsRef<Path>, cause: impl Into<String>) -> AppError {
+fn report_write_failed(path: impl AsRef<Path>, label: &str, cause: impl Into<String>) -> AppError {
     let target = path.as_ref().display().to_string();
     let cause = cause.into();
     AppError {
         kind: crate::error::AppErrorKind::ExportFailed,
         message: format!(
-            "Die XLSX-Datei konnte nicht gespeichert werden.\nZiel:\n{target}\nUrsache:\n{cause}"
+            "Die {label}-Datei konnte nicht gespeichert werden.\nZiel:\n{target}\nUrsache:\n{cause}"
         ),
         target_path: Some(target),
         cause: Some(cause),
