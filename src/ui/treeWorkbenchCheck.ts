@@ -5,6 +5,7 @@ import { runInventoryPatternOverviewCheck } from "./inventoryPatternOverviewChec
 import { runInventoryFileStructureContextCheck } from "./inventoryFileStructureContextCheck";
 import { runInventoryExactFolderFileStructureCheck } from "./inventoryExactFolderFileStructureCheck";
 import { runInventoryFileNameSyntaxCheck } from "./inventoryFileNameSyntaxCheck";
+import { runInventoryReportModelCheck } from "./inventoryReportModelCheck";
 import { runInventoryRepeatedFileNameContextCheck } from "./inventoryRepeatedFileNameContextCheck";
 import { runInventoryRepeatedNameContextCheck } from "./inventoryRepeatedNameContextCheck";
 import { runInventoryStructureContextCheck } from "./inventoryStructureContextCheck";
@@ -307,6 +308,7 @@ export async function runTreeWorkbenchCheck(): Promise<void> {
   runInventoryRepeatedFileNameContextCheck();
   runInventoryExactFolderFileStructureCheck();
   runInventoryFileNameSyntaxCheck();
+  runInventoryReportModelCheck();
 }
 
 function runTreeSearchCheck(nested: DirectoryNode): void {
