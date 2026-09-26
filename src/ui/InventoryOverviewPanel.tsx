@@ -39,6 +39,11 @@ interface InventoryOverviewPanelProps {
   exactFolderStructures?: InventoryExactFolderFileStructureContext | null;
   fileNameSyntax?: InventoryFileNameSyntaxContext | null;
   rootPath?: string | null;
+  /** When set, shows „Bericht erstellen…“ in the IST-Überblick header (R4). */
+  reportAction?: {
+    disabled: boolean;
+    onClick: () => void;
+  } | null;
 }
 
 export function InventoryOverviewPanel({
@@ -47,6 +52,7 @@ export function InventoryOverviewPanel({
   exactFolderStructures = null,
   fileNameSyntax = null,
   rootPath = null,
+  reportAction = null,
 }: InventoryOverviewPanelProps) {
   const view = buildInventoryOverviewView(analysis, rootPath ?? "", structure);
   const patterns = buildInventoryPatternOverviewView(exactFolderStructures, fileNameSyntax);
@@ -56,7 +62,23 @@ export function InventoryOverviewPanel({
       className="inventory-overview"
       onKeyDown={(event) => event.stopPropagation()}
     >
-      <summary>{view.title}</summary>
+      <summary className="inventory-overview-summary">
+        <span className="inventory-overview-title">{view.title}</span>
+        {reportAction !== null ? (
+          <button
+            type="button"
+            className="inventory-overview-report-btn"
+            disabled={reportAction.disabled}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              reportAction.onClick();
+            }}
+          >
+            Bericht erstellen…
+          </button>
+        ) : null}
+      </summary>
       {view.available ? (
         <div className="inventory-overview-body">
           <dl className="inventory-overview-stats">

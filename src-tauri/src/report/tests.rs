@@ -8,7 +8,8 @@ use zip::ZipArchive;
 use crate::report::filename::suggested_report_file_name_at;
 use crate::report::model::*;
 use crate::report::pdf::{
-    build_report_pdf_bytes, PDF_DETAIL_ROW_LIMIT, PDF_FOLDER_OVERVIEW_LIMIT,
+    build_report_pdf_bytes, format_exact_file_name_structure_display,
+    format_extension_distribution_display, PDF_DETAIL_ROW_LIMIT, PDF_FOLDER_OVERVIEW_LIMIT,
     PDF_R3_CHARSET_SAMPLE as R3_CHARSET_SAMPLE, PDF_TABLE_CELL_PADDING_MM,
 };
 use crate::report::persist::{write_report_pdf_file, write_report_xlsx_file};
@@ -182,7 +183,8 @@ fn sample_report() -> InventoryReportModel {
                 ],
             }],
             exact_file_name_structures: vec![InventoryReportExactNameStructureGroup {
-                signature: "Notiz.txt|Rechnung.pdf".into(),
+                // Internal grouping key uses LF between names (never render raw in PDF).
+                signature: "Notiz.txt\nRechnung.pdf".into(),
                 direct_file_names: vec!["Notiz.txt".into(), "Rechnung.pdf".into()],
                 direct_file_count: 2,
                 folder_count: 2,
@@ -200,7 +202,8 @@ fn sample_report() -> InventoryReportModel {
                 ],
             }],
             extension_distributions: vec![InventoryReportExtensionDistributionGroup {
-                signature: "1×.docx,1×.pdf".into(),
+                // Internal grouping key uses TAB between ext/count and LF between rows.
+                signature: ".docx\t1\n.pdf\t1".into(),
                 extension_counts: vec![
                     InventoryReportExtensionCount {
                         extension_key: ".docx".into(),
@@ -727,6 +730,78 @@ fn pdf_detail_limit_is_announced_not_silent() {
     );
     // Limit is a named constant used by the writer (not silent arbitrary truncation).
     assert_eq!(PDF_DETAIL_ROW_LIMIT, 500);
+}
+
+#[test]
+fn pdf_extension_distribution_display_avoids_raw_tab_lf_signature() {
+    // Real R1/R2 internal signature shape: extensionKey TAB count, rows joined by LF.
+    let group = InventoryReportExtensionDistributionGroup {
+        signature: ".pdf\t14\n.zip\t1".into(),
+        extension_counts: vec![
+            InventoryReportExtensionCount {
+                extension_key: ".pdf".into(),
+                count: 14,
+            },
+            InventoryReportExtensionCount {
+                extension_key: ".zip".into(),
+                count: 1,
+            },
+        ],
+        direct_file_count: 15,
+        folder_count: 2,
+        folders: vec![InventoryReportStructureFolder {
+            relative_path: "A".into(),
+            name: "A".into(),
+            depth: 1,
+        }],
+        hint: "Gleiche Endungsverteilung bedeutet nicht gleichen Inhalt.".into(),
+    };
+
+    let label = format_extension_distribution_display(&group);
+    assert_eq!(label, ".pdf × 14, .zip × 1");
+    assert!(!label.contains('\t'), "TAB must not appear in PDF label");
+    assert!(!label.contains('\n'), "LF must not appear in PDF label");
+    assert!(label.contains(".pdf") && label.contains("14"));
+    assert!(label.contains(".zip") && label.contains('1'));
+
+    // Fallback path when structured counts are empty still sanitizes the raw signature.
+    let from_signature_only = format_extension_distribution_display(
+        &InventoryReportExtensionDistributionGroup {
+            signature: ".pdf\t14\n.zip\t1".into(),
+            extension_counts: vec![],
+            direct_file_count: 15,
+            folder_count: 2,
+            folders: vec![],
+            hint: String::new(),
+        },
+    );
+    assert_eq!(from_signature_only, ".pdf × 14, .zip × 1");
+    assert!(!from_signature_only.contains('\t'));
+    assert!(!from_signature_only.contains('\n'));
+
+    let exact = InventoryReportExactNameStructureGroup {
+        signature: "Notiz.txt\nRechnung.pdf".into(),
+        direct_file_names: vec!["Notiz.txt".into(), "Rechnung.pdf".into()],
+        direct_file_count: 2,
+        folder_count: 2,
+        folders: vec![],
+    };
+    let exact_label = format_exact_file_name_structure_display(&exact);
+    assert_eq!(exact_label, "Notiz.txt, Rechnung.pdf");
+    assert!(!exact_label.contains('\n'));
+
+    // PDF build must succeed with realistic TAB/LF signatures in the model.
+    let mut report = sample_report();
+    report.chapters.extension_distributions = vec![group];
+    report.chapters.exact_file_name_structures = vec![exact];
+    let bytes = build_report_pdf_bytes(&report).expect("pdf with extension distributions");
+    assert_eq!(&bytes[..5], b"%PDF-");
+    // Raw control-separated signature must not be the visible path; display uses × and commas.
+    // Content streams are often compressed — assert via display helper contract above.
+    assert!(format_extension_distribution_display(
+        &report.chapters.extension_distributions[0]
+    )
+    .contains('×'));
 }
 
 #[test]

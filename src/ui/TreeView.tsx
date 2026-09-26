@@ -39,6 +39,7 @@ import { analyzeFileNameSyntax } from "./inventoryFileNameSyntax";
 import { analyzeFileStructureContext } from "./inventoryFileStructureContext";
 import { analyzeStructureContext } from "./inventoryStructureContext";
 import { InventoryOverviewPanel } from "./InventoryOverviewPanel";
+import { InventoryReportDialog } from "./InventoryReportDialog";
 import { collectViewWorkStats, formatViewWorkStats } from "./viewStats";
 import { resolveWarningJump } from "./warningNavigation";
 import {
@@ -97,6 +98,7 @@ interface TreeViewProps {
   onWidthsChange: (widths: ColumnWidths) => void;
   onScanFromHere: (path: string) => void;
   onPreparingContentChange: (busy: boolean) => void;
+  onExportBusyChange: (busy: boolean) => void;
 }
 
 export function TreeView({
@@ -114,6 +116,7 @@ export function TreeView({
   onWidthsChange,
   onScanFromHere,
   onPreparingContentChange,
+  onExportBusyChange,
 }: TreeViewProps) {
   if (result === null) {
     return (
@@ -148,6 +151,10 @@ export function TreeView({
           exactFolderStructures={null}
           fileNameSyntax={null}
           rootPath={null}
+          reportAction={{
+            disabled: true,
+            onClick: () => {},
+          }}
         />
         <div className="tree-viewport tree-viewport-empty" />
         <TreePathBar
@@ -184,6 +191,7 @@ export function TreeView({
       onWidthsChange={onWidthsChange}
       onScanFromHere={onScanFromHere}
       onPreparingContentChange={onPreparingContentChange}
+      onExportBusyChange={onExportBusyChange}
     />
   );
 }
@@ -203,6 +211,7 @@ interface PopulatedTreeViewProps {
   onWidthsChange: (widths: ColumnWidths) => void;
   onScanFromHere: (path: string) => void;
   onPreparingContentChange: (busy: boolean) => void;
+  onExportBusyChange: (busy: boolean) => void;
 }
 
 function PopulatedTreeView({
@@ -220,6 +229,7 @@ function PopulatedTreeView({
   onWidthsChange,
   onScanFromHere,
   onPreparingContentChange,
+  onExportBusyChange,
 }: PopulatedTreeViewProps) {
   const [expandedIds, setExpandedIds] = useState(() => defaultExpandedIds(result.root.id));
   const [activeResult, setActiveResult] = useState(result);
@@ -241,6 +251,7 @@ function PopulatedTreeView({
   const [filterOpen, setFilterOpen] = useState(false);
   const [warningNotice, setWarningNotice] = useState<string | null>(null);
   const [warningOfferReset, setWarningOfferReset] = useState(false);
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const pendingRevealRef = useRef<string | null>(null);
   const openInFlightRef = useRef(false);
@@ -268,6 +279,7 @@ function PopulatedTreeView({
     setFilterOpen(false);
     setWarningNotice(null);
     setWarningOfferReset(false);
+    setReportDialogOpen(false);
   }
 
   const columns = visibleColumns(visibility);
@@ -865,7 +877,25 @@ function PopulatedTreeView({
         exactFolderStructures={exactFolderStructures}
         fileNameSyntax={fileNameSyntax}
         rootPath={result.root.path}
+        reportAction={{
+          disabled: !occupancyIdle || inventoryAnalysis === null,
+          onClick: () => setReportDialogOpen(true),
+        }}
       />
+      {reportDialogOpen ? (
+        <InventoryReportDialog
+          open={reportDialogOpen}
+          result={result}
+          resultScanId={resultScanId}
+          analysis={inventoryAnalysis}
+          structure={structureContext}
+          exactFolderStructures={exactFolderStructures}
+          fileNameSyntax={fileNameSyntax}
+          exportBusy={exportBusy}
+          onExportBusyChange={onExportBusyChange}
+          onClose={() => setReportDialogOpen(false)}
+        />
+      ) : null}
       <div className="tree-toolbar">
         <button type="button" disabled={actionsDisabled} onClick={handleExpandAll}>
           Alles aufklappen

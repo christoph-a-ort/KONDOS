@@ -25,6 +25,18 @@ pub fn ensure_explorer_path_exists(path: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Lightweight existence probe for UI overwrite confirmation (R4).
+/// Not a security boundary — Safe Write remains authoritative.
+pub fn path_exists_check(path: &str) -> bool {
+    let trimmed = path.trim();
+    !trimmed.is_empty() && Path::new(trimmed).exists()
+}
+
+#[tauri::command]
+pub fn path_exists(path: String) -> bool {
+    path_exists_check(&path)
+}
+
 pub fn plan_explorer(path: &str, directory: bool) -> Result<ExplorerPlan, AppError> {
     ensure_explorer_path_exists(path)?;
     if directory {
@@ -164,7 +176,7 @@ fn select_file_in_explorer(_path: &str) -> Result<(), AppError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{plan_explorer, ExplorerPlan, EXPLORER_PROGRAM};
+    use super::{path_exists_check, plan_explorer, ExplorerPlan, EXPLORER_PROGRAM};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -265,6 +277,26 @@ mod tests {
         assert!(matches!(dir_plan, ExplorerPlan::OpenFolder { .. }));
         let file_plan = plan_explorer(file.to_str().unwrap(), false).unwrap();
         assert!(matches!(file_plan, ExplorerPlan::SelectFile { .. }));
+        let _ = fs::remove_file(&file);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn path_exists_check_empty_and_missing() {
+        assert!(!path_exists_check(""));
+        assert!(!path_exists_check("   "));
+        let missing = unique_missing();
+        assert!(!path_exists_check(missing.to_str().unwrap()));
+    }
+
+    #[test]
+    fn path_exists_check_finds_file() {
+        let root = unique_missing();
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("report.xlsx");
+        fs::write(&file, b"ok").unwrap();
+        assert!(path_exists_check(file.to_str().unwrap()));
+        assert!(path_exists_check(root.to_str().unwrap()));
         let _ = fs::remove_file(&file);
         let _ = fs::remove_dir_all(&root);
     }

@@ -7,7 +7,7 @@ pub mod scan;
 pub mod workbench_prefs;
 
 pub use content::{cancel_prepare_content, search_file_content, start_prepare_content};
-pub use explorer::open_in_explorer;
+pub use explorer::{open_in_explorer, path_exists};
 pub use export::{copy_export, save_export, suggest_export_filename};
 pub use open::open_with_default;
 pub use report::{export_inventory_report_pdf, export_inventory_report_xlsx};

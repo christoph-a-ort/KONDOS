@@ -527,11 +527,27 @@ button:disabled {
   background: #f7f8fa;
 }
 
-.inventory-overview > summary {
+.inventory-overview > summary,
+.inventory-overview-summary {
   cursor: pointer;
   padding: 6px 10px;
   font-weight: 600;
   list-style-position: inside;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inventory-overview-title {
+  min-width: 0;
+}
+
+.inventory-overview-report-btn {
+  flex-shrink: 0;
+  font-weight: 500;
+  padding: 5px 10px;
 }
 
 .inventory-overview-body {
@@ -1211,6 +1227,132 @@ button:disabled {
 
 .tree-details-grid dd.is-muted {
   color: #6b7380;
+}
+
+/* R4: inventory report dialog */
+.report-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(28, 36, 48, 0.45);
+}
+
+.report-dialog {
+  width: min(560px, 100%);
+  max-height: min(88vh, 820px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 16px 18px 14px;
+  border: 1px solid #d5dbe3;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 40px rgba(20, 30, 45, 0.22);
+}
+
+.report-dialog h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.report-dialog-fieldset {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #d5dbe3;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.report-dialog-fieldset legend {
+  padding: 0 4px;
+  font-weight: 600;
+}
+
+.report-dialog-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.report-dialog-check input {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.report-dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.report-dialog-field > label {
+  font-weight: 600;
+}
+
+.report-dialog-field input[type="text"] {
+  width: 100%;
+}
+
+.report-dialog-hint {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.report-dialog-error {
+  margin: 0;
+  color: #8a1f1f;
+  font-size: 0.9rem;
+}
+
+.report-dialog-chapters {
+  min-height: 0;
+}
+
+.report-dialog-chapter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.report-dialog-chapter-list {
+  max-height: min(32vh, 280px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 4px;
+}
+
+.report-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.report-dialog-message {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+
+.report-dialog-confirm,
+.report-dialog-result {
+  width: min(440px, 100%);
+  max-height: min(70vh, 480px);
 }
 
 @media (max-width: 900px) {

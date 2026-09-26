@@ -26,7 +26,6 @@ const stateRs = read("src-tauri/src/state.rs");
 const apiTs = read("src/scan/api.ts");
 const indexTs = read("src/scan/index.ts");
 const modelTs = read("src/ui/inventoryReportModel.ts");
-const treeView = read("src/ui/TreeView.tsx");
 const appTsx = read("src/App.tsx");
 const lock = read("src-tauri/Cargo.lock");
 const fontLicense = read("src-tauri/assets/fonts/LICENSE-DejaVu.txt");
@@ -48,6 +47,10 @@ assert(pdfRs.includes("chapter_selection"), "respects selection");
 assert(pdfRs.includes("Hinweise zur Interpretation") || pdfRs.includes("Interpretation"), "interpretation section");
 assert(pdfRs.includes("Angezeigt werden"), "compact folder notice");
 assert(pdfRs.includes("Keine entsprechenden Einträge"), "empty chapter note");
+assert(pdfRs.includes("format_extension_distribution_display"), "pdf-safe extension display");
+assert(pdfRs.includes("format_exact_file_name_structure_display"), "pdf-safe exact-name display");
+assert(pdfRs.includes("{} × {}"), "extension display uses multiplication sign not TAB");
+assert(!/g\.signature,\s*g\.folder_count,\s*g\.direct_file_count/.test(pdfRs), "raw extension signature not used in PDF line");
 assert(pdfRs.includes("TABLE_CELL_PADDING") || pdfRs.includes("pdf_table"), "table padding module");
 assert(pdfRs.includes("R3_CHARSET") || true, "charset via pdf_table");
 const pdfTable = read("src-tauri/src/report/pdf_table.rs");
@@ -87,11 +90,11 @@ assert(testsRs.includes("pdf_respects_chapter_selection"), "pdf selection test")
 assert(testsRs.includes("pdf_detail_limit"), "pdf limit test");
 assert(testsRs.includes("write_manual_r3_pdf"), "manual pdf helper");
 
-assert(!treeView.includes("exportInventoryReportPdf"), "no TreeView UI wiring");
-assert(!appTsx.includes("exportInventoryReportPdf"), "no App UI wiring");
-assert(!appTsx.includes("Bericht erstellen"), "no report button");
+// UI wiring is owned by R4 (verify-report-r4.mjs); R3 requires exporters remain API-callable.
+assert(apiTs.includes("exportInventoryReportPdf"), "TS API pdf kept for UI");
 assert(modelTs.includes("buildInventoryReportModel"), "R1 model kept");
 assert(!modelTs.includes("genpdf"), "R1 model not pdf-aware");
+assert(!appTsx.includes("genpdf"), "App not genpdf-aware");
 
 assert(fontLicense.includes("Bitstream") || fontLicense.includes("DejaVu"), "DejaVu license present");
 

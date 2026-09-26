@@ -11,8 +11,8 @@ mod state;
 use commands::{
     cancel_prepare_content, cancel_scan, classify_scan_root, copy_export,
     export_inventory_report_pdf, export_inventory_report_xlsx, load_workbench_prefs,
-    open_in_explorer, open_with_default, save_export, save_workbench_prefs, search_file_content,
-    start_prepare_content, start_scan, suggest_export_filename,
+    open_in_explorer, open_with_default, path_exists, save_export, save_workbench_prefs,
+    search_file_content, start_prepare_content, start_scan, suggest_export_filename,
 };
 use state::AppState;
 use tauri::{Manager, WindowEvent};
@@ -40,6 +40,7 @@ pub fn run() {
             export_inventory_report_xlsx,
             export_inventory_report_pdf,
             open_in_explorer,
+            path_exists,
             open_with_default,
             start_prepare_content,
             cancel_prepare_content,

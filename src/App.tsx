@@ -553,6 +553,7 @@ function App() {
           onWidthsChange={setColumnWidths}
           onScanFromHere={handleUseAsScanRoot}
           onPreparingContentChange={handlePreparingContentChange}
+          onExportBusyChange={setExportBusy}
         />
       </div>
     </div>

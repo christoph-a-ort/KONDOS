@@ -7,7 +7,10 @@ use genpdf::fonts::{FontData, FontFamily};
 use genpdf::style::{Style, StyledString};
 use genpdf::{Alignment, Document, Element as _, SimplePageDecorator};
 
-use crate::report::model::InventoryReportModel;
+use crate::report::model::{
+    InventoryReportExactNameStructureGroup, InventoryReportExtensionCount,
+    InventoryReportExtensionDistributionGroup, InventoryReportModel,
+};
 use crate::report::pdf_table::push_table;
 
 pub use crate::report::pdf_table::{
@@ -476,8 +479,12 @@ Die vollständige Ordnerliste ist für die Excel-Ausgabe vorgesehen."
                 }
                 for g in chapters.exact_file_name_structures.iter().take(slice) {
                     doc.push(
-                        Paragraph::new(format!("{} — {} Ordner", g.signature, g.folder_count))
-                            .styled(Style::new().bold()),
+                        Paragraph::new(format!(
+                            "{} — {} Ordner",
+                            format_exact_file_name_structure_display(g),
+                            g.folder_count
+                        ))
+                        .styled(Style::new().bold()),
                     );
                     for folder in g.folders.iter().take(30) {
                         doc.push(Paragraph::new(format!(
@@ -503,7 +510,9 @@ Die vollständige Ordnerliste ist für die Excel-Ausgabe vorgesehen."
                     doc.push(
                         Paragraph::new(format!(
                             "{} — {} Ordner, {} Dateien",
-                            g.signature, g.folder_count, g.direct_file_count
+                            format_extension_distribution_display(g),
+                            g.folder_count,
+                            g.direct_file_count
                         ))
                         .styled(Style::new().bold()),
                     );
@@ -625,6 +634,54 @@ fn empty_note(doc: &mut Document) {
     doc.push(Paragraph::new(
         "Keine entsprechenden Einträge im eingelesenen Bestand.",
     ));
+}
+
+/// PDF-safe label for exact file-name structures.
+/// Internal grouping signatures may use `\n` between names — never render those raw.
+pub fn format_exact_file_name_structure_display(
+    group: &InventoryReportExactNameStructureGroup,
+) -> String {
+    if !group.direct_file_names.is_empty() {
+        return group.direct_file_names.join(", ");
+    }
+    // Fallback only if names missing: strip control separators from signature.
+    group
+        .signature
+        .split(['\n', '\t', '\r'])
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// PDF-safe label for extension multisets.
+/// Internal grouping signatures use `ext\tcount` rows joined by `\n` — never render those raw.
+pub fn format_extension_distribution_display(
+    group: &InventoryReportExtensionDistributionGroup,
+) -> String {
+    if !group.extension_counts.is_empty() {
+        return format_extension_counts_display(&group.extension_counts);
+    }
+    group
+        .signature
+        .split('\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            if let Some((ext, count)) = line.split_once('\t') {
+                format!("{ext} × {count}")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn format_extension_counts_display(counts: &[InventoryReportExtensionCount]) -> String {
+    counts
+        .iter()
+        .map(|item| format!("{} × {}", item.extension_key, item.count))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn kv(doc: &mut Document, key: &str, value: &str) {

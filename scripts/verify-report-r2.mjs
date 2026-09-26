@@ -27,7 +27,6 @@ const stateRs = read("src-tauri/src/state.rs");
 const apiTs = read("src/scan/api.ts");
 const indexTs = read("src/scan/index.ts");
 const modelTs = read("src/ui/inventoryReportModel.ts");
-const treeView = read("src/ui/TreeView.tsx");
 const appTsx = read("src/App.tsx");
 
 assert(cargoToml.includes('rust_xlsxwriter'), "dep: rust_xlsxwriter in Cargo.toml");
@@ -91,11 +90,11 @@ assert(testsRs.includes("disabled_chapter_omits_sheet"), "test selection");
 assert(testsRs.includes("work_columns_and_validation_present"), "test validation");
 assert(testsRs.includes("safe_write_and_invalid_target"), "test safe write");
 
-assert(!treeView.includes("exportInventoryReportXlsx"), "no TreeView UI wiring");
-assert(!appTsx.includes("exportInventoryReportXlsx"), "no App UI wiring");
-assert(!appTsx.includes("Bericht erstellen"), "no report button");
+// UI wiring is owned by R4 (verify-report-r4.mjs); R2 requires exporters remain API-callable.
+assert(apiTs.includes("exportInventoryReportXlsx"), "TS API kept for UI");
 assert(modelTs.includes("buildInventoryReportModel"), "R1 model kept");
 assert(!modelTs.includes("rust_xlsxwriter"), "R1 model not xlsx-aware");
+assert(!appTsx.includes("rust_xlsxwriter"), "App not xlsx-writer aware");
 
 const lock = read("src-tauri/Cargo.lock");
 assert(lock.includes('name = "rust_xlsxwriter"'), "Cargo.lock has rust_xlsxwriter");

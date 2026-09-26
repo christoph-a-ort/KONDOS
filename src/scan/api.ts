@@ -14,11 +14,13 @@ import {
 } from "../model";
 import type { InventoryReportModel } from "../ui/inventoryReportModel";
 
-export async function pickDirectory(): Promise<string | null> {
+export async function pickDirectory(options?: {
+  title?: string;
+}): Promise<string | null> {
   const selected = await open({
     directory: true,
     multiple: false,
-    title: "Startverzeichnis wählen",
+    title: options?.title ?? "Startverzeichnis wählen",
   });
 
   if (typeof selected === "string" && selected.length > 0) {
@@ -26,6 +28,10 @@ export async function pickDirectory(): Promise<string | null> {
   }
 
   return null;
+}
+
+export function pathExists(path: string): Promise<boolean> {
+  return invoke<boolean>("path_exists", { path });
 }
 
 export function classifyScanRoot(path: string): Promise<"directory" | "file"> {
@@ -122,6 +128,29 @@ export async function pickExportPath(
       {
         name: format.toUpperCase(),
         extensions: [format],
+      },
+    ],
+  });
+
+  if (typeof selected === "string" && selected.length > 0) {
+    return selected;
+  }
+
+  return null;
+}
+
+export async function pickReportSavePath(
+  extension: "pdf" | "xlsx",
+  defaultPath: string,
+): Promise<string | null> {
+  const selected = await save({
+    title:
+      extension === "pdf" ? "PDF-Bericht speichern" : "Excel-Arbeitsdatei speichern",
+    defaultPath,
+    filters: [
+      {
+        name: extension.toUpperCase(),
+        extensions: [extension],
       },
     ],
   });
