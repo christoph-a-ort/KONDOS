@@ -100,6 +100,8 @@ pub struct InventoryReportFileTypeRow {
     pub label: String,
     pub file_count: u64,
     pub known_size_bytes: u64,
+    #[serde(default)]
+    pub files_with_known_size: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -112,6 +114,8 @@ pub struct InventoryReportFolderRow {
     pub direct_file_count: u64,
     pub direct_directory_count: u64,
     pub direct_known_size_bytes: u64,
+    #[serde(default)]
+    pub direct_files_with_known_size: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

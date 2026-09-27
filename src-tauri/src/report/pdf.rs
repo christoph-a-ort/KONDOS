@@ -14,7 +14,8 @@ use crate::report::model::{
 use crate::report::pdf_table::push_table;
 
 pub use crate::report::pdf_table::{
-    R3_CHARSET_SAMPLE as PDF_R3_CHARSET_SAMPLE, TABLE_CELL_PADDING_MM as PDF_TABLE_CELL_PADDING_MM,
+    soft_break_cell_atoms, R3_CHARSET_SAMPLE as PDF_R3_CHARSET_SAMPLE,
+    TABLE_CELL_PADDING_MM as PDF_TABLE_CELL_PADDING_MM,
 };
 
 /// Soft cap for detail rows per fachlichem Abschnitt (not silent).
@@ -22,6 +23,12 @@ pub const PDF_DETAIL_ROW_LIMIT: usize = 500;
 
 /// Compact folder overview rows shown in PDF.
 pub const PDF_FOLDER_OVERVIEW_LIMIT: usize = 10;
+
+/// Ordnerliste je Endungsverteilungsgruppe im PDF (mit Hinweis bei Kürzung).
+pub const PDF_EXTENSION_FOLDER_LIMIT: usize = 10;
+
+/// Ordnerliste je exakter Dateinamensstruktur im PDF (mit Hinweis bei Kürzung).
+pub const PDF_EXACT_NAME_FOLDER_LIMIT: usize = 30;
 
 #[derive(Debug)]
 pub struct ReportPdfError(String);
@@ -139,7 +146,15 @@ fn push_document_body(doc: &mut Document, report: &InventoryReportModel) {
         let o = &chapters.overview;
         kv(doc, "Ordner gesamt", &o.directory_count.to_string());
         kv(doc, "Dateien gesamt", &o.file_count.to_string());
-        kv(doc, "Bekannte Größe (Bytes)", &o.known_size_bytes.to_string());
+        if o.file_count > 0 && o.files_without_known_size == o.file_count {
+            kv(doc, "Dateigrößen", "nicht erfasst");
+        } else {
+            kv(
+                doc,
+                "Bekannte Größe (Bytes)",
+                &o.known_size_bytes.to_string(),
+            );
+        }
         kv(
             doc,
             "Dateien ohne bekannte Größe",
@@ -167,7 +182,11 @@ fn push_document_body(doc: &mut Document, report: &InventoryReportModel) {
                         row.extension.clone(),
                         row.label.clone(),
                         row.file_count.to_string(),
-                        row.known_size_bytes.to_string(),
+                        format_aggregate_size_display(
+                            row.known_size_bytes,
+                            row.files_with_known_size,
+                            row.file_count,
+                        ),
                     ]
                 })
                 .collect();
@@ -205,13 +224,18 @@ Die vollständige Ordnerliste ist für die Excel-Ausgabe vorgesehen."
                         row.depth.to_string(),
                         row.direct_file_count.to_string(),
                         row.direct_directory_count.to_string(),
-                        row.direct_known_size_bytes.to_string(),
+                        format_aggregate_size_display(
+                            row.direct_known_size_bytes,
+                            row.direct_files_with_known_size,
+                            row.direct_file_count,
+                        ),
                     ]
                 })
                 .collect();
+            // Weights tuned so „Unterordner“ stays readable on A4 portrait.
             push_table(
                 doc,
-                vec![2, 4, 1, 1, 1, 2],
+                vec![3, 5, 1, 2, 3, 2],
                 &[
                     "Name",
                     "Relativer Pfad",
@@ -480,16 +504,24 @@ Die vollständige Ordnerliste ist für die Excel-Ausgabe vorgesehen."
                 for g in chapters.exact_file_name_structures.iter().take(slice) {
                     doc.push(
                         Paragraph::new(format!(
-                            "{} — {} Ordner",
+                            "{} — {}",
                             format_exact_file_name_structure_display(g),
-                            g.folder_count
+                            format_ordner(g.folder_count)
                         ))
                         .styled(Style::new().bold()),
                     );
-                    for folder in g.folders.iter().take(30) {
+                    let folder_total = g.folders.len();
+                    let folder_shown = folder_total.min(PDF_EXACT_NAME_FOLDER_LIMIT);
+                    for folder in g.folders.iter().take(folder_shown) {
                         doc.push(Paragraph::new(format!(
                             "  · {} (Tiefe {})",
                             folder.relative_path, folder.depth
+                        )));
+                    }
+                    if folder_total > PDF_EXACT_NAME_FOLDER_LIMIT {
+                        doc.push(Paragraph::new(format!(
+                            "Angezeigt werden {folder_shown} von {folder_total} Ordnern. \
+Die vollständige Liste ist in der Excel-Arbeitsdatei enthalten."
                         )));
                     }
                     doc.push(Break::new(0.15));
@@ -509,20 +541,28 @@ Die vollständige Ordnerliste ist für die Excel-Ausgabe vorgesehen."
                 {
                     doc.push(
                         Paragraph::new(format!(
-                            "{} — {} Ordner, {} Dateien",
+                            "{} — {}, {}",
                             format_extension_distribution_display(g),
-                            g.folder_count,
-                            g.direct_file_count
+                            format_ordner(g.folder_count),
+                            format_dateien(g.direct_file_count)
                         ))
                         .styled(Style::new().bold()),
                     );
                     if !g.hint.is_empty() {
                         doc.push(Paragraph::new(g.hint.as_str()));
                     }
-                    for folder in g.folders.iter().take(20) {
+                    let folder_total = g.folders.len();
+                    let folder_shown = folder_total.min(PDF_EXTENSION_FOLDER_LIMIT);
+                    for folder in g.folders.iter().take(folder_shown) {
                         doc.push(Paragraph::new(format!(
                             "  · {} (Tiefe {})",
                             folder.relative_path, folder.depth
+                        )));
+                    }
+                    if folder_total > PDF_EXTENSION_FOLDER_LIMIT {
+                        doc.push(Paragraph::new(format!(
+                            "Angezeigt werden {folder_shown} von {folder_total} Ordnern. \
+Die vollständige Liste ist in der Excel-Arbeitsdatei enthalten."
                         )));
                     }
                     doc.push(Break::new(0.15));
@@ -682,6 +722,31 @@ fn format_extension_counts_display(counts: &[InventoryReportExtensionCount]) -> 
         .map(|item| format!("{} × {}", item.extension_key, item.count))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// Visible size cell: unknown aggregate → "—"; known zero → "0"; else the byte sum.
+pub fn format_aggregate_size_display(
+    known_bytes: u64,
+    files_with_known_size: u64,
+    file_count: u64,
+) -> String {
+    if file_count > 0 && files_with_known_size == 0 {
+        "—".to_string()
+    } else {
+        known_bytes.to_string()
+    }
+}
+
+pub fn format_dateien(count: u64) -> String {
+    if count == 1 {
+        "1 Datei".to_string()
+    } else {
+        format!("{count} Dateien")
+    }
+}
+
+pub fn format_ordner(count: u64) -> String {
+    format!("{count} Ordner")
 }
 
 fn kv(doc: &mut Document, key: &str, value: &str) {

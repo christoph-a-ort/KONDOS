@@ -82,6 +82,8 @@ export interface InventoryReportFileTypeRow {
   label: string;
   fileCount: number;
   knownSizeBytes: number;
+  /** Files of this type that contributed a known sizeBytes. */
+  filesWithKnownSize: number;
 }
 
 export interface InventoryReportFolderRow {
@@ -92,6 +94,8 @@ export interface InventoryReportFolderRow {
   directFileCount: number;
   directDirectoryCount: number;
   directKnownSizeBytes: number;
+  /** Direct file children that contributed a known sizeBytes. */
+  directFilesWithKnownSize: number;
 }
 
 export interface InventoryReportPathRow {
@@ -258,10 +262,6 @@ export function buildInventoryReportModel(input: InventoryReportBuildInput): Inv
     input.chapterSelection ?? createDefaultInventoryReportChapterSelection(),
   );
 
-  const folderByAbsPath = new Map(
-    structure.folders.map((folder) => [normalizePathKey(folder.folder.path), folder]),
-  );
-
   const meta: InventoryReportMeta = {
     schemaVersion: INVENTORY_REPORT_SCHEMA_VERSION,
     createdAtMs: input.createdAtMs ?? Date.now(),
@@ -286,6 +286,7 @@ export function buildInventoryReportModel(input: InventoryReportBuildInput): Inv
     label: row.label,
     fileCount: row.fileCount,
     knownSizeBytes: row.knownSizeBytes,
+    filesWithKnownSize: row.filesWithKnownSize,
   }));
 
   const folders: InventoryReportFolderRow[] = analysis.folderOccupancy
@@ -297,12 +298,13 @@ export function buildInventoryReportModel(input: InventoryReportBuildInput): Inv
       directFileCount: folder.directFileCount,
       directDirectoryCount: folder.directDirectoryCount,
       directKnownSizeBytes: folder.directKnownSizeBytes,
+      directFilesWithKnownSize: folder.directFilesWithKnownSize,
     }))
     .sort((left, right) => compareText(left.relativePath, right.relativePath));
 
   const emptyFolders = analysis.emptyFolders.map((node) => pathRow(rootPath, node));
-  const singleFileFolders = analysis.singleDirectFileFolders.map((node) =>
-    singleFileFolderRow(rootPath, node, folderByAbsPath),
+  const singleFileFolders = analysis.singleDirectFileFolders.map((entry) =>
+    singleFileFolderRow(rootPath, entry),
   );
 
   const unreadable = {
@@ -382,18 +384,15 @@ function pathRow(rootPath: string, node: InventoryNodeRef): InventoryReportPathR
 
 function singleFileFolderRow(
   rootPath: string,
-  node: InventoryNodeRef,
-  folderByAbsPath: Map<string, { childFiles: InventoryNodeRef[] }>,
+  entry: { folder: InventoryNodeRef; file: InventoryNodeRef },
 ): InventoryReportSingleFileFolderRow {
-  const folder = folderByAbsPath.get(normalizePathKey(node.path));
-  const file = folder?.childFiles[0];
-  const fileName = file?.name ?? "";
+  const fileName = entry.file.name;
   const extension = fileName.includes(".")
     ? fileName.slice(fileName.lastIndexOf(".")).toLocaleLowerCase()
     : "";
   return {
-    folderName: node.name,
-    relativePath: relativeReportPath(rootPath, node.path),
+    folderName: entry.folder.name,
+    relativePath: relativeReportPath(rootPath, entry.folder.path),
     fileName,
     extension,
   };
@@ -526,10 +525,6 @@ function extensionGroup(group: ExactExtensionMultisetGroup): InventoryReportExte
     })),
     hint: EXTENSION_MULTISET_HINT,
   };
-}
-
-function normalizePathKey(path: string): string {
-  return path.replace(/\\/g, "/").toLocaleLowerCase();
 }
 
 function compareText(left: string, right: string): number {

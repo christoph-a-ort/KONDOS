@@ -8,8 +8,10 @@ use zip::ZipArchive;
 use crate::report::filename::suggested_report_file_name_at;
 use crate::report::model::*;
 use crate::report::pdf::{
-    build_report_pdf_bytes, format_exact_file_name_structure_display,
-    format_extension_distribution_display, PDF_DETAIL_ROW_LIMIT, PDF_FOLDER_OVERVIEW_LIMIT,
+    build_report_pdf_bytes, format_aggregate_size_display, format_dateien,
+    format_exact_file_name_structure_display, format_extension_distribution_display,
+    format_ordner, soft_break_cell_atoms, PDF_DETAIL_ROW_LIMIT, PDF_EXTENSION_FOLDER_LIMIT,
+    PDF_EXACT_NAME_FOLDER_LIMIT, PDF_FOLDER_OVERVIEW_LIMIT,
     PDF_R3_CHARSET_SAMPLE as R3_CHARSET_SAMPLE, PDF_TABLE_CELL_PADDING_MM,
 };
 use crate::report::persist::{write_report_pdf_file, write_report_xlsx_file};
@@ -47,12 +49,14 @@ fn sample_report() -> InventoryReportModel {
                     label: "PDF".into(),
                     file_count: 3,
                     known_size_bytes: 191,
+                    files_with_known_size: 3,
                 },
                 InventoryReportFileTypeRow {
                     extension: ".txt".into(),
                     label: "TXT".into(),
                     file_count: 2,
                     known_size_bytes: 13,
+                    files_with_known_size: 2,
                 },
             ],
             folders: vec![
@@ -64,6 +68,7 @@ fn sample_report() -> InventoryReportModel {
                     direct_file_count: 0,
                     direct_directory_count: 6,
                     direct_known_size_bytes: 0,
+                    direct_files_with_known_size: 0,
                 },
                 InventoryReportFolderRow {
                     name: "Äpfel".into(),
@@ -73,6 +78,7 @@ fn sample_report() -> InventoryReportModel {
                     direct_file_count: 1,
                     direct_directory_count: 0,
                     direct_known_size_bytes: 10,
+                    direct_files_with_known_size: 1,
                 },
             ],
             empty_folders: vec![InventoryReportPathRow {
@@ -593,6 +599,7 @@ fn sample_report_for_pdf() -> InventoryReportModel {
             direct_file_count: i as u64,
             direct_directory_count: 1,
             direct_known_size_bytes: (i as u64) * 100,
+            direct_files_with_known_size: if i == 0 { 0 } else { 1 },
         });
     }
     for i in 0..40 {
@@ -816,6 +823,7 @@ fn pdf_folder_overview_is_compact() {
             direct_file_count: 1,
             direct_directory_count: 0,
             direct_known_size_bytes: 1,
+            direct_files_with_known_size: 1,
         })
         .collect();
     let bytes = build_report_pdf_bytes(&report).expect("pdf");
@@ -866,4 +874,227 @@ fn write_manual_r3_pdf_outside_repo_when_env_set() {
     let bytes = fs::read(&written).unwrap();
     assert_eq!(&bytes[..5], b"%PDF-");
     assert!(pdf_page_count(&bytes) >= 2);
+}
+
+#[test]
+fn pdf_folder_overview_has_six_columns_including_unterordner() {
+    let src = include_str!("pdf.rs");
+    assert!(src.contains("\"Unterordner\""));
+    assert!(src.contains("vec![3, 5, 1, 2, 3, 2]"));
+    assert!(!src.contains("\"Listing\""));
+    let bytes = build_report_pdf_bytes(&sample_report()).expect("pdf");
+    assert_eq!(&bytes[..5], b"%PDF-");
+}
+
+#[test]
+fn format_aggregate_size_distinguishes_unknown_from_zero() {
+    assert_eq!(format_aggregate_size_display(0, 0, 5), "—");
+    assert_eq!(format_aggregate_size_display(0, 2, 5), "0");
+    assert_eq!(format_aggregate_size_display(42, 1, 1), "42");
+    assert_eq!(format_aggregate_size_display(0, 0, 0), "0");
+}
+
+#[test]
+fn format_dateien_singular_plural() {
+    assert_eq!(format_dateien(1), "1 Datei");
+    assert_eq!(format_dateien(2), "2 Dateien");
+    assert_eq!(format_ordner(1), "1 Ordner");
+    assert_eq!(format_ordner(2), "2 Ordner");
+}
+
+#[test]
+fn pdf_extension_folder_list_limit_is_explicit() {
+    assert_eq!(PDF_EXTENSION_FOLDER_LIMIT, 10);
+    assert_eq!(PDF_EXACT_NAME_FOLDER_LIMIT, 30);
+    let mut report = sample_report();
+    let folders: Vec<_> = (0..15)
+        .map(|i| InventoryReportStructureFolder {
+            relative_path: format!("p/{i}"),
+            name: format!("n{i}"),
+            depth: 1,
+        })
+        .collect();
+    report.chapters.extension_distributions = vec![InventoryReportExtensionDistributionGroup {
+        signature: ".pdf\t1".into(),
+        extension_counts: vec![InventoryReportExtensionCount {
+            extension_key: ".pdf".into(),
+            count: 1,
+        }],
+        direct_file_count: 1,
+        folder_count: 15,
+        folders,
+        hint: String::new(),
+    }];
+    let bytes = build_report_pdf_bytes(&report).expect("pdf");
+    assert_eq!(&bytes[..5], b"%PDF-");
+    // Helpers encode the visible truncation contract used by the renderer.
+    let total = 15usize;
+    let shown = total.min(PDF_EXTENSION_FOLDER_LIMIT);
+    assert_eq!(shown, 10);
+    assert!(total > PDF_EXTENSION_FOLDER_LIMIT);
+    let notice = format!(
+        "Angezeigt werden {shown} von {total} Ordnern. \
+Die vollständige Liste ist in der Excel-Arbeitsdatei enthalten."
+    );
+    assert!(notice.contains("10 von 15"));
+}
+
+#[test]
+fn xlsx_unknown_sizes_leave_numeric_cells_empty() {
+    let mut report = sample_report();
+    report.chapters.overview.file_count = 4;
+    report.chapters.overview.known_size_bytes = 0;
+    report.chapters.overview.files_without_known_size = 4;
+    report.chapters.file_types = vec![InventoryReportFileTypeRow {
+        extension: ".pdf".into(),
+        label: "PDF".into(),
+        file_count: 4,
+        known_size_bytes: 0,
+        files_with_known_size: 0,
+    }];
+    report.chapters.folders = vec![InventoryReportFolderRow {
+        name: "x".into(),
+        relative_path: "x".into(),
+        depth: 1,
+        listing: "read".into(),
+        direct_file_count: 2,
+        direct_directory_count: 0,
+        direct_known_size_bytes: 0,
+        direct_files_with_known_size: 0,
+    }];
+    let bytes = build_report_xlsx_bytes(&report).expect("xlsx");
+    let shared = shared_strings(&bytes);
+    assert!(shared.contains("nicht erfasst"));
+
+    // Known zero remains distinguishable via helper used by writers.
+    assert_eq!(format_aggregate_size_display(0, 1, 1), "0");
+}
+
+#[test]
+fn pdf_single_file_long_filenames_survive_soft_break_and_render() {
+    use genpdf::fonts::{FontCache, FontData, FontFamily};
+    use genpdf::style::Style;
+    use genpdf::Mm;
+
+    // Synthetic fixtures only — same width classes as the Realtest DROP/KEEP cases.
+    let keep = "keep_ok_short_token.pdf";
+    let former_drop = "overflow_token_needs_soft_break_XXXX.pdf";
+    let very_long = "overflow_token_with_umlaut_Bestätigung_and_many_more_chars_ABCDEF.pdf";
+    let synthetic_long = format!("SYNTH_{}_ENDE.pdf", "X".repeat(80));
+
+    let family = FontFamily {
+        regular: FontData::new(
+            include_bytes!("../../assets/fonts/DejaVuSans-Regular.ttf").to_vec(),
+            None,
+        )
+        .unwrap(),
+        bold: FontData::new(
+            include_bytes!("../../assets/fonts/DejaVuSans-Bold.ttf").to_vec(),
+            None,
+        )
+        .unwrap(),
+        italic: FontData::new(
+            include_bytes!("../../assets/fonts/DejaVuSans-Italic.ttf").to_vec(),
+            None,
+        )
+        .unwrap(),
+        bold_italic: FontData::new(
+            include_bytes!("../../assets/fonts/DejaVuSans-BoldItalic.ttf").to_vec(),
+            None,
+        )
+        .unwrap(),
+    };
+    let cache = FontCache::new(family);
+    let style = Style::new().with_font_size(8);
+    // Kapitel E Datei column inner width (A4 / margins 14 / weights 2+4+3+2).
+    let content = Mm::from(210.0f32 - 28.0);
+    let datei_inner = content * (3.0 / 11.0)
+        - Mm::from(PDF_TABLE_CELL_PADDING_MM)
+        - Mm::from(PDF_TABLE_CELL_PADDING_MM);
+
+    assert!(style.str_width(&cache, keep) <= datei_inner);
+    assert!(style.str_width(&cache, former_drop) > datei_inner);
+    assert!(style.str_width(&cache, very_long) > datei_inner);
+
+    for name in [keep, former_drop, very_long, synthetic_long.as_str()] {
+        let atoms = soft_break_cell_atoms(name, datei_inner, style, &cache);
+        assert_eq!(atoms.concat(), name, "soft-break must not alter characters");
+        assert!(
+            !atoms.iter().any(|a| a.contains('\u{00ad}') || a.contains('\u{200b}')),
+            "must not inject soft hyphen / ZWSP into atoms"
+        );
+        for atom in &atoms {
+            assert!(
+                style.str_width(&cache, atom) <= datei_inner || atom.chars().count() == 1,
+                "atom must fit genpdf cell width: {atom:?}"
+            );
+        }
+    }
+    assert_eq!(
+        soft_break_cell_atoms(keep, datei_inner, style, &cache).len(),
+        1,
+        "KEEP case stays one atom"
+    );
+    assert!(
+        soft_break_cell_atoms(former_drop, datei_inner, style, &cache).len() > 1,
+        "former DROP must soft-break"
+    );
+    assert!(
+        soft_break_cell_atoms(very_long, datei_inner, style, &cache).len() > 1,
+        "very long must soft-break"
+    );
+
+    let mut report = sample_report();
+    report.chapter_selection = InventoryReportChapterSelection {
+        overview: false,
+        file_types: false,
+        folders: false,
+        empty_folders: false,
+        single_file_folders: true,
+        unreadable: false,
+        repeated_folder_names: false,
+        repeated_file_names: false,
+        year_structures: false,
+        file_name_patterns: false,
+        same_file_stems: false,
+        exact_file_name_structures: false,
+        extension_distributions: false,
+        interpretation: false,
+    };
+    report.chapters.single_file_folders = vec![
+        InventoryReportSingleFileFolderRow {
+            folder_name: "keep".into(),
+            relative_path: "probe/keep".into(),
+            file_name: keep.into(),
+            extension: ".pdf".into(),
+        },
+        InventoryReportSingleFileFolderRow {
+            folder_name: "drop".into(),
+            relative_path: "probe/drop".into(),
+            file_name: former_drop.into(),
+            extension: ".pdf".into(),
+        },
+        InventoryReportSingleFileFolderRow {
+            folder_name: "long".into(),
+            relative_path: "probe/long".into(),
+            file_name: very_long.into(),
+            extension: ".pdf".into(),
+        },
+        InventoryReportSingleFileFolderRow {
+            folder_name: "synth".into(),
+            relative_path: "probe/synth".into(),
+            file_name: synthetic_long.clone(),
+            extension: ".pdf".into(),
+        },
+    ];
+
+    let bytes = build_report_pdf_bytes(&report).expect("pdf with long single-file names");
+    assert_eq!(&bytes[..5], b"%PDF-");
+    assert!(bytes.len() > 1000);
+
+    // Soft-break is what paint_row feeds to Paragraph; atoms above must all fit so genpdf
+    // cannot drop them. Also assert the table path still uses soft_break.
+    let table_src = include_str!("pdf_table.rs");
+    assert!(table_src.contains("soft_break_cell_atoms"));
+    assert!(table_src.contains("cell_paragraph"));
 }

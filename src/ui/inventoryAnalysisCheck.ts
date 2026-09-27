@@ -96,6 +96,8 @@ export function runInventoryAnalysisCheck(): void {
   const none = analysis.fileTypes.find((item) => item.extension === NO_EXTENSION_KEY);
   assert(none !== undefined && none.label === NO_EXTENSION_LABEL && none.fileCount === 1, "types: no extension group");
   assert(none.knownSizeBytes === 0, "types: unknown size not added");
+  assert(none.filesWithKnownSize === 0, "types: unknown size count");
+  assert(pdf.filesWithKnownSize === 2, "types: known size count for pdf");
   assert(analysis.fileTypes[0]?.fileCount >= analysis.fileTypes[1]?.fileCount, "types: sorted by count desc");
   const typeOrder = analysis.fileTypes.map((item) => item.extension);
   assert(typeOrder.indexOf(".jpg") < typeOrder.indexOf(".pdf"), "types: equal count sorted by extension");
@@ -105,9 +107,10 @@ export function runInventoryAnalysisCheck(): void {
   assert(!analysis.emptyFolders.some((item) => item.path === "C:/bestand/grenze"), "depthLimited not listed as empty");
   assert(analysis.emptyFolders.some((item) => item.path === "C:/bestand/leer"), "true empty folder listed");
 
-  const einzeln = analysis.singleDirectFileFolders.find((item) => item.path === "C:/bestand/einzeln");
+  const einzeln = analysis.singleDirectFileFolders.find((item) => item.folder.path === "C:/bestand/einzeln");
   assert(einzeln !== undefined, "single direct file folder listed");
-  assert(!analysis.singleDirectFileFolders.some((item) => item.path === "C:/bestand/viele"), "many-file folder not single");
+  assert(einzeln.file.name === "allein.txt", "single direct file name captured from scan");
+  assert(!analysis.singleDirectFileFolders.some((item) => item.folder.path === "C:/bestand/viele"), "many-file folder not single");
 
   assert(analysis.foldersByDirectFileCount[0]?.path === "C:/bestand/Vertraege", "rank: most direct files first");
   assert(analysis.foldersByDirectFileCount[1]?.path === "C:/bestand/viele", "rank: second by file count");

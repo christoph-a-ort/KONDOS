@@ -231,7 +231,17 @@ fn write_overview(
     row += 1;
     row = write_kv_num(sheet, row, "Ordner", overview.directory_count, wrap)?;
     row = write_kv_num(sheet, row, "Dateien", overview.file_count, wrap)?;
-    row = write_kv_num(sheet, row, "Bekannte Größe (Bytes)", overview.known_size_bytes, wrap)?;
+    if overview.file_count > 0 && overview.files_without_known_size == overview.file_count {
+        row = write_kv(sheet, row, "Dateigrößen", "nicht erfasst", wrap)?;
+    } else {
+        row = write_kv_num(
+            sheet,
+            row,
+            "Bekannte Größe (Bytes)",
+            overview.known_size_bytes,
+            wrap,
+        )?;
+    }
     row = write_kv_num(
         sheet,
         row,
@@ -288,6 +298,23 @@ fn write_kv_num(
     sheet.write_string(row, 0, key)?;
     sheet.write_number_with_format(row, 1, value as f64, wrap)?;
     Ok(row + 1)
+}
+
+/// Unknown aggregate size → empty numeric cell; known 0 → written 0; else the sum.
+fn write_optional_known_size(
+    sheet: &mut Worksheet,
+    row: u32,
+    col: u16,
+    known_bytes: u64,
+    files_with_known_size: u64,
+    file_count: u64,
+) -> Result<(), ReportXlsxError> {
+    if file_count > 0 && files_with_known_size == 0 {
+        Ok(())
+    } else {
+        sheet.write_number(row, col, known_bytes as f64)?;
+        Ok(())
+    }
 }
 
 fn format_created_at(ms: i64) -> String {
@@ -377,7 +404,7 @@ fn write_file_types(
         sheet.write_string_with_format(r, 0, &row.extension, wrap)?;
         sheet.write_string_with_format(r, 1, &row.label, wrap)?;
         sheet.write_number(r, 2, row.file_count as f64)?;
-        sheet.write_number(r, 3, row.known_size_bytes as f64)?;
+        write_optional_known_size(sheet, r, 3, row.known_size_bytes, row.files_with_known_size, row.file_count)?;
     }
     finish_table(sheet, 3, report.chapters.file_types.len() as u32, None)?;
     Ok(())
@@ -415,7 +442,14 @@ fn write_folders(
         sheet.write_string(r, 3, &row.listing)?;
         sheet.write_number(r, 4, row.direct_file_count as f64)?;
         sheet.write_number(r, 5, row.direct_directory_count as f64)?;
-        sheet.write_number(r, 6, row.direct_known_size_bytes as f64)?;
+        write_optional_known_size(
+            sheet,
+            r,
+            6,
+            row.direct_known_size_bytes,
+            row.direct_files_with_known_size,
+            row.direct_file_count,
+        )?;
     }
     finish_table(sheet, 6, report.chapters.folders.len() as u32, None)?;
     Ok(())

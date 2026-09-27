@@ -191,6 +191,14 @@ export function runInventoryReportModelCheck(): void {
   assert(model.chapters.fileTypes.some((row) => row.extension === ".pdf"), "types: pdf");
   assert(model.chapters.fileTypes.length >= 1, "types: present");
   assert(model.chapters.fileTypes.every((row) => typeof row.knownSizeBytes === "number"), "types: sizes");
+  assert(
+    model.chapters.fileTypes.every((row) => typeof row.filesWithKnownSize === "number"),
+    "types: filesWithKnownSize",
+  );
+  assert(
+    model.chapters.folders.every((row) => typeof row.directFilesWithKnownSize === "number"),
+    "folders: directFilesWithKnownSize",
+  );
 
   assert(model.chapters.folders.length === model.chapters.overview.directoryCount, "folders: full occupancy");
   assert(model.chapters.folders.every((row) => !row.relativePath.includes("X:/")), "folders: relative paths");
@@ -201,6 +209,10 @@ export function runInventoryReportModelCheck(): void {
   assert(single !== undefined, "single: einzeln present");
   assert(single.fileName === "allein.txt", "single: file name");
   assert(single.extension === ".txt", "single: extension");
+  assert(
+    !single.fileName.includes("/") && !single.fileName.includes("\\"),
+    "single: name not invented from path",
+  );
 
   assert(model.chapters.unreadable.warnings.length === 1, "unreadable: warning");
   assert(model.chapters.unreadable.warnings[0]?.code === "skipped", "unreadable: code");

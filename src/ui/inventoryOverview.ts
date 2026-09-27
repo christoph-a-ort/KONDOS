@@ -343,7 +343,9 @@ export function buildInventoryOverviewView(
     unconfirmedTitle: UNCONFIRMED_EMPTY_TITLE,
     unconfirmedHint: UNCONFIRMED_EMPTY_HINT,
     singleFileCount: analysis.singleDirectFileFolders.length,
-    singleFileFolders: analysis.singleDirectFileFolders.map((folder) => folderRow(folder, rootPath)),
+    singleFileFolders: analysis.singleDirectFileFolders.map((entry) =>
+      folderRow(entry.folder, rootPath),
+    ),
     singleFileEmpty:
       analysis.singleDirectFileFolders.length === 0 ? EMPTY_SINGLE_FILE_FOLDERS : null,
     repeatedFolders: nameGroups(analysis.repeatedFolderNames, rootPath),

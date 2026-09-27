@@ -1,4 +1,4 @@
-import { isDirectory, isFile, type DirectoryListing, type DirectoryNode, type FsNode, type ScanResult, type ScanWarning } from "../model";
+import { isDirectory, isFile, type DirectoryListing, type DirectoryNode, type FileNode, type FsNode, type ScanResult, type ScanWarning } from "../model";
 import { fileExtensionKey, NO_EXTENSION_KEY, NO_EXTENSION_LABEL } from "./displayFilter";
 import { normalizeFsPath } from "./warningNavigation";
 
@@ -15,6 +15,8 @@ export interface FileTypeStat {
   label: string;
   fileCount: number;
   knownSizeBytes: number;
+  /** How many files of this type contributed a known sizeBytes. */
+  filesWithKnownSize: number;
 }
 
 export interface FolderOccupancy {
@@ -27,6 +29,17 @@ export interface FolderOccupancy {
   directDirectoryCount: number;
   /** Sum of known sizes of files that are direct children only. */
   directKnownSizeBytes: number;
+  /** Count of direct file children that contributed a known sizeBytes. */
+  directFilesWithKnownSize: number;
+}
+
+/**
+ * Folder with exactly one direct file child.
+ * `file` is the concrete ScanResult file node captured during analysis (not reinvented later).
+ */
+export interface SingleDirectFileFolder {
+  folder: InventoryNodeRef;
+  file: InventoryNodeRef;
 }
 
 export interface RepeatedNameGroup {
@@ -49,7 +62,7 @@ export interface InventoryAnalysis {
   fileTypes: FileTypeStat[];
   folderOccupancy: FolderOccupancy[];
   emptyFolders: InventoryNodeRef[];
-  singleDirectFileFolders: InventoryNodeRef[];
+  singleDirectFileFolders: SingleDirectFileFolder[];
   foldersByDirectFileCount: FolderOccupancy[];
   repeatedFolderNames: RepeatedNameGroup[];
   repeatedFileNames: RepeatedNameGroup[];
@@ -70,6 +83,7 @@ interface TypeBucket {
   label: string;
   fileCount: number;
   knownSizeBytes: number;
+  filesWithKnownSize: number;
 }
 
 function compareText(left: string, right: string): number {
@@ -98,7 +112,7 @@ function warnedPathSet(warnings: readonly ScanWarning[]): Set<string> {
   return paths;
 }
 
-function nodeRef(node: DirectoryNode): InventoryNodeRef {
+function nodeRef(node: DirectoryNode | FileNode): InventoryNodeRef {
   return {
     id: node.id,
     name: node.name,
@@ -146,7 +160,7 @@ export function analyzeInventory(result: ScanResult): InventoryAnalysis {
   const fileNames = new Map<string, NameBucket>();
   const occupancy: FolderOccupancy[] = [];
   const emptyFolders: InventoryNodeRef[] = [];
-  const singleDirectFileFolders: InventoryNodeRef[] = [];
+  const singleDirectFileFolders: SingleDirectFileFolder[] = [];
   const unconfirmedEmptyLookingFolders: InventoryNodeRef[] = [];
 
   function visit(node: FsNode): void {
@@ -170,11 +184,13 @@ export function analyzeInventory(result: ScanResult): InventoryAnalysis {
           label,
           fileCount: 1,
           knownSizeBytes: size ?? 0,
+          filesWithKnownSize: size !== undefined ? 1 : 0,
         });
       } else {
         bucket.fileCount += 1;
         if (size !== undefined) {
           bucket.knownSizeBytes += size;
+          bucket.filesWithKnownSize += 1;
         }
       }
       addName(fileNames, node.name, node.path);
@@ -193,13 +209,19 @@ export function analyzeInventory(result: ScanResult): InventoryAnalysis {
     let directFileCount = 0;
     let directDirectoryCount = 0;
     let directKnownSizeBytes = 0;
+    let directFilesWithKnownSize = 0;
+    let soleDirectFile: InventoryNodeRef | null = null;
     for (const child of node.children) {
       if (isDirectory(child)) {
         directDirectoryCount += 1;
       } else {
         directFileCount += 1;
-        if (isFile(child) && child.sizeBytes !== undefined) {
-          directKnownSizeBytes += child.sizeBytes;
+        if (isFile(child)) {
+          soleDirectFile = nodeRef(child);
+          if (child.sizeBytes !== undefined) {
+            directKnownSizeBytes += child.sizeBytes;
+            directFilesWithKnownSize += 1;
+          }
         }
       }
     }
@@ -213,6 +235,7 @@ export function analyzeInventory(result: ScanResult): InventoryAnalysis {
       directFileCount,
       directDirectoryCount,
       directKnownSizeBytes,
+      directFilesWithKnownSize,
     });
 
     if (node.children.length === 0) {
@@ -224,8 +247,11 @@ export function analyzeInventory(result: ScanResult): InventoryAnalysis {
         emptyFolders.push(nodeRef(node));
       }
     }
-    if (directFileCount === 1) {
-      singleDirectFileFolders.push(nodeRef(node));
+    if (directFileCount === 1 && soleDirectFile !== null) {
+      singleDirectFileFolders.push({
+        folder: nodeRef(node),
+        file: soleDirectFile,
+      });
     }
 
     for (const child of node.children) {
@@ -239,7 +265,7 @@ export function analyzeInventory(result: ScanResult): InventoryAnalysis {
     compareCountThenText(left.fileCount, right.fileCount, left.extension, right.extension),
   );
   emptyFolders.sort((left, right) => compareText(left.path, right.path));
-  singleDirectFileFolders.sort((left, right) => compareText(left.path, right.path));
+  singleDirectFileFolders.sort((left, right) => compareText(left.folder.path, right.folder.path));
   unconfirmedEmptyLookingFolders.sort((left, right) => compareText(left.path, right.path));
   const foldersByDirectFileCount = occupancy.slice().sort((left, right) => {
     const byCount = compareCountThenText(left.directFileCount, right.directFileCount, left.path, right.path);

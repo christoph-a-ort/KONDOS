@@ -150,35 +150,55 @@ fn estimate_row_height(
     line_h * (max_lines as f64) + pad_mm + pad_mm
 }
 
-fn estimate_lines(text: &str, max_width: Mm, style: Style, font_cache: &FontCache) -> usize {
+/// Split cell text into genpdf-safe atoms: natural space words, plus character chunks
+/// for any single token wider than `max_width`.
+///
+/// Concatenating the returned atoms always reconstructs `text` exactly (no inserted
+/// hyphens/spaces). Multiple atoms are fed to `Paragraph` as separate strings so genpdf
+/// can wrap between them without treating the whole token as one unsplittable word.
+pub fn soft_break_cell_atoms(
+    text: &str,
+    max_width: Mm,
+    style: Style,
+    font_cache: &FontCache,
+) -> Vec<String> {
     if text.is_empty() {
+        return Vec::new();
+    }
+    let mut atoms = Vec::new();
+    for word in text.split_inclusive(' ') {
+        if style.str_width(font_cache, word) <= max_width {
+            atoms.push(word.to_string());
+            continue;
+        }
+        let mut probe = String::new();
+        for ch in word.chars() {
+            probe.push(ch);
+            if style.str_width(font_cache, &probe) > max_width && probe.chars().count() > 1 {
+                let overflow = probe.pop().expect("char just pushed");
+                atoms.push(std::mem::take(&mut probe));
+                probe.push(overflow);
+            }
+        }
+        if !probe.is_empty() {
+            // Keep an oversized single glyph rather than dropping content.
+            atoms.push(probe);
+        }
+    }
+    atoms
+}
+
+fn estimate_lines(text: &str, max_width: Mm, style: Style, font_cache: &FontCache) -> usize {
+    let atoms = soft_break_cell_atoms(text, max_width, style, font_cache);
+    if atoms.is_empty() {
         return 1;
     }
     let zero = Mm::from(0);
     let mut lines = 1usize;
     let mut x = zero;
-    for word in text.split_inclusive(' ') {
-        let w = style.str_width(font_cache, word);
-        if w > max_width {
-            // Long token: pack by growing a probe string until width overflows.
-            let mut probe = String::new();
-            let mut token_lines = 1usize;
-            for ch in word.chars() {
-                probe.push(ch);
-                if style.str_width(font_cache, &probe) > max_width && probe.chars().count() > 1 {
-                    token_lines += 1;
-                    probe.clear();
-                    probe.push(ch);
-                }
-            }
-            if x > zero {
-                lines += 1;
-            }
-            lines += token_lines.saturating_sub(1);
-            x = zero;
-            continue;
-        }
-        if x + w > max_width && x > zero {
+    for atom in &atoms {
+        let w = style.str_width(font_cache, atom);
+        if x > zero && x + w > max_width {
             lines += 1;
             x = w;
         } else {
@@ -186,6 +206,29 @@ fn estimate_lines(text: &str, max_width: Mm, style: Style, font_cache: &FontCach
         }
     }
     lines.max(1)
+}
+
+fn cell_paragraph(
+    text: &str,
+    max_width: Mm,
+    style: Style,
+    font_cache: &FontCache,
+    right_align: bool,
+) -> Paragraph {
+    let atoms = soft_break_cell_atoms(text, max_width, style, font_cache);
+    let mut para = Paragraph::default();
+    if atoms.is_empty() {
+        para.push("");
+    } else {
+        for atom in atoms {
+            para.push(atom);
+        }
+    }
+    if right_align {
+        para.aligned(Alignment::Right)
+    } else {
+        para
+    }
 }
 
 fn paint_row(
@@ -203,7 +246,7 @@ fn paint_row(
     let mut row_area = area.clone();
     row_area.set_height(row_h);
 
-    let cell_areas = row_area.split_horizontally(weights);
+        let cell_areas = row_area.split_horizontally(weights);
     let n = cells.len().min(cell_areas.len());
 
     for i in 0..n {
@@ -216,13 +259,13 @@ fn paint_row(
         // Content with padding.
         let mut content = cell_area.clone();
         content.add_margins(pad);
-        let mut para = Paragraph::new(cells[i].clone());
-        if right_align.get(i) == Some(&true) {
-            para = para.aligned(Alignment::Right);
-        }
+        // Soft-break against the width Paragraph will actually receive.
+        let inner = content.size().width.max(Mm::from(4.0f32));
+        let right = right_align.get(i) == Some(&true);
+        let mut para = cell_paragraph(&cells[i], inner, style, &context.font_cache, right);
         let rendered = para.render(context, content, style)?;
-        // If content still claims has_more despite our estimate, accept residual clip for R3
-        // rather than splitting the row across pages (we already reserved full row_h).
+        // Soft-break keeps atoms within width; has_more should stay rare. Still do not
+        // split a row across pages if residual clip remains.
         let _ = rendered;
     }
 
@@ -310,6 +353,41 @@ pub fn push_table(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use genpdf::fonts::{FontData, FontFamily};
+
+    fn test_font_cache() -> FontCache {
+        let family = FontFamily {
+            regular: FontData::new(
+                include_bytes!("../../assets/fonts/DejaVuSans-Regular.ttf").to_vec(),
+                None,
+            )
+            .expect("regular"),
+            bold: FontData::new(
+                include_bytes!("../../assets/fonts/DejaVuSans-Bold.ttf").to_vec(),
+                None,
+            )
+            .expect("bold"),
+            italic: FontData::new(
+                include_bytes!("../../assets/fonts/DejaVuSans-Italic.ttf").to_vec(),
+                None,
+            )
+            .expect("italic"),
+            bold_italic: FontData::new(
+                include_bytes!("../../assets/fonts/DejaVuSans-BoldItalic.ttf").to_vec(),
+                None,
+            )
+            .expect("bold italic"),
+        };
+        FontCache::new(family)
+    }
+
+    /// Approximate Kapitel-E Datei column inner width (A4, margins 14, weights 2/4/3/2).
+    fn datei_column_inner() -> Mm {
+        let content = Mm::from(210.0f32 - 28.0);
+        let col = content * (3.0 / 11.0);
+        let pad = Mm::from(TABLE_CELL_PADDING_MM);
+        col - pad - pad
+    }
 
     #[test]
     fn padding_is_positive() {
@@ -326,5 +404,73 @@ mod tests {
         }
         assert!(!R3_CHARSET_SAMPLE.contains('日'));
         assert!(!R3_CHARSET_SAMPLE.contains('Ε'));
+    }
+
+    #[test]
+    fn soft_break_keeps_short_filename_as_single_atom() {
+        let cache = test_font_cache();
+        let style = Style::new().with_font_size(8);
+        let inner = datei_column_inner();
+        // Synthetic KEEP: short enough to fit the Datei column in one atom.
+        let name = "keep_ok_short_token.pdf";
+        assert!(style.str_width(&cache, name) <= inner);
+        let atoms = soft_break_cell_atoms(name, inner, style, &cache);
+        assert_eq!(atoms, vec![name.to_string()]);
+        assert_eq!(atoms.concat(), name);
+    }
+
+    #[test]
+    fn soft_break_splits_former_drop_filename_without_losing_chars() {
+        let cache = test_font_cache();
+        let style = Style::new().with_font_size(8);
+        let inner = datei_column_inner();
+        // Synthetic DROP: one unbroken token wider than the Datei column.
+        let name = "overflow_token_needs_soft_break_XXXX.pdf";
+        assert!(
+            style.str_width(&cache, name) > inner,
+            "fixture must exceed Datei column"
+        );
+        let atoms = soft_break_cell_atoms(name, inner, style, &cache);
+        assert!(atoms.len() > 1, "must soft-break into multiple atoms");
+        assert_eq!(atoms.concat(), name);
+        for atom in &atoms {
+            assert!(
+                style.str_width(&cache, atom) <= inner
+                    || atom.chars().count() == 1,
+                "atom too wide for genpdf: {atom:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn soft_break_preserves_umlaut_hyphen_underscore_dot_and_spaces() {
+        let cache = test_font_cache();
+        let style = Style::new().with_font_size(8);
+        let inner = datei_column_inner();
+        let name = "äöü_Probe.Name_with-hyphen space.pdf";
+        let atoms = soft_break_cell_atoms(name, inner, style, &cache);
+        assert_eq!(atoms.concat(), name);
+        assert!(atoms.concat().contains('ä'));
+        assert!(atoms.concat().contains('_'));
+        assert!(atoms.concat().contains('-'));
+        assert!(atoms.concat().contains('.'));
+        assert!(atoms.concat().contains(' '));
+        // Natural space still preferred: at least one atom should end with space or be a space-bearing word.
+        assert!(
+            atoms.iter().any(|a| a.contains(' ')),
+            "space from original must remain inside some atom"
+        );
+    }
+
+    #[test]
+    fn soft_break_handles_very_long_token() {
+        let cache = test_font_cache();
+        let style = Style::new().with_font_size(8);
+        let inner = datei_column_inner();
+        let name = "overflow_token_with_umlaut_Bestätigung_and_many_more_chars_ABCDEF.pdf";
+        let atoms = soft_break_cell_atoms(name, inner, style, &cache);
+        assert!(atoms.len() > 1);
+        assert_eq!(atoms.concat(), name);
+        assert!(estimate_lines(name, inner, style, &cache) >= atoms.len().min(2));
     }
 }
