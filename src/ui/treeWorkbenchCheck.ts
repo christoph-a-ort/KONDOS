@@ -11,6 +11,7 @@ import { runInventoryRepeatedFileNameContextCheck } from "./inventoryRepeatedFil
 import { runInventoryRepeatedNameContextCheck } from "./inventoryRepeatedNameContextCheck";
 import { runInventoryStructureContextCheck } from "./inventoryStructureContextCheck";
 import { runStructureInsightModelCheck } from "./structureInsightModelCheck";
+import { runStructureComparisonContextCheck } from "./structureComparisonContextCheck";
 import { runP1cCheck } from "./p1cCheck";
 import { runP1dCheck } from "./p1dCheck";
 import { runP1e1Check } from "./contentSearchCheck";
@@ -313,6 +314,7 @@ export async function runTreeWorkbenchCheck(): Promise<void> {
   runInventoryReportModelCheck();
   runInventoryReportWorkflowCheck();
   runStructureInsightModelCheck();
+  runStructureComparisonContextCheck();
 }
 
 function runTreeSearchCheck(nested: DirectoryNode): void {
