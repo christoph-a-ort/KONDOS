@@ -14,6 +14,7 @@ import { runStructureInsightModelCheck } from "./structureInsightModelCheck";
 import { runStructureComparisonContextCheck } from "./structureComparisonContextCheck";
 import { runStructureTimeInsightCheck } from "./structureTimeInsightCheck";
 import { runStructureFolderPatternInsightCheck } from "./structureFolderPatternInsightCheck";
+import { runStructureFileNameInsightCheck } from "./structureFileNameInsightCheck";
 import { runP1cCheck } from "./p1cCheck";
 import { runP1dCheck } from "./p1dCheck";
 import { runP1e1Check } from "./contentSearchCheck";
@@ -319,6 +320,7 @@ export async function runTreeWorkbenchCheck(): Promise<void> {
   runStructureComparisonContextCheck();
   runStructureTimeInsightCheck();
   runStructureFolderPatternInsightCheck();
+  runStructureFileNameInsightCheck();
 }
 
 function runTreeSearchCheck(nested: DirectoryNode): void {
