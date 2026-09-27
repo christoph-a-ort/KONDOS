@@ -83,7 +83,7 @@ export interface StructureInsightObservation {
   displayHint?: string;
 }
 
-export type StructureInsightConfidenceLevel = "low" | "medium" | "high";
+export type StructureInsightConfidenceLevel = "unassessed" | "low" | "medium" | "high";
 
 /** Structured factor explaining a confidence level — not a bare percentage. */
 export interface StructureInsightConfidenceFactor {
@@ -106,6 +106,10 @@ export type StructureInsightRuleStatus =
 /**
  * Interprets one or more observations. Competing candidates for the same scope are allowed.
  * Status values are stable internals; German UI labels come later.
+ *
+ * confidence.level "unassessed" means P2-I has not evaluated this candidate yet.
+ * "low" | "medium" | "high" are reserved for assessed confidence (P2-I).
+ * candidateFeatures hold descriptive formation facts only — not confidence scoring.
  */
 export interface StructureInsightRuleCandidate {
   id: string;
@@ -123,6 +127,8 @@ export interface StructureInsightRuleCandidate {
   };
   confidence: StructureInsightConfidence;
   status: StructureInsightRuleStatus;
+  /** Optional descriptive candidate-formation facts (not confidence, not SOLL). */
+  candidateFeatures?: StructureInsightAttrMap;
 }
 
 export type StructureInsightSuggestionStatus =

@@ -34,6 +34,12 @@ assert(modelSrc.includes("scan-local") || modelSrc.includes("within one scan"), 
 assert(modelSrc.includes("FORBIDDEN_SUGGESTION_ACTION_TOKENS"), "model: forbids FS verbs");
 assert(!/confidence\s*=\s*0\.\d+/.test(modelSrc), "model: no pseudo percentages");
 
+assert(modelSrc.includes('"unassessed"'), "model: unassessed level");
+assert(modelSrc.includes("candidateFeatures"), "model: candidateFeatures");
+assert(modelSrc.includes("| \"low\"") || modelSrc.includes('"low"'), "model: low remains");
+assert(modelSrc.includes('"medium"'), "model: medium remains");
+assert(modelSrc.includes('"high"'), "model: high remains");
+
 assert(checkSrc.includes("runStructureInsightModelCheck"), "check exported");
 assert(checkSrc.includes("matchedCount: 7") && checkSrc.includes("totalCount: 8"), "check: Fall A 7/8");
 assert(checkSrc.includes("matchedCount: 52") && checkSrc.includes("totalCount: 64"), "check: Fall B");
@@ -43,6 +49,9 @@ assert(checkSrc.includes("suggestions: []"), "check: empty suggestions allowed")
 assert(checkSrc.includes("confirmedExceptions"), "check: Fall F");
 assert(checkSrc.includes("contentHash"), "check: Fall G");
 assert(checkSrc.includes("structureInsightJsonRoundTrip"), "check: Fall H");
+assert(checkSrc.includes("unassessed"), "check: Fall I unassessed");
+assert(checkSrc.includes("candidateFeatures"), "check: Fall I features");
+assert(checkSrc.includes("low != unassessed") || checkSrc.includes("unassessed != low"), "check: Fall I/J distinct");
 assert(!checkSrc.includes("Off.Dokumente"), "check: no private real path");
 assert(!checkSrc.includes("BahnCard"), "check: no private real names");
 
@@ -180,6 +189,24 @@ function evidence(element, role, attributes) {
   assert(round.observations[0].matchedCount === 7, "H: counts");
   assert(round.ruleCandidates[0].confidence.level === "high", "H: confidence");
   assert(round.confirmedExceptions[0].confirmed === true, "H: exception");
+}
+
+// FALL I – unassessed
+{
+  const sample = {
+    ruleCandidates: [
+      {
+        confidence: { level: "unassessed", factors: [] },
+        candidateFeatures: { evaluableCount: 6, rivalGroupCount: 1 },
+        status: "detected",
+      },
+    ],
+  };
+  const round = JSON.parse(JSON.stringify(sample));
+  assert(round.ruleCandidates[0].confidence.level === "unassessed", "I: unassessed");
+  assert(round.ruleCandidates[0].confidence.factors.length === 0, "I: empty factors");
+  assert(round.ruleCandidates[0].candidateFeatures.evaluableCount === 6, "I: features");
+  assert(round.ruleCandidates[0].confidence.level !== "low", "I: != low");
 }
 
 console.log("structure insight p2a checks passed");

@@ -427,4 +427,46 @@ export function runStructureInsightModelCheck(): void {
       JSON.stringify(f.observations[0].patternFeatures),
     "H: features preserved",
   );
+
+  // FALL I – unassessed confidence (P2-H / pre-P2-I)
+  {
+    const unassessed: StructureInsightRuleCandidate = {
+      id: "rule-i-unassessed",
+      category: "folderStructure",
+      principle: "parallel-local-file-type-bucket-structure",
+      scope: { kind: "comparisonSet", nodeIds: ["n1", "n2"] },
+      observationIds: ["obs-i"],
+      supportingEvidence: [],
+      counterEvidence: [],
+      support: { matchedCount: 5, totalCount: 6 },
+      confidence: { level: "unassessed", factors: [] },
+      status: "detected",
+      candidateFeatures: {
+        evaluableCount: 6,
+        rivalGroupCount: 1,
+        maxRivalMatchedCount: 1,
+        listingCompleteness: "allEvaluableRead",
+        sourceObservationType: "parallel-file-type-bucket-group",
+      },
+    };
+    const payload: StructureInsightResult = {
+      schemaVersion: STRUCTURE_INSIGHT_SCHEMA_VERSION,
+      observations: [],
+      ruleCandidates: [unassessed],
+      suggestions: [],
+      confirmedExceptions: [],
+    };
+    const round = structureInsightJsonRoundTrip(payload);
+    assert(round.ruleCandidates[0].confidence.level === "unassessed", "I: unassessed roundtrip");
+    assert(round.ruleCandidates[0].confidence.factors.length === 0, "I: empty factors");
+    assert(round.ruleCandidates[0].candidateFeatures?.evaluableCount === 6, "I: features roundtrip");
+    assert(unassessed.confidence.level !== "low", "I: unassessed != low");
+    assert(String(unassessed.confidence.level) !== "low", "I: unassessed string != low");
+  }
+
+  // FALL J – existing low still valid and distinct from unassessed
+  {
+    assert(e.ruleCandidates[0].confidence.level === "low", "J: existing low case");
+    assert(String(e.ruleCandidates[0].confidence.level) !== "unassessed", "J: low != unassessed");
+  }
 }
