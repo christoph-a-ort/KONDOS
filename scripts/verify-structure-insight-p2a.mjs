@@ -58,7 +58,9 @@ assert(!checkSrc.includes("Off.Dokumente"), "check: no private real path");
 assert(!checkSrc.includes("BahnCard"), "check: no private real names");
 
 assert(workbenchSrc.includes("runStructureInsightModelCheck"), "workbench wires P2-A check");
-assert(!appSrc.includes("structureInsight"), "App unchanged / no P2 UI");
+// P2-J-B may orchestrate analysis in App; still no P2-A model/UI mounting.
+assert(!appSrc.includes("structureInsightModel"), "App: no structureInsightModel import");
+assert(!appSrc.includes("StructureInsightObservation"), "App: no observation UI types");
 assert(!treeViewSrc.includes("structureInsight"), "TreeView unchanged / no P2 UI");
 assert(!treeViewSrc.includes("StructureInsight"), "TreeView no insight types");
 

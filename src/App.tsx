@@ -33,6 +33,12 @@ import { ProgressPanel } from "./ui/ProgressPanel";
 import { withScanRootPath } from "./ui/displayFilter";
 import { TreeView } from "./ui/TreeView";
 import {
+  scheduleStructureInsightAnalysis,
+  type InsightAnalysisError,
+  type InsightAnalysisPhase,
+} from "./ui/structureInsightAnalysis";
+import type { StructureInsightViewModel } from "./ui/structureInsightViewModel";
+import {
   txtExportColumns,
   type ColumnVisibility,
   type ColumnWidths,
@@ -74,6 +80,10 @@ function App() {
   const [progress, setProgress] = useState<ScanProgress | null>(null);
   const [result, setResult] = useState<ScanResult | null>(null);
   const [resultScanId, setResultScanId] = useState<number | null>(null);
+  const [insightAnalysisPhase, setInsightAnalysisPhase] = useState<InsightAnalysisPhase>("idle");
+  const [insightViewModel, setInsightViewModel] = useState<StructureInsightViewModel | null>(null);
+  const [insightAnalysisError, setInsightAnalysisError] = useState<InsightAnalysisError | null>(null);
+  const [insightAnalysisScanId, setInsightAnalysisScanId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [exportNoticeKind, setExportNoticeKind] = useState<"progress" | "saved" | "failed" | null>(
@@ -99,6 +109,7 @@ function App() {
   const extensionInputRef = useRef(extensionInput);
   const resultRef = useRef(result);
   const resultScanIdRef = useRef(resultScanId);
+  const insightAnalysisGenerationRef = useRef(0);
   const handleDroppedPathsRef = useRef<(paths: string[]) => void>(() => {});
   const jsonStoreRef = useRef<WorkbenchPrefsJsonStore | null>(createJsonPrefsStore());
   const skipPersistAfterHydrateRef = useRef(true);
@@ -110,6 +121,57 @@ function App() {
   extensionInputRef.current = extensionInput;
   resultRef.current = result;
   resultScanIdRef.current = resultScanId;
+
+  function clearInsightAnalysisState(): void {
+    insightAnalysisGenerationRef.current += 1;
+    setInsightAnalysisPhase("idle");
+    setInsightViewModel(null);
+    setInsightAnalysisError(null);
+    setInsightAnalysisScanId(null);
+  }
+
+  function beginInsightAnalysisForScan(scanResult: ScanResult, scanId: number): void {
+    const generation = insightAnalysisGenerationRef.current;
+    setInsightAnalysisPhase("running");
+    setInsightAnalysisError(null);
+    setInsightViewModel(null);
+    setInsightAnalysisScanId(scanId);
+    scheduleStructureInsightAnalysis({
+      scanResult,
+      scanId,
+      generation,
+      getCurrentScanId: () => resultScanIdRef.current,
+      getCurrentGeneration: () => insightAnalysisGenerationRef.current,
+      onReady: (viewModel) => {
+        setInsightViewModel(viewModel);
+        setInsightAnalysisError(null);
+        setInsightAnalysisPhase("ready");
+      },
+      onFailed: (analysisError) => {
+        setInsightViewModel(null);
+        setInsightAnalysisError(analysisError);
+        setInsightAnalysisPhase("failed");
+      },
+    });
+  }
+
+  /** Recovery entry for later J-H UI — reuses current ScanResult, never starts a new scan. */
+  function retryInsightAnalysis(): void {
+    const scanResult = resultRef.current;
+    const scanId = resultScanIdRef.current;
+    if (scanResult === null || scanId === null || scanningRef.current) {
+      return;
+    }
+    insightAnalysisGenerationRef.current += 1;
+    beginInsightAnalysisForScan(scanResult, scanId);
+  }
+
+  // Held for J-C/J-H; no visible UI in J-B.
+  void insightAnalysisPhase;
+  void insightViewModel;
+  void insightAnalysisError;
+  void insightAnalysisScanId;
+  void retryInsightAnalysis;
 
   useEffect(() => {
     let disposed = false;
@@ -273,6 +335,7 @@ function App() {
     clearExportNotice();
     const previousResult = resultRef.current;
     const previousScanId = resultScanIdRef.current;
+    clearInsightAnalysisState();
     setResult(null);
     setResultScanId(null);
     setScanning(true);
@@ -303,6 +366,8 @@ function App() {
         currentPath: rootPath,
         status: "completed",
       });
+      // Structure is usable immediately; insight analysis starts after this turn.
+      beginInsightAnalysisForScan(next, scanId);
     } catch (cause) {
       if (activeScanIdRef.current !== scanId) {
         return;

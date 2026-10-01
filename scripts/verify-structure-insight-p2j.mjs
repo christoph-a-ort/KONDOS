@@ -57,7 +57,8 @@ assert(checkSrc.includes("immutable"), "check: immutability");
 assert(!checkSrc.includes("Off.Dokumente"), "check: no private path");
 
 assert(workbenchSrc.includes("runStructureInsightViewModelCheck"), "workbench wires P2-J-A");
-assert(!appSrc.includes("structureInsightViewModel"), "App unchanged");
+// P2-J-B may hold StructureInsightViewModel state in App via analysis orchestration.
+assert(!appSrc.includes("buildStructureInsightViewModel"), "App: no direct J-A builder call");
 assert(!treeViewSrc.includes("structureInsightViewModel"), "TreeView unchanged");
 assert(!cssSrc.includes("structureInsightViewModel"), "CSS unchanged");
 assert(!ruleSrc.includes("structureInsightViewModel"), "P2-H unchanged");
