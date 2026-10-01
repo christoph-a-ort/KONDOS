@@ -90,6 +90,11 @@ export interface StructureInsightConfidenceFactor {
   id: string;
   value?: number;
   detail?: string;
+  /**
+   * Optional polarity for assessed factors (P2-I).
+   * Absent on legacy samples; P2-I always sets it explicitly.
+   */
+  kind?: "supporting" | "limiting";
 }
 
 export interface StructureInsightConfidence {

@@ -52,6 +52,8 @@ assert(checkSrc.includes("structureInsightJsonRoundTrip"), "check: Fall H");
 assert(checkSrc.includes("unassessed"), "check: Fall I unassessed");
 assert(checkSrc.includes("candidateFeatures"), "check: Fall I features");
 assert(checkSrc.includes("low != unassessed") || checkSrc.includes("unassessed != low"), "check: Fall I/J distinct");
+assert(modelSrc.includes('kind?: "supporting" | "limiting"'), "model: optional factor kind");
+assert(checkSrc.includes('kind: "supporting"') || checkSrc.includes('kind: "limiting"'), "check: Fall K kind");
 assert(!checkSrc.includes("Off.Dokumente"), "check: no private real path");
 assert(!checkSrc.includes("BahnCard"), "check: no private real names");
 

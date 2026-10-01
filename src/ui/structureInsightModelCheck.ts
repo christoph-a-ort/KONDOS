@@ -469,4 +469,38 @@ export function runStructureInsightModelCheck(): void {
     assert(e.ruleCandidates[0].confidence.level === "low", "J: existing low case");
     assert(String(e.ruleCandidates[0].confidence.level) !== "unassessed", "J: low != unassessed");
   }
+
+  // FALL K – optional factor.kind roundtrip (P2-I additive; legacy factors without kind remain valid)
+  {
+    const withKind: StructureInsightRuleCandidate = {
+      id: "rule-k-kind",
+      category: "folderStructure",
+      principle: "test-principle",
+      scope: { kind: "scanRoot" },
+      observationIds: ["obs-k"],
+      supportingEvidence: [],
+      counterEvidence: [],
+      support: { matchedCount: 7, totalCount: 7 },
+      confidence: {
+        level: "high",
+        factors: [
+          { id: "evidence-breadth", value: 7, kind: "supporting" },
+          { id: "support-unanimity", value: 1, kind: "supporting" },
+          { id: "counter-evidence-present", value: 1, kind: "limiting" },
+        ],
+      },
+      status: "detected",
+    };
+    const payload: StructureInsightResult = {
+      schemaVersion: STRUCTURE_INSIGHT_SCHEMA_VERSION,
+      observations: [],
+      ruleCandidates: [withKind, e.ruleCandidates[0]],
+      suggestions: [],
+      confirmedExceptions: [],
+    };
+    const round = structureInsightJsonRoundTrip(payload);
+    assert(round.ruleCandidates[0].confidence.factors[0].kind === "supporting", "K: kind supporting");
+    assert(round.ruleCandidates[0].confidence.factors[2].kind === "limiting", "K: kind limiting");
+    assert(round.ruleCandidates[1].confidence.factors[0].kind === undefined, "K: legacy kind absent");
+  }
 }
