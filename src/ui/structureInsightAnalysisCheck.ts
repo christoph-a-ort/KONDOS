@@ -10,6 +10,7 @@ import {
   shouldAcceptInsightAnalysisResult,
   toInsightAnalysisError,
   type InsightAnalysisError,
+  type InsightAnalysisPhase,
   type StructureInsightAnalysisDependencies,
 } from "./structureInsightAnalysis";
 import { buildStructureConfidenceInsight } from "./structureConfidenceAssessment";
@@ -300,6 +301,127 @@ export function runStructureInsightAnalysisCheck(): void {
 
   // 10 New scan generation model
   assert(shouldAcceptInsightAnalysisResult(1, 1, 1, 2) === false, "new scan bumps generation");
+
+  // 11 Race: Ref still null (pre-render) while expected scanId is N — WITHOUT sync discard
+  {
+    let mirroredScanIdRef: number | null = null;
+    let analyzeCalls = 0;
+    readyCount = 0;
+    failedCount = 0;
+    const tasks: Array<() => void> = [];
+    scheduleStructureInsightAnalysis({
+      scanResult: tiny,
+      scanId: 70,
+      generation: 70,
+      getCurrentScanId: () => mirroredScanIdRef,
+      getCurrentGeneration: () => 70,
+      onReady: () => {
+        readyCount += 1;
+      },
+      onFailed: () => {
+        failedCount += 1;
+      },
+      schedule: (task) => {
+        tasks.push(task);
+      },
+      analyze: () => {
+        analyzeCalls += 1;
+        return zeroVm;
+      },
+    });
+    // Simulate App bug window: setState(scanId) queued, Ref not yet updated, task runs now.
+    assert(mirroredScanIdRef === null, "race start: ref still null");
+    tasks[0]!();
+    assert(analyzeCalls === 0, "race without sync: analyze not run");
+    assert(readyCount === 0 && failedCount === 0, "race without sync: silent discard");
+  }
+
+  // 12 Race fix contract: sync Ref to N before schedule → ready without React render
+  {
+    let mirroredScanIdRef: number | null = null;
+    let analyzeCalls = 0;
+    const phaseBox: { value: InsightAnalysisPhase } = { value: "idle" };
+    readyCount = 0;
+    failedCount = 0;
+    const tasks: Array<() => void> = [];
+    const newScanId = 71;
+    const generation = 71;
+
+    // App contract: assignResultScanId(N) before beginInsightAnalysisForScan
+    mirroredScanIdRef = newScanId;
+    phaseBox.value = "running";
+    scheduleStructureInsightAnalysis({
+      scanResult: tiny,
+      scanId: newScanId,
+      generation,
+      getCurrentScanId: () => mirroredScanIdRef,
+      getCurrentGeneration: () => generation,
+      onReady: () => {
+        readyCount += 1;
+        phaseBox.value = "ready";
+      },
+      onFailed: () => {
+        failedCount += 1;
+        phaseBox.value = "failed";
+      },
+      schedule: (task) => {
+        tasks.push(task);
+      },
+      analyze: () => {
+        analyzeCalls += 1;
+        return zeroVm;
+      },
+    });
+    assert(mirroredScanIdRef === newScanId, "fix: ref already N before task");
+    tasks[0]!();
+    assert(analyzeCalls === 1, "fix: analyze runs without React render");
+    assert(readyCount === 1, "fix: onReady reached");
+    assert(failedCount === 0, "fix: no failed");
+    assert(String(phaseBox.value) === "ready", "fix: lifecycle reaches ready");
+  }
+
+  // 13 Reset: Ref invalidated to null → previous scanId no longer accepted
+  {
+    let mirroredScanIdRef: number | null = 5;
+    readyCount = 0;
+    failedCount = 0;
+    const tasks: Array<() => void> = [];
+    scheduleStructureInsightAnalysis({
+      scanResult: tiny,
+      scanId: 5,
+      generation: 80,
+      getCurrentScanId: () => mirroredScanIdRef,
+      getCurrentGeneration: () => 80,
+      onReady: () => {
+        readyCount += 1;
+      },
+      onFailed: () => {
+        failedCount += 1;
+      },
+      schedule: (task) => {
+        tasks.push(task);
+      },
+      analyze: () => zeroVm,
+    });
+    // New scan start: invalidate Ref synchronously (assignResultScanId(null))
+    mirroredScanIdRef = null;
+    tasks[0]!();
+    assert(readyCount === 0 && failedCount === 0, "reset invalidates prior scheduled run");
+  }
+
+  // 14 Restore: Ref restored to previousScanId; no auto analysis started here
+  {
+    let mirroredScanIdRef: number | null = null;
+    const previousScanId = 3;
+    // Error path restore contract (assignResultScanId(previousScanId))
+    mirroredScanIdRef = previousScanId;
+    assert(mirroredScanIdRef === previousScanId, "restore: ref matches previousScanId");
+    assert(
+      shouldAcceptInsightAnalysisResult(previousScanId, mirroredScanIdRef, 1, 1) === true,
+      "restore: guard accepts restored id",
+    );
+    // No scheduleStructureInsightAnalysis call on restore — contract preserved
+  }
 
   // Public builders present
   assert(typeof buildStructureRuleCandidateInsight === "function", "H export");

@@ -57,11 +57,25 @@ assert(appSrc.includes("clearInsightAnalysisState"), "App clear on new scan");
 assert(appSrc.includes("retryInsightAnalysis"), "App retry foundation");
 assert(appSrc.includes("insightAnalysisPhase"), "App phase state");
 assert(appSrc.includes("insightViewModel"), "App view model state");
-assert(!appSrc.includes("Erkenntnisse"), "App: no visible Erkenntnisse label");
-assert(!appSrc.includes("activeView"), "App: no view toggle yet");
+assert(appSrc.includes("assignResultScanId"), "App: sync resultScanIdRef helper");
+assert(appSrc.includes("resultScanIdRef.current = nextScanId"), "App: Ref sync before setState");
+assert(
+  /assignResultScanId\(scanId\);[\s\S]*?beginInsightAnalysisForScan\(next, scanId\)/.test(appSrc),
+  "App: Ref sync before beginInsightAnalysisForScan",
+);
+assert(appSrc.includes("assignResultScanId(null)"), "App: Ref sync on clear");
+assert(appSrc.includes("assignResultScanId(previousScanId)"), "App: Ref sync on restore");
+assert(checkSrc.includes("race without sync"), "check: race discard case");
+assert(checkSrc.includes("fix: analyze runs without React render"), "check: race fix case");
+assert(checkSrc.includes("reset invalidates prior scheduled run"), "check: reset case");
+assert(checkSrc.includes("restore: ref matches previousScanId"), "check: restore case");
+// J-C may add visible Erkenntnisse navigation; J-B still must not own card/filter UI.
+assert(appSrc.includes("StructureInsightsView") || appSrc.includes("Erkenntnisse"), "App: J-C ground view may be visible");
+assert(!appSrc.includes("activeView"), "App: use mainView (not activeView)");
+assert(!appSrc.includes("insightAnalysisScanIdRef"), "App: no second scan-id Ref layer");
 assert(!treeViewSrc.includes("structureInsightAnalysis"), "TreeView unchanged by analysis");
 assert(!treeViewSrc.includes("insightViewModel"), "TreeView no insight prop");
-assert(!cssSrc.includes("structureInsightAnalysis"), "CSS unchanged");
+assert(!cssSrc.includes("structureInsightAnalysis"), "CSS: no analysis module name");
 assert(!ruleSrc.includes("structureInsightAnalysis"), "P2-H unchanged");
 assert(!confSrc.includes("structureInsightAnalysis"), "P2-I unchanged");
 assert(!vmSrc.includes("structureInsightAnalysis"), "P2-J-A unchanged");

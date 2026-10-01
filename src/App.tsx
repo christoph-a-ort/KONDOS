@@ -33,6 +33,13 @@ import { ProgressPanel } from "./ui/ProgressPanel";
 import { withScanRootPath } from "./ui/displayFilter";
 import { TreeView } from "./ui/TreeView";
 import {
+  StructureInsightsView,
+  canSelectInsightsView,
+  insightNavCountLabel,
+  mainViewAfterScanStart,
+  type MainView,
+} from "./ui/StructureInsightsView";
+import {
   scheduleStructureInsightAnalysis,
   type InsightAnalysisError,
   type InsightAnalysisPhase,
@@ -84,6 +91,7 @@ function App() {
   const [insightViewModel, setInsightViewModel] = useState<StructureInsightViewModel | null>(null);
   const [insightAnalysisError, setInsightAnalysisError] = useState<InsightAnalysisError | null>(null);
   const [insightAnalysisScanId, setInsightAnalysisScanId] = useState<number | null>(null);
+  const [mainView, setMainView] = useState<MainView>("structure");
   const [error, setError] = useState<string | null>(null);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [exportNoticeKind, setExportNoticeKind] = useState<"progress" | "saved" | "failed" | null>(
@@ -122,12 +130,19 @@ function App() {
   resultRef.current = result;
   resultScanIdRef.current = resultScanId;
 
+  /** Keep resultScanId State and resultScanIdRef in sync before any scheduled insight work. */
+  function assignResultScanId(nextScanId: number | null): void {
+    resultScanIdRef.current = nextScanId;
+    setResultScanId(nextScanId);
+  }
+
   function clearInsightAnalysisState(): void {
     insightAnalysisGenerationRef.current += 1;
     setInsightAnalysisPhase("idle");
     setInsightViewModel(null);
     setInsightAnalysisError(null);
     setInsightAnalysisScanId(null);
+    setMainView(mainViewAfterScanStart());
   }
 
   function beginInsightAnalysisForScan(scanResult: ScanResult, scanId: number): void {
@@ -166,12 +181,13 @@ function App() {
     beginInsightAnalysisForScan(scanResult, scanId);
   }
 
-  // Held for J-C/J-H; no visible UI in J-B.
-  void insightAnalysisPhase;
-  void insightViewModel;
+  // Retry UI arrives in J-H; keep the foundation callable without wiring a button.
+  void retryInsightAnalysis;
   void insightAnalysisError;
   void insightAnalysisScanId;
-  void retryInsightAnalysis;
+
+  const insightsSelectable = canSelectInsightsView(result !== null && resultScanId !== null);
+  const insightsNavCount = insightNavCountLabel(insightAnalysisPhase, insightViewModel);
 
   useEffect(() => {
     let disposed = false;
@@ -337,7 +353,7 @@ function App() {
     const previousScanId = resultScanIdRef.current;
     clearInsightAnalysisState();
     setResult(null);
-    setResultScanId(null);
+    assignResultScanId(null);
     setScanning(true);
     setProgress({
       scanId,
@@ -358,7 +374,7 @@ function App() {
         return;
       }
       setResult(next);
-      setResultScanId(scanId);
+      assignResultScanId(scanId);
       setAppliedExtensions(scanConfig.extensions);
       setProgress({
         scanId,
@@ -374,10 +390,10 @@ function App() {
       }
       if (shouldClearScanResultOnError(cause)) {
         setResult(null);
-        setResultScanId(null);
+        assignResultScanId(null);
       } else {
         setResult(previousResult);
-        setResultScanId(previousScanId);
+        assignResultScanId(previousScanId);
       }
       if (isCancelledError(cause)) {
         setError(null);
@@ -603,23 +619,87 @@ function App() {
             }}
           />
         </aside>
-        <TreeView
-          result={result}
-          resultScanId={resultScanId}
-          scanning={scanning}
-          exportBusy={exportBusy}
-          appliedExtensions={appliedExtensions}
-          sort={treeSort}
-          visibility={columnVisibility}
-          widths={columnWidths}
-          preferStoredWidths={preferStoredWidths}
-          onSortChange={setTreeSort}
-          onVisibilityChange={setColumnVisibility}
-          onWidthsChange={setColumnWidths}
-          onScanFromHere={handleUseAsScanRoot}
-          onPreparingContentChange={handlePreparingContentChange}
-          onExportBusyChange={setExportBusy}
-        />
+        <div className="main-workbench">
+          <div
+            className="insight-view-switcher"
+            role="group"
+            aria-label="Hauptansicht"
+          >
+            <button
+              type="button"
+              className="insight-view-tab"
+              aria-pressed={mainView === "structure" || !insightsSelectable}
+              onClick={() => {
+                setMainView("structure");
+              }}
+            >
+              Struktur
+            </button>
+            <button
+              type="button"
+              className="insight-view-tab"
+              aria-pressed={insightsSelectable && mainView === "insights"}
+              disabled={!insightsSelectable}
+              onClick={() => {
+                if (insightsSelectable) {
+                  setMainView("insights");
+                }
+              }}
+            >
+              Erkenntnisse
+              {insightsNavCount !== null ? (
+                <span className="insight-view-tab-count" aria-label={`${insightsNavCount} Erkenntnisse`}>
+                  {insightsNavCount}
+                </span>
+              ) : null}
+            </button>
+          </div>
+          <div className="main-view-panels">
+            <div
+              className={
+                insightsSelectable && mainView === "insights"
+                  ? "main-view-panel main-view-panel-hidden"
+                  : "main-view-panel"
+              }
+              aria-hidden={insightsSelectable && mainView === "insights"}
+              inert={insightsSelectable && mainView === "insights" ? true : undefined}
+            >
+              <TreeView
+                result={result}
+                resultScanId={resultScanId}
+                scanning={scanning}
+                exportBusy={exportBusy}
+                appliedExtensions={appliedExtensions}
+                sort={treeSort}
+                visibility={columnVisibility}
+                widths={columnWidths}
+                preferStoredWidths={preferStoredWidths}
+                onSortChange={setTreeSort}
+                onVisibilityChange={setColumnVisibility}
+                onWidthsChange={setColumnWidths}
+                onScanFromHere={handleUseAsScanRoot}
+                onPreparingContentChange={handlePreparingContentChange}
+                onExportBusyChange={setExportBusy}
+              />
+            </div>
+            {insightsSelectable ? (
+              <div
+                className={
+                  mainView === "insights"
+                    ? "main-view-panel"
+                    : "main-view-panel main-view-panel-hidden"
+                }
+                aria-hidden={mainView !== "insights"}
+                inert={mainView !== "insights" ? true : undefined}
+              >
+                <StructureInsightsView
+                  phase={insightAnalysisPhase}
+                  viewModel={insightViewModel}
+                />
+              </div>
+            ) : null}
+          </div>
+        </div>
       </div>
     </div>
   );
