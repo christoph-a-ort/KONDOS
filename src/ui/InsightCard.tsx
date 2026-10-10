@@ -1,10 +1,11 @@
 /**
  * P2-J-D – Compact insight card (closed by default).
  *
- * Detail expand shows only structureSummary.plainDescription.
- * No element lists, examples, or explanation bullets (those are J-E).
+ * Expanded details (explanation, examples, element lists) are rendered by
+ * InsightCardDetails (P2-J-E). No tree navigation / filter / search / retry.
  */
 
+import { InsightCardDetails } from "./InsightCardDetails";
 import {
   INSIGHT_DETAILS_HIDE_LABEL,
   INSIGHT_DETAILS_SHOW_LABEL,
@@ -74,7 +75,6 @@ export function InsightCard({ card, expanded, onToggleDetails }: InsightCardProp
   const detailsId = `insight-card-details-${card.id}`;
   const categoryClass = insightCategoryClassName(card.category);
   const evidenceClass = insightEvidenceClassName(card.evidenceLevel);
-  const plainDescription = card.structureSummary.plainDescription.trim();
 
   return (
     <article className={`insight-card ${categoryClass}`} data-insight-id={card.id}>
@@ -113,11 +113,7 @@ export function InsightCard({ card, expanded, onToggleDetails }: InsightCardProp
       </div>
       {expanded ? (
         <div id={detailsId} className="insight-card-details">
-          {plainDescription.length > 0 ? (
-            <p className="insight-card-details-summary">{plainDescription}</p>
-          ) : (
-            <p className="insight-card-details-summary muted">Keine weitere Kurzbeschreibung vorhanden.</p>
-          )}
+          <InsightCardDetails card={card} />
         </div>
       ) : null}
     </article>

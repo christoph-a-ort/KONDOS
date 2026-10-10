@@ -56,13 +56,14 @@ assert(cardSrc.includes("INSIGHT_INCOMPLETE_CARD_NOTE"), "card: incomplete");
 assert(cardSrc.includes("aria-expanded"), "card: aria-expanded");
 assert(cardSrc.includes('type="button"'), "card: button");
 assert(cardSrc.includes("aria-controls"), "card: aria-controls");
-assert(cardSrc.includes("structureSummary.plainDescription"), "card: plainDescription only");
-assert(!cardSrc.includes("explanationBullets"), "card: no bullets");
-assert(!cardSrc.includes("primaryElements"), "card: no primary");
-assert(!cardSrc.includes("secondaryRecurringGroups"), "card: no secondary");
-assert(!cardSrc.includes("otherElements"), "card: no other");
-assert(!cardSrc.includes("structureSummary.examples"), "card: no examples field");
-assert(!cardSrc.includes(".examples"), "card: no examples access");
+// J-D compact shell; J-E details live in InsightCardDetails.
+assert(cardSrc.includes("InsightCardDetails") || cardSrc.includes("insight-card-details"), "card: details region");
+assert(cardSrc.includes("Details anzeigen") || cardSrc.includes("INSIGHT_DETAILS_SHOW_LABEL"), "card: details toggle");
+assert(!cardSrc.includes("explanationBullets"), "card shell: no bullets");
+assert(!cardSrc.includes("primaryElements"), "card shell: no primary");
+assert(!cardSrc.includes("secondaryRecurringGroups"), "card shell: no secondary");
+assert(!cardSrc.includes("otherElements"), "card shell: no other");
+assert(!cardSrc.includes("structureSummary.examples"), "card shell: no examples field");
 assert(!cardSrc.toLowerCase().includes("confidenceScore"), "card: no score");
 assert(!/%/.test(cardSrc), "card: no percent");
 

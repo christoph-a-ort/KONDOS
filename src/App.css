@@ -1766,6 +1766,179 @@ button:disabled {
   color: #334155;
 }
 
+/* ——— P2-J-E: expanded insight details ——— */
+.insight-card-details-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.insight-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+}
+
+.insight-detail-heading {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #243041;
+}
+
+.insight-detail-sublabel {
+  margin: 0 0 2px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: #4a5d73;
+}
+
+.insight-detail-note {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.insight-detail-incomplete-note {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.insight-detail-bullets,
+.insight-detail-parts-list,
+.insight-detail-examples-list,
+.insight-detail-element-list {
+  margin: 0;
+  padding: 0 0 0 1.15em;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  color: #334155;
+}
+
+.insight-detail-bullets li,
+.insight-detail-parts-list li,
+.insight-detail-examples-list li {
+  margin: 0 0 3px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.insight-detail-example-mark {
+  font-weight: 650;
+  color: #4a5d73;
+}
+
+.insight-detail-parts,
+.insight-detail-examples {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.insight-detail-secondary-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.insight-detail-list-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  background: #f8fafc;
+}
+
+.insight-detail-list-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  padding: 2px 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #1a4a73;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+
+.insight-detail-list-toggle:hover {
+  background: #eef4fa;
+}
+
+.insight-detail-list-toggle:focus-visible {
+  outline: 2px solid #2f6fed;
+  outline-offset: 2px;
+}
+
+.insight-detail-list-region {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 0 0 4px;
+}
+
+.insight-detail-element-list {
+  list-style: disc;
+}
+
+.insight-detail-element {
+  margin: 0 0 4px;
+}
+
+.insight-detail-element-name {
+  display: block;
+  font-weight: 550;
+  color: #243041;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.insight-detail-element-path {
+  display: block;
+  margin-top: 1px;
+  font-size: 0.78rem;
+  color: #5c6b7c;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.insight-detail-list-more {
+  appearance: none;
+  align-self: flex-start;
+  margin: 2px 0 0;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #1a4a73;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.insight-detail-list-more:hover {
+  background: #eef4fa;
+}
+
+.insight-detail-list-more:focus-visible {
+  outline: 2px solid #2f6fed;
+  outline-offset: 2px;
+}
+
 .insight-activity {
   display: inline-block;
   width: 0.7em;
