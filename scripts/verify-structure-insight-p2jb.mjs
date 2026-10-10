@@ -1,9 +1,12 @@
 // P2-J-B: structure insight analysis lifecycle / H→I→J-A orchestration.
 // No visible insight UI / CSS / Tree markers / private Realtest paths.
 
+import { register } from "node:module";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+register(pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "ts-resolve-hook.mjs")).href);
 
 function assert(condition, label) {
   if (!condition) throw new Error(label);

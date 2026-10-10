@@ -1,9 +1,13 @@
 // P2-J-C: Structure | Erkenntnisse navigation + ground view.
-// No insight cards / filters / search / tree markers / retry button.
+// Filters / search / tree markers / retry remain out of scope.
+// P2-J-D may render InsightCard inside the ready body.
 
+import { register } from "node:module";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+register(pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "ts-resolve-hook.mjs")).href);
 
 function assert(condition, label) {
   if (!condition) throw new Error(label);
@@ -55,8 +59,11 @@ assert(!presentSrc.includes("retryInsightAnalysis"), "view: no retry wire");
 assert(!presentSrc.includes("startScan"), "view: no startScan");
 assert(!presentSrc.includes("invoke("), "view: no invoke");
 assert(!presentSrc.includes("fs."), "view: no fs");
-assert(!viewSrc.includes("InsightCard"), "view: no InsightCard component");
+assert(viewSrc.includes("InsightCard") || viewSrc.includes("insight-view-body"), "view: ready body present");
 assert(!/Filter|Suche/.test(viewSrc), "view: no Filter/Suche UI");
+assert(!viewSrc.includes("Alle Details"), "view: no Alle Details");
+assert(!viewSrc.includes("Bestätigen"), "view: no user rating");
+assert(!treeViewSrc.includes("InsightCard"), "TreeView: no InsightCard");
 assert(!presentSrc.toLowerCase().includes("confidencescore"), "view: no score");
 assert(!presentSrc.includes("error.detail"), "view: no error.detail");
 assert(!presentSrc.includes("insightAnalysisError"), "view: no raw error prop");
@@ -95,7 +102,11 @@ assert(cssSrc.includes("prefers-reduced-motion"), "CSS: reduced motion");
 assert(cssSrc.includes('[aria-pressed="true"]'), "CSS: pressed not color-only");
 assert(cssSrc.includes("font-weight"), "CSS: weight for active");
 assert(cssSrc.includes("border-bottom"), "CSS: underline accent");
-const jcCss = cssSrc.slice(cssSrc.indexOf("P2-J-C"));
+const jcCssEnd = cssSrc.indexOf("P2-J-D");
+const jcCss = cssSrc.slice(
+  cssSrc.indexOf("P2-J-C"),
+  jcCssEnd >= 0 ? jcCssEnd : cssSrc.length,
+);
 assert(!/purple|violet|magenta|pink|#(?:a|b|c|d|e|f)[0-9a-f]*[89a-f][0-9a-f]*ff|#ff[0-9a-f]*[89a-f][0-9a-f]*|#c0[0-9a-f]{2}ff/i.test(jcCss), "CSS: no purple/pink/magenta in J-C");
 assert(!/#(?:7|8|9|a)[0-9a-f]{2}[0-9a-f]{2}ff/i.test(jcCss) || true, "CSS: purple heuristic soft");
 // Explicit forbidden family tokens in J-C block

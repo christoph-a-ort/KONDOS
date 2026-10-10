@@ -22,6 +22,7 @@ import { runStructureConfidenceAssessmentCheck } from "./structureConfidenceAsse
 import { runStructureInsightViewModelCheck } from "./structureInsightViewModelCheck";
 import { runStructureInsightAnalysisCheck } from "./structureInsightAnalysisCheck";
 import { runStructureInsightsViewCheck } from "./structureInsightsViewCheck";
+import { runStructureInsightCardsCheck } from "./structureInsightCardsCheck";
 import { runP1cCheck } from "./p1cCheck";
 import { runP1dCheck } from "./p1dCheck";
 import { runP1e1Check } from "./contentSearchCheck";
@@ -335,6 +336,7 @@ export async function runTreeWorkbenchCheck(): Promise<void> {
   runStructureInsightViewModelCheck();
   runStructureInsightAnalysisCheck();
   runStructureInsightsViewCheck();
+  runStructureInsightCardsCheck();
 }
 
 function runTreeSearchCheck(nested: DirectoryNode): void {

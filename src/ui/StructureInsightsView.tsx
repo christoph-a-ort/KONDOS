@@ -1,11 +1,20 @@
 /**
- * P2-J-C – Structure insights ground view (presentation only).
+ * P2-J-C/D – Structure insights ground view + compact insight cards.
  *
- * Renders analysis phase / ViewModel summaries. Does not run H/I/J-A,
- * does not scan, does not mutate the filesystem, and has no retry UI.
+ * Renders analysis phase / ViewModel summaries and location-grouped cards.
+ * Does not run H/I/J-A, does not scan, does not mutate the filesystem,
+ * and has no retry / filter / search / tree navigation UI.
  */
 
+import { useEffect, useMemo, useState } from "react";
+
+import { InsightCard } from "./InsightCard";
 import type { InsightAnalysisPhase } from "./structureInsightAnalysis";
+import {
+  formatInsightLocationHeading,
+  insightViewModelExpansionKey,
+  listInsightLocationSections,
+} from "./structureInsightCardsHelpers";
 import type { StructureInsightViewModel } from "./structureInsightViewModel";
 import {
   INSIGHT_EVIDENCE_INFO,
@@ -31,6 +40,30 @@ export interface StructureInsightsViewProps {
 }
 
 export function StructureInsightsView({ phase, viewModel }: StructureInsightsViewProps) {
+  const expansionKey = insightViewModelExpansionKey(viewModel);
+  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set());
+
+  useEffect(() => {
+    setExpandedIds(new Set());
+  }, [expansionKey]);
+
+  const sections = useMemo(
+    () => (viewModel === null ? [] : listInsightLocationSections(viewModel)),
+    [viewModel],
+  );
+
+  function toggleCard(cardId: string) {
+    setExpandedIds((current) => {
+      const next = new Set(current);
+      if (next.has(cardId)) {
+        next.delete(cardId);
+      } else {
+        next.add(cardId);
+      }
+      return next;
+    });
+  }
+
   if (phase === "running") {
     return (
       <section className="insight-view tree-panel" aria-label="Erkenntnisse">
@@ -133,7 +166,39 @@ export function StructureInsightsView({ phase, viewModel }: StructureInsightsVie
         ) : null}
         <p className="insight-evidence-info muted">{INSIGHT_EVIDENCE_INFO}</p>
       </header>
-      <div className="insight-view-body" aria-hidden="true" />
+      <div className="insight-view-body">
+        <div className="insight-locations">
+          {sections.map(({ location, cards }) => {
+            if (cards.length === 0) {
+              return null;
+            }
+            const heading = formatInsightLocationHeading(location);
+            return (
+              <section
+                key={location.locationId}
+                className="insight-location"
+                aria-label={heading}
+              >
+                <h3 className="insight-location-path">
+                  <span className="insight-location-path-text">{heading}</span>
+                </h3>
+                <div className="insight-location-cards">
+                  {cards.map((card) => (
+                    <InsightCard
+                      key={card.id}
+                      card={card}
+                      expanded={expandedIds.has(card.id)}
+                      onToggleDetails={() => {
+                        toggleCard(card.id);
+                      }}
+                    />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      </div>
     </section>
   );
 }

@@ -1,9 +1,12 @@
 // P2-J-A: READ-ONLY structure insight view model / mapping.
 // No UI / App wiring / CSS / P2-H/I mutation / private Realtest paths.
 
+import { register } from "node:module";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+register(pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "ts-resolve-hook.mjs")).href);
 
 function assert(condition, label) {
   if (!condition) throw new Error(label);
