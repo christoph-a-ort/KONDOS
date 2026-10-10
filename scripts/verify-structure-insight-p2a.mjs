@@ -61,8 +61,13 @@ assert(workbenchSrc.includes("runStructureInsightModelCheck"), "workbench wires 
 // P2-J-B may orchestrate analysis in App; still no P2-A model/UI mounting.
 assert(!appSrc.includes("structureInsightModel"), "App: no structureInsightModel import");
 assert(!appSrc.includes("StructureInsightObservation"), "App: no observation UI types");
-assert(!treeViewSrc.includes("structureInsight"), "TreeView unchanged / no P2 UI");
-assert(!treeViewSrc.includes("StructureInsight"), "TreeView no insight types");
+// J-F may wire structureInsightNavigation markers; still no P2-A model types/UI.
+assert(!treeViewSrc.includes("structureInsightModel"), "TreeView: no P2-A model");
+assert(!treeViewSrc.includes("StructureInsightObservation"), "TreeView: no observation types");
+assert(
+  !treeViewSrc.includes("structureInsight") || treeViewSrc.includes("structureInsightNavigation"),
+  "TreeView: only navigation module allowed for structureInsight*",
+);
 
 // --- Synthetic case invariants (mirror TS check; no private names) ---
 

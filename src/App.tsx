@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
@@ -46,6 +46,13 @@ import {
 } from "./ui/structureInsightAnalysis";
 import type { StructureInsightViewModel } from "./ui/structureInsightViewModel";
 import {
+  buildFolderInsightIdsByLocation,
+  canNavigateToScanNode,
+  firstInsightIdForLocation,
+  type InsightFocusRequest,
+  type TreeRevealRequest,
+} from "./ui/structureInsightNavigation";
+import {
   txtExportColumns,
   type ColumnVisibility,
   type ColumnWidths,
@@ -92,6 +99,8 @@ function App() {
   const [insightAnalysisError, setInsightAnalysisError] = useState<InsightAnalysisError | null>(null);
   const [insightAnalysisScanId, setInsightAnalysisScanId] = useState<number | null>(null);
   const [mainView, setMainView] = useState<MainView>("structure");
+  const [treeRevealRequest, setTreeRevealRequest] = useState<TreeRevealRequest | null>(null);
+  const [insightFocusRequest, setInsightFocusRequest] = useState<InsightFocusRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [exportNoticeKind, setExportNoticeKind] = useState<"progress" | "saved" | "failed" | null>(
@@ -118,6 +127,7 @@ function App() {
   const resultRef = useRef(result);
   const resultScanIdRef = useRef(resultScanId);
   const insightAnalysisGenerationRef = useRef(0);
+  const navRequestIdRef = useRef(0);
   const handleDroppedPathsRef = useRef<(paths: string[]) => void>(() => {});
   const jsonStoreRef = useRef<WorkbenchPrefsJsonStore | null>(createJsonPrefsStore());
   const skipPersistAfterHydrateRef = useRef(true);
@@ -136,14 +146,67 @@ function App() {
     setResultScanId(nextScanId);
   }
 
+  function clearInsightNavigationState(): void {
+    navRequestIdRef.current += 1;
+    setTreeRevealRequest(null);
+    setInsightFocusRequest(null);
+  }
+
   function clearInsightAnalysisState(): void {
     insightAnalysisGenerationRef.current += 1;
     setInsightAnalysisPhase("idle");
     setInsightViewModel(null);
     setInsightAnalysisError(null);
     setInsightAnalysisScanId(null);
+    clearInsightNavigationState();
     setMainView(mainViewAfterScanStart());
   }
+
+  function requestRevealInTree(nodeId: string): void {
+    if (result === null || resultScanId === null) {
+      return;
+    }
+    if (!canNavigateToScanNode(result.root, nodeId)) {
+      return;
+    }
+    navRequestIdRef.current += 1;
+    setTreeRevealRequest({
+      id: navRequestIdRef.current,
+      scanId: resultScanId,
+      nodeId,
+    });
+    setMainView("structure");
+  }
+
+  function requestShowInsightsForLocation(locationId: string): void {
+    if (
+      resultScanId === null ||
+      insightViewModel === null ||
+      insightAnalysisPhase !== "ready"
+    ) {
+      return;
+    }
+    const firstInsightId = firstInsightIdForLocation(insightViewModel, locationId);
+    if (firstInsightId === null) {
+      return;
+    }
+    navRequestIdRef.current += 1;
+    setInsightFocusRequest({
+      id: navRequestIdRef.current,
+      scanId: resultScanId,
+      locationId,
+      firstInsightId,
+    });
+    setMainView("insights");
+  }
+
+  const folderInsightIdsByLocation = useMemo(
+    () =>
+      insightAnalysisPhase === "ready"
+        ? buildFolderInsightIdsByLocation(insightViewModel)
+        : buildFolderInsightIdsByLocation(null),
+    [insightAnalysisPhase, insightViewModel],
+  );
 
   function beginInsightAnalysisForScan(scanResult: ScanResult, scanId: number): void {
     const generation = insightAnalysisGenerationRef.current;
@@ -680,6 +743,9 @@ function App() {
                 onScanFromHere={handleUseAsScanRoot}
                 onPreparingContentChange={handlePreparingContentChange}
                 onExportBusyChange={setExportBusy}
+                revealRequest={treeRevealRequest}
+                folderInsightIdsByLocation={folderInsightIdsByLocation}
+                onInsightMarkerActivate={requestShowInsightsForLocation}
               />
             </div>
             {insightsSelectable ? (
@@ -695,6 +761,8 @@ function App() {
                 <StructureInsightsView
                   phase={insightAnalysisPhase}
                   viewModel={insightViewModel}
+                  focusRequest={insightFocusRequest}
+                  onNavigateToNode={requestRevealInTree}
                 />
               </div>
             ) : null}

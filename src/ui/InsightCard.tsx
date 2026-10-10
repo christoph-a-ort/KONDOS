@@ -14,12 +14,16 @@ import {
   insightCategoryIconLabel,
   insightEvidenceClassName,
 } from "./structureInsightCardsHelpers";
+import { INSIGHT_SHOW_IN_TREE_LABEL } from "./structureInsightNavigation";
 import type { InsightCardModel, InsightUserCategoryKey } from "./structureInsightViewModel";
 
 export interface InsightCardProps {
   card: InsightCardModel;
   expanded: boolean;
+  highlighted?: boolean;
   onToggleDetails: () => void;
+  onNavigateToLocation?: () => void;
+  onNavigateToNode?: (nodeId: string) => void;
 }
 
 function CategoryGlyph({ category }: { category: InsightUserCategoryKey }) {
@@ -71,13 +75,27 @@ function CategoryGlyph({ category }: { category: InsightUserCategoryKey }) {
   }
 }
 
-export function InsightCard({ card, expanded, onToggleDetails }: InsightCardProps) {
+export function InsightCard({
+  card,
+  expanded,
+  highlighted = false,
+  onToggleDetails,
+  onNavigateToLocation,
+  onNavigateToNode,
+}: InsightCardProps) {
   const detailsId = `insight-card-details-${card.id}`;
   const categoryClass = insightCategoryClassName(card.category);
   const evidenceClass = insightEvidenceClassName(card.evidenceLevel);
+  const cardClass = [
+    "insight-card",
+    categoryClass,
+    highlighted ? "insight-card--highlighted" : "",
+  ]
+    .filter((part) => part.length > 0)
+    .join(" ");
 
   return (
-    <article className={`insight-card ${categoryClass}`} data-insight-id={card.id}>
+    <article className={cardClass} data-insight-id={card.id}>
       <div className="insight-card-accent" aria-hidden="true" />
       <header className="insight-card-header">
         <div className="insight-card-category">
@@ -110,10 +128,19 @@ export function InsightCard({ card, expanded, onToggleDetails }: InsightCardProp
           </span>
           {expanded ? INSIGHT_DETAILS_HIDE_LABEL : INSIGHT_DETAILS_SHOW_LABEL}
         </button>
+        {onNavigateToLocation !== undefined ? (
+          <button
+            type="button"
+            className="insight-card-tree-nav"
+            onClick={onNavigateToLocation}
+          >
+            {INSIGHT_SHOW_IN_TREE_LABEL}
+          </button>
+        ) : null}
       </div>
       {expanded ? (
         <div id={detailsId} className="insight-card-details">
-          <InsightCardDetails card={card} />
+          <InsightCardDetails card={card} onNavigateToNode={onNavigateToNode} />
         </div>
       ) : null}
     </article>

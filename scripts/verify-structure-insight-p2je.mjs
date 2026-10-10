@@ -95,7 +95,10 @@ assert(!checkSrc.includes("Off.Dokumente"), "check: no private path");
 
 assert(workbenchSrc.includes("runStructureInsightDetailsCheck"), "workbench wires J-E");
 assert(!treeViewSrc.includes("InsightCardDetails"), "TreeView: no details");
-assert(!treeViewSrc.includes("Erkenntnis"), "TreeView: no markers");
+assert(
+  !treeViewSrc.includes("Erkenntnis") || treeViewSrc.includes("structureInsightNavigation"),
+  "TreeView: Erkenntnis text only via navigation module",
+);
 assert(!appSrc.includes("buildStructureInsightViewModel"), "App: no direct J-A");
 assert(!analysisSrc.includes("InsightCardDetails"), "J-B unchanged");
 assert(!ruleSrc.includes("InsightCardDetails"), "P2-H unchanged");

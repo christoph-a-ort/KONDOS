@@ -82,6 +82,14 @@ import {
   type AppliedDisplayFilter,
   type DisplayFilterDraft,
 } from "./displayFilter";
+import {
+  insightCountForFolder,
+  insightMarkerAriaLabel,
+  insightMarkerCountLabel,
+  insightMarkerTooltip,
+  shouldAcceptTreeRevealRequest,
+  type TreeRevealRequest,
+} from "./structureInsightNavigation";
 
 interface TreeViewProps {
   result: ScanResult | null;
@@ -99,6 +107,12 @@ interface TreeViewProps {
   onScanFromHere: (path: string) => void;
   onPreparingContentChange: (busy: boolean) => void;
   onExportBusyChange: (busy: boolean) => void;
+  /** P2-J-F: reveal a node after insight → tree navigation. */
+  revealRequest?: TreeRevealRequest | null;
+  /** P2-J-F: folder locationId → insight ids (local fundort only). */
+  folderInsightIdsByLocation?: ReadonlyMap<string, readonly string[]> | null;
+  /** P2-J-F: marker click → show insights for this folder location. */
+  onInsightMarkerActivate?: (locationId: string) => void;
 }
 
 export function TreeView({
@@ -117,6 +131,9 @@ export function TreeView({
   onScanFromHere,
   onPreparingContentChange,
   onExportBusyChange,
+  revealRequest = null,
+  folderInsightIdsByLocation = null,
+  onInsightMarkerActivate,
 }: TreeViewProps) {
   if (result === null) {
     return (
@@ -192,6 +209,9 @@ export function TreeView({
       onScanFromHere={onScanFromHere}
       onPreparingContentChange={onPreparingContentChange}
       onExportBusyChange={onExportBusyChange}
+      revealRequest={revealRequest}
+      folderInsightIdsByLocation={folderInsightIdsByLocation}
+      onInsightMarkerActivate={onInsightMarkerActivate}
     />
   );
 }
@@ -212,6 +232,9 @@ interface PopulatedTreeViewProps {
   onScanFromHere: (path: string) => void;
   onPreparingContentChange: (busy: boolean) => void;
   onExportBusyChange: (busy: boolean) => void;
+  revealRequest: TreeRevealRequest | null;
+  folderInsightIdsByLocation: ReadonlyMap<string, readonly string[]> | null;
+  onInsightMarkerActivate?: (locationId: string) => void;
 }
 
 function PopulatedTreeView({
@@ -230,6 +253,9 @@ function PopulatedTreeView({
   onScanFromHere,
   onPreparingContentChange,
   onExportBusyChange,
+  revealRequest,
+  folderInsightIdsByLocation,
+  onInsightMarkerActivate,
 }: PopulatedTreeViewProps) {
   const [expandedIds, setExpandedIds] = useState(() => defaultExpandedIds(result.root.id));
   const [activeResult, setActiveResult] = useState(result);
@@ -582,12 +608,23 @@ function PopulatedTreeView({
   }
 
   function revealTreeNode(id: string) {
+    const rootForAncestors = viewRoot ?? result.root;
+    if (findNodeById(result.root, id) === undefined) {
+      return;
+    }
     setExpandedIds((current) =>
-      withAncestorsExpanded(current, ancestorDirectoryIds(viewRoot ?? result.root, id)),
+      withAncestorsExpanded(current, ancestorDirectoryIds(rootForAncestors, id)),
     );
     setSelectedId(id);
     pendingRevealRef.current = id;
   }
+
+  useEffect(() => {
+    if (!shouldAcceptTreeRevealRequest(revealRequest, resultScanId)) {
+      return;
+    }
+    revealTreeNode(revealRequest.nodeId);
+  }, [revealRequest?.id, resultScanId]);
 
   function handleNextMatch() {
     if (searchMode === "content") {
@@ -1131,21 +1168,37 @@ function PopulatedTreeView({
                 onClick={() => clearSelectionFromPointer()}
               />
             ) : null}
-            {visibleRows.map((row) => (
-              <VirtualTreeRow
-                key={row.id}
-                row={row}
-                columns={columns}
-                gridTemplate={gridTemplate}
-                expanded={row.directory && expandedIds.has(row.id)}
-                selected={selectedId === row.id}
-                match={matchIdSet.has(row.id)}
-                currentMatch={row.id === currentMatchId}
-                onSelect={() => handleRowClick(row)}
-                onDoubleClick={() => handleRowDoubleClick(row)}
-                onTwist={(event) => handleTwistClick(event, row.id)}
-              />
-            ))}
+            {visibleRows.map((row) => {
+              const insightCount =
+                row.directory && folderInsightIdsByLocation !== null
+                  ? insightCountForFolder(folderInsightIdsByLocation, row.id)
+                  : 0;
+              return (
+                <VirtualTreeRow
+                  key={row.id}
+                  row={row}
+                  columns={columns}
+                  gridTemplate={gridTemplate}
+                  expanded={row.directory && expandedIds.has(row.id)}
+                  selected={selectedId === row.id}
+                  match={matchIdSet.has(row.id)}
+                  currentMatch={row.id === currentMatchId}
+                  insightCount={insightCount}
+                  onSelect={() => handleRowClick(row)}
+                  onDoubleClick={() => handleRowDoubleClick(row)}
+                  onTwist={(event) => handleTwistClick(event, row.id)}
+                  onInsightMarkerActivate={
+                    insightCount > 0 && onInsightMarkerActivate !== undefined
+                      ? (event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onInsightMarkerActivate(row.id);
+                        }
+                      : undefined
+                  }
+                />
+              );
+            })}
             {treeWindow.bottomSpacerHeight > 0 ? (
               <div
                 className="tree-spacer"
@@ -1232,9 +1285,11 @@ interface VirtualTreeRowProps {
   selected: boolean;
   match: boolean;
   currentMatch: boolean;
+  insightCount: number;
   onSelect: () => void;
   onDoubleClick: () => void;
   onTwist: (event: MouseEvent<HTMLButtonElement>) => void;
+  onInsightMarkerActivate?: (event: MouseEvent<HTMLButtonElement>) => void;
 }
 
 function VirtualTreeRow({
@@ -1245,13 +1300,17 @@ function VirtualTreeRow({
   selected,
   match,
   currentMatch,
+  insightCount,
   onSelect,
   onDoubleClick,
   onTwist,
+  onInsightMarkerActivate,
 }: VirtualTreeRowProps) {
   const { node, depth, directory, expandable } = row;
   const isRoot = depth === 0;
   const hint = listingHint(node);
+  const showInsightMarker = directory && insightCount > 0 && onInsightMarkerActivate !== undefined;
+  const markerCountText = insightMarkerCountLabel(insightCount);
 
   let icon: ReactNode;
   if (directory) {
@@ -1330,6 +1389,24 @@ function VirtualTreeRow({
                 >
                   !
                 </span>
+              ) : null}
+              {showInsightMarker ? (
+                <button
+                  type="button"
+                  className="insight-tree-marker"
+                  title={insightMarkerTooltip(insightCount)}
+                  aria-label={insightMarkerAriaLabel(insightCount, node.name)}
+                  onClick={onInsightMarkerActivate}
+                  onDoubleClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                >
+                  <span className="insight-tree-marker-dot" aria-hidden="true" />
+                  {markerCountText.length > 0 ? (
+                    <span className="insight-tree-marker-count">{markerCountText}</span>
+                  ) : null}
+                </button>
               ) : null}
             </div>
           );

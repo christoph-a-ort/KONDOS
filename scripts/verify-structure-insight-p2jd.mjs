@@ -85,7 +85,7 @@ assert(!viewSrc.includes("buildStructureInsightViewModel"), "view: no J-A");
 assert(!viewSrc.includes("buildStructureRuleCandidateInsight"), "view: no H");
 assert(!viewSrc.includes("buildStructureConfidenceInsight"), "view: no I");
 assert(!viewSrc.includes("invoke("), "view: no invoke");
-assert(!viewSrc.includes("fs."), "view: no fs");
+assert(!/\bfs\.|from ["']node:fs["']|from ["']fs["']/.test(viewSrc), "view: no filesystem module");
 
 assert(cssSrc.includes(".insight-location"), "CSS: location");
 assert(cssSrc.includes(".insight-location-path"), "CSS: path");
@@ -121,7 +121,10 @@ assert(workbenchSrc.includes("runStructureInsightCardsCheck"), "workbench wires 
 
 assert(!treeViewSrc.includes("InsightCard"), "TreeView: no InsightCard");
 assert(!treeViewSrc.includes("insight-card"), "TreeView: no insight-card");
-assert(!treeViewSrc.includes("Erkenntnis"), "TreeView: no markers");
+assert(
+  !treeViewSrc.includes("Erkenntnis") || treeViewSrc.includes("structureInsightNavigation"),
+  "TreeView: Erkenntnis text only via navigation module",
+);
 assert(!appSrc.includes("buildStructureInsightViewModel"), "App: no direct J-A");
 assert(!analysisSrc.includes("InsightCard"), "J-B unchanged by cards");
 assert(!ruleSrc.includes("InsightCard"), "P2-H unchanged");
@@ -135,9 +138,14 @@ assert(!deps["lucide-react"] && !devDeps["lucide-react"], "no lucide");
 assert(!deps["react-icons"] && !devDeps["react-icons"], "no react-icons");
 assert(!deps["@mui/icons-material"] && !devDeps["@mui/icons-material"], "no mui icons");
 
-// Path interaction: location path is display-only (no onClick on path heading)
-assert(!viewSrc.includes("insight-location-path") || !/insight-location-path[\s\S]{0,200}onClick/.test(viewSrc), "path not interactive");
-assert(!cardSrc.includes("onClick") || cardSrc.includes("onToggleDetails"), "card click is details only");
+// J-D path was display-only; J-F makes displayPathSegments navigable via segment buttons.
+assert(viewSrc.includes("insight-location-path-segment"), "path segments present (J-F)");
+assert(/insight-location-path-segment[\s\S]{0,280}onClick/.test(viewSrc), "path segments interactive (J-F)");
+assert(cardSrc.includes("onToggleDetails"), "card has details toggle");
+assert(
+  !cardSrc.includes("onClick") || cardSrc.includes("onToggleDetails") || cardSrc.includes("onNavigateToLocation"),
+  "card clicks are details/navigation only",
+);
 
 const checkUrl = pathToFileURL(join(rootDir, "src/ui/structureInsightCardsCheck.ts")).href;
 const { runStructureInsightCardsCheck } = await import(checkUrl);

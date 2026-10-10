@@ -34,19 +34,43 @@ import {
 
 export interface InsightCardDetailsProps {
   card: InsightCardModel;
+  onNavigateToNode?: (nodeId: string) => void;
 }
 
-function ElementRows({ elements }: { elements: readonly InsightElementRef[] }) {
+function ElementRows({
+  elements,
+  onNavigateToNode,
+}: {
+  elements: readonly InsightElementRef[];
+  onNavigateToNode?: (nodeId: string) => void;
+}) {
   return (
     <ul className="insight-detail-element-list">
       {elements.map((element) => {
         const { name, path } = insightElementDisplayLines(element);
         return (
           <li key={element.nodeId} className="insight-detail-element">
-            <span className="insight-detail-element-name">{name}</span>
-            {path !== null ? (
-              <span className="insight-detail-element-path">{path}</span>
-            ) : null}
+            {onNavigateToNode !== undefined ? (
+              <button
+                type="button"
+                className="insight-detail-element-nav"
+                onClick={() => {
+                  onNavigateToNode(element.nodeId);
+                }}
+              >
+                <span className="insight-detail-element-name">{name}</span>
+                {path !== null ? (
+                  <span className="insight-detail-element-path">{path}</span>
+                ) : null}
+              </button>
+            ) : (
+              <>
+                <span className="insight-detail-element-name">{name}</span>
+                {path !== null ? (
+                  <span className="insight-detail-element-path">{path}</span>
+                ) : null}
+              </>
+            )}
           </li>
         );
       })}
@@ -61,6 +85,7 @@ function CollapsibleElementList({
   open,
   onToggle,
   regionId,
+  onNavigateToNode,
 }: {
   listKey: string;
   heading: string;
@@ -68,6 +93,7 @@ function CollapsibleElementList({
   open: boolean;
   onToggle: () => void;
   regionId: string;
+  onNavigateToNode?: (nodeId: string) => void;
 }) {
   const [showAll, setShowAll] = useState(false);
   const hasMore = insightElementListHasMore(elements.length);
@@ -99,7 +125,7 @@ function CollapsibleElementList({
       </button>
       {open ? (
         <div id={regionId} className="insight-detail-list-region">
-          <ElementRows elements={visible} />
+          <ElementRows elements={visible} onNavigateToNode={onNavigateToNode} />
           {hasMore ? (
             <button
               type="button"
@@ -122,11 +148,13 @@ function SecondaryGroupBlock({
   group,
   open,
   onToggle,
+  onNavigateToNode,
 }: {
   cardId: string;
   group: InsightSecondaryRecurringGroup;
   open: boolean;
   onToggle: () => void;
+  onNavigateToNode?: (nodeId: string) => void;
 }) {
   const listKey = insightNestedListKey(cardId, "secondary", group.groupKey);
   const regionId = `insight-detail-list-${cardId}-sec-${group.groupKey}`;
@@ -138,11 +166,12 @@ function SecondaryGroupBlock({
       open={open}
       onToggle={onToggle}
       regionId={regionId}
+      onNavigateToNode={onNavigateToNode}
     />
   );
 }
 
-export function InsightCardDetails({ card }: InsightCardDetailsProps) {
+export function InsightCardDetails({ card, onNavigateToNode }: InsightCardDetailsProps) {
   const [openLists, setOpenLists] = useState<ReadonlySet<string>>(() => new Set());
 
   function toggleList(key: string) {
@@ -231,6 +260,7 @@ export function InsightCardDetails({ card }: InsightCardDetailsProps) {
               toggleList(primaryKey);
             }}
             regionId={`insight-detail-list-${card.id}-primary`}
+            onNavigateToNode={onNavigateToNode}
           />
         </section>
       ) : null}
@@ -253,6 +283,7 @@ export function InsightCardDetails({ card }: InsightCardDetailsProps) {
                   onToggle={() => {
                     toggleList(key);
                   }}
+                  onNavigateToNode={onNavigateToNode}
                 />
               );
             })}
@@ -271,6 +302,7 @@ export function InsightCardDetails({ card }: InsightCardDetailsProps) {
               toggleList(otherKey);
             }}
             regionId={`insight-detail-list-${card.id}-other`}
+            onNavigateToNode={onNavigateToNode}
           />
         </section>
       ) : null}

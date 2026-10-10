@@ -1,12 +1,10 @@
 /**
- * P2-J-C/D – Structure insights ground view + compact insight cards.
+ * P2-J-C/D/E/F – Structure insights view with cards, details, and navigation.
  *
- * Renders analysis phase / ViewModel summaries and location-grouped cards.
- * Does not run H/I/J-A, does not scan, does not mutate the filesystem,
- * and has no retry / filter / search / tree navigation UI.
+ * Presentation + navigation callbacks only. No H/I/J-A, no filesystem.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { InsightCard } from "./InsightCard";
 import type { InsightAnalysisPhase } from "./structureInsightAnalysis";
@@ -15,7 +13,8 @@ import {
   insightViewModelExpansionKey,
   listInsightLocationSections,
 } from "./structureInsightCardsHelpers";
-import type { StructureInsightViewModel } from "./structureInsightViewModel";
+import type { InsightFocusRequest } from "./structureInsightNavigation";
+import type { InsightLocationGroup, StructureInsightViewModel } from "./structureInsightViewModel";
 import {
   INSIGHT_EVIDENCE_INFO,
   formatInsightEvidenceSummary,
@@ -37,20 +36,94 @@ export {
 export interface StructureInsightsViewProps {
   phase: InsightAnalysisPhase;
   viewModel: StructureInsightViewModel | null;
+  focusRequest?: InsightFocusRequest | null;
+  onNavigateToNode?: (nodeId: string) => void;
 }
 
-export function StructureInsightsView({ phase, viewModel }: StructureInsightsViewProps) {
+function LocationPath({
+  location,
+  onNavigateToNode,
+}: {
+  location: InsightLocationGroup;
+  onNavigateToNode?: (nodeId: string) => void;
+}) {
+  if (location.kind === "root" || location.displayPathSegments.length === 0) {
+    const label = formatInsightLocationHeading(location);
+    if (onNavigateToNode === undefined) {
+      return <span className="insight-location-path-text">{label}</span>;
+    }
+    return (
+      <button
+        type="button"
+        className="insight-location-path-segment"
+        onClick={() => {
+          onNavigateToNode(location.locationId);
+        }}
+      >
+        {label}
+      </button>
+    );
+  }
+
+  return (
+    <span className="insight-location-path-segments">
+      {location.displayPathSegments.map((segment, index) => (
+        <span key={segment.nodeId} className="insight-location-path-piece">
+          {index > 0 ? (
+            <span className="insight-location-path-sep" aria-hidden="true">
+              {" › "}
+            </span>
+          ) : null}
+          {onNavigateToNode !== undefined ? (
+            <button
+              type="button"
+              className="insight-location-path-segment"
+              onClick={() => {
+                onNavigateToNode(segment.nodeId);
+              }}
+            >
+              {segment.displayName}
+            </button>
+          ) : (
+            <span className="insight-location-path-text">{segment.displayName}</span>
+          )}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+export function StructureInsightsView({
+  phase,
+  viewModel,
+  focusRequest = null,
+  onNavigateToNode,
+}: StructureInsightsViewProps) {
   const expansionKey = insightViewModelExpansionKey(viewModel);
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [highlightedInsightId, setHighlightedInsightId] = useState<string | null>(null);
+  const locationSectionEls = useRef<Map<string, HTMLElement>>(new Map());
 
   useEffect(() => {
     setExpandedIds(new Set());
+    setHighlightedInsightId(null);
   }, [expansionKey]);
 
   const sections = useMemo(
     () => (viewModel === null ? [] : listInsightLocationSections(viewModel)),
     [viewModel],
   );
+
+  useEffect(() => {
+    if (focusRequest === null) {
+      return;
+    }
+    setHighlightedInsightId(focusRequest.firstInsightId);
+    const sectionEl = locationSectionEls.current.get(focusRequest.locationId);
+    if (sectionEl !== undefined) {
+      sectionEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [focusRequest?.id]);
 
   function toggleCard(cardId: string) {
     setExpandedIds((current) => {
@@ -107,7 +180,6 @@ export function StructureInsightsView({ phase, viewModel }: StructureInsightsVie
     );
   }
 
-  // ready
   const count = viewModel.insights.length;
   const incomplete = viewModel.globallyIncomplete;
   const evidenceSummary = formatInsightEvidenceSummary(viewModel.countsByEvidence);
@@ -178,9 +250,16 @@ export function StructureInsightsView({ phase, viewModel }: StructureInsightsVie
                 key={location.locationId}
                 className="insight-location"
                 aria-label={heading}
+                ref={(element) => {
+                  if (element === null) {
+                    locationSectionEls.current.delete(location.locationId);
+                  } else {
+                    locationSectionEls.current.set(location.locationId, element);
+                  }
+                }}
               >
                 <h3 className="insight-location-path">
-                  <span className="insight-location-path-text">{heading}</span>
+                  <LocationPath location={location} onNavigateToNode={onNavigateToNode} />
                 </h3>
                 <div className="insight-location-cards">
                   {cards.map((card) => (
@@ -188,9 +267,18 @@ export function StructureInsightsView({ phase, viewModel }: StructureInsightsVie
                       key={card.id}
                       card={card}
                       expanded={expandedIds.has(card.id)}
+                      highlighted={highlightedInsightId === card.id}
                       onToggleDetails={() => {
                         toggleCard(card.id);
                       }}
+                      onNavigateToLocation={
+                        onNavigateToNode !== undefined
+                          ? () => {
+                              onNavigateToNode(card.locationId);
+                            }
+                          : undefined
+                      }
+                      onNavigateToNode={onNavigateToNode}
                     />
                   ))}
                 </div>
