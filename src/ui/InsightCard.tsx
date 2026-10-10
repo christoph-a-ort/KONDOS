@@ -1,9 +1,11 @@
 /**
- * P2-J-D/F/G – Compact insight card (closed by default).
+ * P2-J-D/F/G/I – Compact insight card (closed by default).
  *
- * Expanded details (explanation, examples, element lists) are rendered by
- * InsightCardDetails (P2-J-E). J-G adds optional search highlighting.
+ * Expanded details are rendered by InsightCardDetails.
+ * J-I: tighter hierarchy, memoized card shell.
  */
+
+import { memo } from "react";
 
 import { InsightCardDetails } from "./InsightCardDetails";
 import { InsightSearchHighlight } from "./InsightSearchHighlight";
@@ -27,11 +29,11 @@ export interface InsightCardProps {
   onNavigateToLocation?: () => void;
   onNavigateToNode?: (nodeId: string) => void;
   searchQuery?: string;
+  locationSegmentNames?: readonly string[];
 }
 
 function CategoryGlyph({ category }: { category: InsightUserCategoryKey }) {
   const label = insightCategoryIconLabel(category);
-  // Decorative SVG; category is also shown as text.
   switch (category) {
     case "file-names":
       return (
@@ -78,7 +80,7 @@ function CategoryGlyph({ category }: { category: InsightUserCategoryKey }) {
   }
 }
 
-export function InsightCard({
+function InsightCardComponent({
   card,
   expanded,
   highlighted = false,
@@ -86,6 +88,7 @@ export function InsightCard({
   onNavigateToLocation,
   onNavigateToNode,
   searchQuery = "",
+  locationSegmentNames = [],
 }: InsightCardProps) {
   const detailsId = `insight-card-details-${card.id}`;
   const categoryClass = insightCategoryClassName(card.category);
@@ -103,27 +106,27 @@ export function InsightCard({
     <article className={cardClass} data-insight-id={card.id}>
       <div className="insight-card-accent" aria-hidden="true" />
       <header className="insight-card-header">
-        <div className="insight-card-category">
-          <span className="insight-card-category-icon" aria-hidden="true">
-            <CategoryGlyph category={card.category} />
-          </span>
-          <span className="insight-card-category-label">{card.categoryLabel}</span>
-        </div>
         <h4 className="insight-card-title">
           <InsightSearchHighlight text={card.title} normalizedQuery={normalizedQuery} />
         </h4>
+        <p className="insight-card-fact">
+          <InsightSearchHighlight text={card.factLine} normalizedQuery={normalizedQuery} />
+        </p>
+        <div className="insight-card-meta">
+          <div className="insight-card-category">
+            <span className="insight-card-category-icon" aria-hidden="true">
+              <CategoryGlyph category={card.category} />
+            </span>
+            <span className="insight-card-category-label">{card.categoryLabel}</span>
+          </div>
+          <span className={`insight-card-evidence ${evidenceClass}`}>
+            Evidenz: {card.evidenceLabel}
+          </span>
+          {card.incompleteData ? (
+            <span className="insight-card-incomplete">{INSIGHT_INCOMPLETE_CARD_NOTE}</span>
+          ) : null}
+        </div>
       </header>
-      <p className="insight-card-fact">
-        <InsightSearchHighlight text={card.factLine} normalizedQuery={normalizedQuery} />
-      </p>
-      <div className="insight-card-meta">
-        <span className={`insight-card-evidence ${evidenceClass}`}>
-          Evidenz: {card.evidenceLabel}
-        </span>
-        {card.incompleteData ? (
-          <span className="insight-card-incomplete">{INSIGHT_INCOMPLETE_CARD_NOTE}</span>
-        ) : null}
-      </div>
       <div className="insight-card-actions">
         <button
           type="button"
@@ -153,9 +156,12 @@ export function InsightCard({
             card={card}
             onNavigateToNode={onNavigateToNode}
             searchQuery={searchQuery}
+            locationSegmentNames={locationSegmentNames}
           />
         </div>
       ) : null}
     </article>
   );
 }
+
+export const InsightCard = memo(InsightCardComponent);

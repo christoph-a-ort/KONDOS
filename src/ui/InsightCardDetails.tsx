@@ -1,11 +1,11 @@
 /**
- * P2-J-E/G – Expanded insight-card detail body (READ-ONLY presentation).
+ * P2-J-E/G/I – Expanded insight-card detail body (READ-ONLY presentation).
  *
  * Renders explanation, structure summary extras, and element lists from the
- * ViewModel. J-G adds search highlighting and list reveal. No H/I/J-A, no filesystem.
+ * ViewModel. J-I adds compact examples and path presentation. No H/I/J-A.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { InsightSearchHighlight } from "./InsightSearchHighlight";
 import type {
@@ -26,7 +26,6 @@ import {
   displayableExamples,
   displayableExplanationBullets,
   displayableStructuralParts,
-  insightElementDisplayLines,
   insightElementListHasMore,
   insightNestedListKey,
   otherElementsHeading,
@@ -36,45 +35,75 @@ import {
   cardDetailListKeysNeedingOpen,
   elementListNeedsShowAllForSearch,
   normalizeInsightSearchQuery,
+  textMatchesInsightQuery,
 } from "./structureInsightFilters";
+import {
+  countDisplayNames,
+  insightElementPathPresentation,
+  insightExamplesHaveMore,
+  visibleInsightExamples,
+} from "./structureInsightPresentation";
 
 export interface InsightCardDetailsProps {
   card: InsightCardModel;
   onNavigateToNode?: (nodeId: string) => void;
   /** Raw search query from J-G filter bar (may be empty). */
   searchQuery?: string;
+  /** Fundort breadcrumb display names for path redundancy checks. */
+  locationSegmentNames?: readonly string[];
 }
 
 function ElementRows({
   elements,
+  allElements,
   onNavigateToNode,
   normalizedQuery,
+  locationSegmentNames,
 }: {
   elements: readonly InsightElementRef[];
+  allElements: readonly InsightElementRef[];
   onNavigateToNode?: (nodeId: string) => void;
   normalizedQuery: string;
+  locationSegmentNames: readonly string[];
 }) {
+  const nameCounts = useMemo(() => countDisplayNames(allElements), [allElements]);
+
   return (
     <ul className="insight-detail-element-list">
       {elements.map((element) => {
-        const { name, path } = insightElementDisplayLines(element);
+        const presentation = insightElementPathPresentation(
+          element,
+          locationSegmentNames,
+          nameCounts,
+        );
         const nameNode = (
           <span className="insight-detail-element-name">
-            <InsightSearchHighlight text={name} normalizedQuery={normalizedQuery} />
+            <InsightSearchHighlight text={presentation.name} normalizedQuery={normalizedQuery} />
           </span>
         );
         const pathNode =
-          path !== null ? (
+          presentation.secondaryPath !== null ? (
             <span className="insight-detail-element-path">
-              <InsightSearchHighlight text={path} normalizedQuery={normalizedQuery} />
+              <InsightSearchHighlight
+                text={presentation.secondaryPath}
+                normalizedQuery={normalizedQuery}
+              />
             </span>
           ) : null;
+        const title =
+          presentation.fullPathTitle !== null ? presentation.fullPathTitle : undefined;
+        const ariaLabel =
+          presentation.fullPathTitle !== null
+            ? `${presentation.name}, ${presentation.fullPathTitle}`
+            : presentation.name;
         return (
           <li key={element.nodeId} className="insight-detail-element">
             {onNavigateToNode !== undefined ? (
               <button
                 type="button"
                 className="insight-detail-element-nav"
+                title={title}
+                aria-label={ariaLabel}
                 onClick={() => {
                   onNavigateToNode(element.nodeId);
                 }}
@@ -83,10 +112,10 @@ function ElementRows({
                 {pathNode}
               </button>
             ) : (
-              <>
+              <span className="insight-detail-element-static" title={title}>
                 {nameNode}
                 {pathNode}
-              </>
+              </span>
             )}
           </li>
         );
@@ -104,6 +133,7 @@ function CollapsibleElementList({
   regionId,
   onNavigateToNode,
   normalizedQuery,
+  locationSegmentNames,
 }: {
   listKey: string;
   heading: string;
@@ -113,6 +143,7 @@ function CollapsibleElementList({
   regionId: string;
   onNavigateToNode?: (nodeId: string) => void;
   normalizedQuery: string;
+  locationSegmentNames: readonly string[];
 }) {
   const [showAll, setShowAll] = useState(false);
   const needsShowAll = elementListNeedsShowAllForSearch(elements, normalizedQuery);
@@ -154,8 +185,10 @@ function CollapsibleElementList({
         <div id={regionId} className="insight-detail-list-region">
           <ElementRows
             elements={visible}
+            allElements={elements}
             onNavigateToNode={onNavigateToNode}
             normalizedQuery={normalizedQuery}
+            locationSegmentNames={locationSegmentNames}
           />
           {hasMore ? (
             <button
@@ -181,6 +214,7 @@ function SecondaryGroupBlock({
   onToggle,
   onNavigateToNode,
   normalizedQuery,
+  locationSegmentNames,
 }: {
   cardId: string;
   group: InsightSecondaryRecurringGroup;
@@ -188,6 +222,7 @@ function SecondaryGroupBlock({
   onToggle: () => void;
   onNavigateToNode?: (nodeId: string) => void;
   normalizedQuery: string;
+  locationSegmentNames: readonly string[];
 }) {
   const listKey = insightNestedListKey(cardId, "secondary", group.groupKey);
   const regionId = `insight-detail-list-${cardId}-sec-${group.groupKey}`;
@@ -201,6 +236,7 @@ function SecondaryGroupBlock({
       regionId={regionId}
       onNavigateToNode={onNavigateToNode}
       normalizedQuery={normalizedQuery}
+      locationSegmentNames={locationSegmentNames}
     />
   );
 }
@@ -209,9 +245,11 @@ export function InsightCardDetails({
   card,
   onNavigateToNode,
   searchQuery = "",
+  locationSegmentNames = [],
 }: InsightCardDetailsProps) {
   const normalizedQuery = normalizeInsightSearchQuery(searchQuery);
   const [openLists, setOpenLists] = useState<ReadonlySet<string>>(() => new Set());
+  const [showAllExamples, setShowAllExamples] = useState(false);
 
   useEffect(() => {
     if (normalizedQuery.length === 0) {
@@ -234,6 +272,30 @@ export function InsightCardDetails({
     });
   }, [card, normalizedQuery]);
 
+  const plainDescription = card.structureSummary.plainDescription.trim();
+  const bullets = displayableExplanationBullets(card.explanationBullets);
+  const examples = displayableExamples(card.structureSummary.examples);
+  const parts = displayableStructuralParts(card.structureSummary.structuralParts);
+
+  const exampleNeedsShowAll =
+    normalizedQuery.length > 0 &&
+    examples.some(
+      (example, index) =>
+        index >= 3 && textMatchesInsightQuery(example, normalizedQuery),
+    );
+
+  useEffect(() => {
+    if (exampleNeedsShowAll) {
+      setShowAllExamples(true);
+    }
+  }, [exampleNeedsShowAll]);
+
+  useEffect(() => {
+    if (normalizedQuery.length === 0) {
+      setShowAllExamples(false);
+    }
+  }, [normalizedQuery]);
+
   function toggleList(key: string) {
     setOpenLists((current) => {
       const next = new Set(current);
@@ -246,10 +308,6 @@ export function InsightCardDetails({
     });
   }
 
-  const plainDescription = card.structureSummary.plainDescription.trim();
-  const bullets = displayableExplanationBullets(card.explanationBullets);
-  const examples = displayableExamples(card.structureSummary.examples);
-  const parts = displayableStructuralParts(card.structureSummary.structuralParts);
   const primary = card.primaryElements;
   const secondary = card.secondaryRecurringGroups.filter((group) => group.elements.length > 0);
   const other = card.otherElements;
@@ -260,6 +318,9 @@ export function InsightCardDetails({
 
   const hasExplanation = plainDescription.length > 0 || bullets.length > 0;
   const hasStructureExtras = examples.length > 0 || parts.length > 0;
+  const effectiveShowAllExamples = showAllExamples || exampleNeedsShowAll;
+  const visibleExamples = visibleInsightExamples(examples, effectiveShowAllExamples);
+  const examplesHaveMore = insightExamplesHaveMore(examples.length);
 
   return (
     <div className="insight-card-details-body">
@@ -304,13 +365,26 @@ export function InsightCardDetails({
             <div className="insight-detail-examples">
               <p className="insight-detail-sublabel">{INSIGHT_STRUCTURE_EXAMPLES_LABEL}</p>
               <ul className="insight-detail-examples-list">
-                {examples.map((example, index) => (
+                {visibleExamples.map((example, index) => (
                   <li key={`${card.id}-ex-${index}`}>
                     <span className="insight-detail-example-mark">Beispiel:</span>{" "}
                     <InsightSearchHighlight text={example} normalizedQuery={normalizedQuery} />
                   </li>
                 ))}
               </ul>
+              {examplesHaveMore ? (
+                <button
+                  type="button"
+                  className="insight-detail-list-more"
+                  onClick={() => {
+                    setShowAllExamples((current) => !current);
+                  }}
+                >
+                  {effectiveShowAllExamples
+                    ? INSIGHT_LIST_SHOW_LESS_LABEL
+                    : INSIGHT_LIST_SHOW_MORE_LABEL}
+                </button>
+              ) : null}
             </div>
           ) : null}
         </section>
@@ -329,6 +403,7 @@ export function InsightCardDetails({
             regionId={`insight-detail-list-${card.id}-primary`}
             onNavigateToNode={onNavigateToNode}
             normalizedQuery={normalizedQuery}
+            locationSegmentNames={locationSegmentNames}
           />
         </section>
       ) : null}
@@ -353,6 +428,7 @@ export function InsightCardDetails({
                   }}
                   onNavigateToNode={onNavigateToNode}
                   normalizedQuery={normalizedQuery}
+                  locationSegmentNames={locationSegmentNames}
                 />
               );
             })}
@@ -373,6 +449,7 @@ export function InsightCardDetails({
             regionId={`insight-detail-list-${card.id}-other`}
             onNavigateToNode={onNavigateToNode}
             normalizedQuery={normalizedQuery}
+            locationSegmentNames={locationSegmentNames}
           />
         </section>
       ) : null}

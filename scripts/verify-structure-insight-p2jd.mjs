@@ -46,7 +46,10 @@ assert(!helpersSrc.includes("buildStructureRuleCandidateInsight"), "helpers: no 
 assert(!helpersSrc.includes("buildStructureConfidenceInsight"), "helpers: no P2-I");
 assert(!helpersSrc.includes("buildStructureInsightViewModel"), "helpers: no J-A builder");
 
-assert(cardSrc.includes("export function InsightCard"), "card export");
+assert(
+  cardSrc.includes("export function InsightCard") || cardSrc.includes("export const InsightCard"),
+  "card export",
+);
 assert(cardSrc.includes("card.title"), "card: title");
 assert(cardSrc.includes("card.factLine"), "card: factLine");
 assert(cardSrc.includes("card.categoryLabel"), "card: categoryLabel");

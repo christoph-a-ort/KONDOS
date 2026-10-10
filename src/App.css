@@ -1519,46 +1519,80 @@ button:disabled {
 .insight-locations {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
   max-width: 920px;
 }
 
 .insight-location {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+}
+
+.insight-location-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 0 2px;
 }
 
 .insight-location-path {
   margin: 0;
-  padding: 0 2px;
-  font-size: 0.88rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.86rem;
   font-weight: 650;
   line-height: 1.35;
   color: #2a3a4d;
 }
 
+.insight-location-path-segments {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 1px;
+  max-width: 100%;
+}
+
+.insight-location-path-piece {
+  display: inline;
+  max-width: 100%;
+}
+
 .insight-location-path-text {
   display: inline;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.insight-location-count {
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #5c6b7c;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .insight-location-cards {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .insight-card {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   margin: 0;
-  padding: 10px 12px 10px 14px;
+  padding: 8px 10px 8px 12px;
   border: 1px solid #d7dee8;
   border-radius: 6px;
   background: #fbfcfe;
   box-shadow: none;
+  min-width: 0;
 }
 
 .insight-card-accent {
@@ -1590,7 +1624,8 @@ button:disabled {
 .insight-card-header {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
+  min-width: 0;
 }
 
 .insight-card-category {
@@ -1646,24 +1681,29 @@ button:disabled {
 
 .insight-card-title {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: 0.92rem;
   font-weight: 700;
-  line-height: 1.35;
+  line-height: 1.3;
   color: #172334;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .insight-card-fact {
   margin: 0;
-  font-size: 0.88rem;
-  line-height: 1.4;
+  font-size: 0.84rem;
+  line-height: 1.35;
   color: #334155;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .insight-card-meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 8px;
+  gap: 4px 6px;
+  margin-top: 1px;
 }
 
 .insight-card-evidence {
@@ -1721,8 +1761,8 @@ button:disabled {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 10px;
-  margin-top: 2px;
+  gap: 2px 8px;
+  margin-top: 1px;
 }
 
 .insight-card-tree-nav {
@@ -1760,7 +1800,7 @@ button:disabled {
 .insight-location-path-segment {
   appearance: none;
   margin: 0;
-  padding: 0;
+  padding: 1px 2px;
   border: none;
   border-radius: 2px;
   background: transparent;
@@ -1774,6 +1814,9 @@ button:disabled {
   text-decoration: underline;
   text-decoration-color: transparent;
   text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 100%;
 }
 
 .insight-location-path-segment:hover {
@@ -2335,6 +2378,37 @@ button:disabled {
   font: inherit;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
+}
+
+/* ——— P2-J-I: polish, density, a11y ——— */
+.insight-detail-element-static {
+  display: block;
+  min-width: 0;
+}
+
+.insight-card-details-toggle:focus-visible,
+.insight-detail-element-nav:focus-visible,
+.insight-tree-marker:focus-visible {
+  outline: 2px solid #2f6fed;
+  outline-offset: 2px;
+}
+
+.insight-detail-element-nav {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-align: left;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .insight-card,
+  .insight-filter-bar,
+  .insight-search-hit,
+  .insight-location-path-segment,
+  .insight-failed-retry,
+  .insight-card-details-toggle,
+  .insight-card-tree-nav {
+    transition: none;
+  }
 }
 
 @media (max-width: 720px) {

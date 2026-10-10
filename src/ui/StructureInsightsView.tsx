@@ -1,10 +1,10 @@
 /**
- * P2-J-C/D/E/F/G – Structure insights view with cards, navigation, search/filters.
+ * P2-J-C/D/E/F/G/H/I – Structure insights view with cards, navigation, search/filters.
  *
  * Presentation + navigation callbacks only. No H/I/J-A, no filesystem.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { InsightCard } from "./InsightCard";
 import type { InsightAnalysisError, InsightAnalysisPhase } from "./structureInsightAnalysis";
@@ -53,6 +53,7 @@ import {
   type InsightFilterState,
 } from "./structureInsightFilters";
 import type { InsightFocusRequest } from "./structureInsightNavigation";
+import { formatInsightLocationCountLabel } from "./structureInsightPresentation";
 import type { InsightLocationGroup, StructureInsightViewModel } from "./structureInsightViewModel";
 import {
   INSIGHT_EVIDENCE_INFO,
@@ -242,32 +243,42 @@ export function StructureInsightsView({
     }
   }, [focusRequest?.id, sections]);
 
-  function toggleCard(cardId: string) {
-    setExpandedIds((current) => {
-      const next = new Set(current);
-      if (next.has(cardId)) {
-        next.delete(cardId);
-        if (normalizedQuery.length > 0) {
+  const toggleCard = useCallback(
+    (cardId: string) => {
+      setExpandedIds((current) => {
+        const next = new Set(current);
+        if (next.has(cardId)) {
+          next.delete(cardId);
+          if (normalizedQuery.length > 0) {
+            setSuppressedAutoOpenIds((suppressed) => {
+              const updated = new Set(suppressed);
+              updated.add(cardId);
+              return updated;
+            });
+          }
+        } else {
+          next.add(cardId);
           setSuppressedAutoOpenIds((suppressed) => {
+            if (!suppressed.has(cardId)) {
+              return suppressed;
+            }
             const updated = new Set(suppressed);
-            updated.add(cardId);
+            updated.delete(cardId);
             return updated;
           });
         }
-      } else {
-        next.add(cardId);
-        setSuppressedAutoOpenIds((suppressed) => {
-          if (!suppressed.has(cardId)) {
-            return suppressed;
-          }
-          const updated = new Set(suppressed);
-          updated.delete(cardId);
-          return updated;
-        });
-      }
-      return next;
-    });
-  }
+        return next;
+      });
+    },
+    [normalizedQuery],
+  );
+
+  const navigateToNode = useCallback(
+    (nodeId: string) => {
+      onNavigateToNode?.(nodeId);
+    },
+    [onNavigateToNode],
+  );
 
   function expandAllVisibleDetails() {
     setExpandedIds((current) => {
@@ -558,11 +569,15 @@ export function StructureInsightsView({
           <div className="insight-locations">
             {sections.map(({ location, cards }) => {
               const heading = formatInsightLocationHeading(location);
+              const locationSegmentNames = location.displayPathSegments.map(
+                (segment) => segment.displayName,
+              );
+              const countLabel = formatInsightLocationCountLabel(cards.length);
               return (
                 <section
                   key={location.locationId}
                   className="insight-location"
-                  aria-label={heading}
+                  aria-label={`${heading}, ${countLabel}`}
                   ref={(element) => {
                     if (element === null) {
                       locationSectionEls.current.delete(location.locationId);
@@ -571,9 +586,12 @@ export function StructureInsightsView({
                     }
                   }}
                 >
-                  <h3 className="insight-location-path">
-                    <LocationPath location={location} onNavigateToNode={onNavigateToNode} />
-                  </h3>
+                  <div className="insight-location-heading">
+                    <h3 className="insight-location-path">
+                      <LocationPath location={location} onNavigateToNode={onNavigateToNode} />
+                    </h3>
+                    <span className="insight-location-count">{countLabel}</span>
+                  </div>
                   <div className="insight-location-cards">
                     {cards.map((card) => (
                       <InsightCard
@@ -582,17 +600,20 @@ export function StructureInsightsView({
                         expanded={expandedIds.has(card.id)}
                         highlighted={highlightedInsightId === card.id}
                         searchQuery={filters.query}
+                        locationSegmentNames={locationSegmentNames}
                         onToggleDetails={() => {
                           toggleCard(card.id);
                         }}
                         onNavigateToLocation={
                           onNavigateToNode !== undefined
                             ? () => {
-                                onNavigateToNode(card.locationId);
+                                navigateToNode(card.locationId);
                               }
                             : undefined
                         }
-                        onNavigateToNode={onNavigateToNode}
+                        onNavigateToNode={
+                          onNavigateToNode !== undefined ? navigateToNode : undefined
+                        }
                       />
                     ))}
                   </div>
