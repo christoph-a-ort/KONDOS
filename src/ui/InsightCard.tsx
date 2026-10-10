@@ -1,11 +1,12 @@
 /**
- * P2-J-D – Compact insight card (closed by default).
+ * P2-J-D/F/G – Compact insight card (closed by default).
  *
  * Expanded details (explanation, examples, element lists) are rendered by
- * InsightCardDetails (P2-J-E). No tree navigation / filter / search / retry.
+ * InsightCardDetails (P2-J-E). J-G adds optional search highlighting.
  */
 
 import { InsightCardDetails } from "./InsightCardDetails";
+import { InsightSearchHighlight } from "./InsightSearchHighlight";
 import {
   INSIGHT_DETAILS_HIDE_LABEL,
   INSIGHT_DETAILS_SHOW_LABEL,
@@ -14,6 +15,7 @@ import {
   insightCategoryIconLabel,
   insightEvidenceClassName,
 } from "./structureInsightCardsHelpers";
+import { normalizeInsightSearchQuery } from "./structureInsightFilters";
 import { INSIGHT_SHOW_IN_TREE_LABEL } from "./structureInsightNavigation";
 import type { InsightCardModel, InsightUserCategoryKey } from "./structureInsightViewModel";
 
@@ -24,6 +26,7 @@ export interface InsightCardProps {
   onToggleDetails: () => void;
   onNavigateToLocation?: () => void;
   onNavigateToNode?: (nodeId: string) => void;
+  searchQuery?: string;
 }
 
 function CategoryGlyph({ category }: { category: InsightUserCategoryKey }) {
@@ -82,10 +85,12 @@ export function InsightCard({
   onToggleDetails,
   onNavigateToLocation,
   onNavigateToNode,
+  searchQuery = "",
 }: InsightCardProps) {
   const detailsId = `insight-card-details-${card.id}`;
   const categoryClass = insightCategoryClassName(card.category);
   const evidenceClass = insightEvidenceClassName(card.evidenceLevel);
+  const normalizedQuery = normalizeInsightSearchQuery(searchQuery);
   const cardClass = [
     "insight-card",
     categoryClass,
@@ -104,9 +109,13 @@ export function InsightCard({
           </span>
           <span className="insight-card-category-label">{card.categoryLabel}</span>
         </div>
-        <h4 className="insight-card-title">{card.title}</h4>
+        <h4 className="insight-card-title">
+          <InsightSearchHighlight text={card.title} normalizedQuery={normalizedQuery} />
+        </h4>
       </header>
-      <p className="insight-card-fact">{card.factLine}</p>
+      <p className="insight-card-fact">
+        <InsightSearchHighlight text={card.factLine} normalizedQuery={normalizedQuery} />
+      </p>
       <div className="insight-card-meta">
         <span className={`insight-card-evidence ${evidenceClass}`}>
           Evidenz: {card.evidenceLabel}
@@ -140,7 +149,11 @@ export function InsightCard({
       </div>
       {expanded ? (
         <div id={detailsId} className="insight-card-details">
-          <InsightCardDetails card={card} onNavigateToNode={onNavigateToNode} />
+          <InsightCardDetails
+            card={card}
+            onNavigateToNode={onNavigateToNode}
+            searchQuery={searchQuery}
+          />
         </div>
       ) : null}
     </article>

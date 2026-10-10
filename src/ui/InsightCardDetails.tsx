@@ -1,12 +1,13 @@
 /**
- * P2-J-E – Expanded insight-card detail body (READ-ONLY presentation).
+ * P2-J-E/G – Expanded insight-card detail body (READ-ONLY presentation).
  *
  * Renders explanation, structure summary extras, and element lists from the
- * ViewModel. No tree navigation, no H/I/J-A, no filesystem.
+ * ViewModel. J-G adds search highlighting and list reveal. No H/I/J-A, no filesystem.
  */
 
 import { useEffect, useState } from "react";
 
+import { InsightSearchHighlight } from "./InsightSearchHighlight";
 import type {
   InsightCardModel,
   InsightElementRef,
@@ -31,23 +32,43 @@ import {
   otherElementsHeading,
   visibleInsightElements,
 } from "./structureInsightDetailsHelpers";
+import {
+  cardDetailListKeysNeedingOpen,
+  elementListNeedsShowAllForSearch,
+  normalizeInsightSearchQuery,
+} from "./structureInsightFilters";
 
 export interface InsightCardDetailsProps {
   card: InsightCardModel;
   onNavigateToNode?: (nodeId: string) => void;
+  /** Raw search query from J-G filter bar (may be empty). */
+  searchQuery?: string;
 }
 
 function ElementRows({
   elements,
   onNavigateToNode,
+  normalizedQuery,
 }: {
   elements: readonly InsightElementRef[];
   onNavigateToNode?: (nodeId: string) => void;
+  normalizedQuery: string;
 }) {
   return (
     <ul className="insight-detail-element-list">
       {elements.map((element) => {
         const { name, path } = insightElementDisplayLines(element);
+        const nameNode = (
+          <span className="insight-detail-element-name">
+            <InsightSearchHighlight text={name} normalizedQuery={normalizedQuery} />
+          </span>
+        );
+        const pathNode =
+          path !== null ? (
+            <span className="insight-detail-element-path">
+              <InsightSearchHighlight text={path} normalizedQuery={normalizedQuery} />
+            </span>
+          ) : null;
         return (
           <li key={element.nodeId} className="insight-detail-element">
             {onNavigateToNode !== undefined ? (
@@ -58,17 +79,13 @@ function ElementRows({
                   onNavigateToNode(element.nodeId);
                 }}
               >
-                <span className="insight-detail-element-name">{name}</span>
-                {path !== null ? (
-                  <span className="insight-detail-element-path">{path}</span>
-                ) : null}
+                {nameNode}
+                {pathNode}
               </button>
             ) : (
               <>
-                <span className="insight-detail-element-name">{name}</span>
-                {path !== null ? (
-                  <span className="insight-detail-element-path">{path}</span>
-                ) : null}
+                {nameNode}
+                {pathNode}
               </>
             )}
           </li>
@@ -86,6 +103,7 @@ function CollapsibleElementList({
   onToggle,
   regionId,
   onNavigateToNode,
+  normalizedQuery,
 }: {
   listKey: string;
   heading: string;
@@ -94,16 +112,25 @@ function CollapsibleElementList({
   onToggle: () => void;
   regionId: string;
   onNavigateToNode?: (nodeId: string) => void;
+  normalizedQuery: string;
 }) {
   const [showAll, setShowAll] = useState(false);
+  const needsShowAll = elementListNeedsShowAllForSearch(elements, normalizedQuery);
+  const effectiveShowAll = showAll || needsShowAll;
   const hasMore = insightElementListHasMore(elements.length);
-  const visible = visibleInsightElements(elements, showAll);
+  const visible = visibleInsightElements(elements, effectiveShowAll);
 
   useEffect(() => {
     if (!open) {
       setShowAll(false);
     }
   }, [open]);
+
+  useEffect(() => {
+    if (needsShowAll) {
+      setShowAll(true);
+    }
+  }, [needsShowAll]);
 
   if (elements.length === 0) {
     return null;
@@ -125,7 +152,11 @@ function CollapsibleElementList({
       </button>
       {open ? (
         <div id={regionId} className="insight-detail-list-region">
-          <ElementRows elements={visible} onNavigateToNode={onNavigateToNode} />
+          <ElementRows
+            elements={visible}
+            onNavigateToNode={onNavigateToNode}
+            normalizedQuery={normalizedQuery}
+          />
           {hasMore ? (
             <button
               type="button"
@@ -134,7 +165,7 @@ function CollapsibleElementList({
                 setShowAll((current) => !current);
               }}
             >
-              {showAll ? INSIGHT_LIST_SHOW_LESS_LABEL : INSIGHT_LIST_SHOW_MORE_LABEL}
+              {effectiveShowAll ? INSIGHT_LIST_SHOW_LESS_LABEL : INSIGHT_LIST_SHOW_MORE_LABEL}
             </button>
           ) : null}
         </div>
@@ -149,12 +180,14 @@ function SecondaryGroupBlock({
   open,
   onToggle,
   onNavigateToNode,
+  normalizedQuery,
 }: {
   cardId: string;
   group: InsightSecondaryRecurringGroup;
   open: boolean;
   onToggle: () => void;
   onNavigateToNode?: (nodeId: string) => void;
+  normalizedQuery: string;
 }) {
   const listKey = insightNestedListKey(cardId, "secondary", group.groupKey);
   const regionId = `insight-detail-list-${cardId}-sec-${group.groupKey}`;
@@ -167,12 +200,39 @@ function SecondaryGroupBlock({
       onToggle={onToggle}
       regionId={regionId}
       onNavigateToNode={onNavigateToNode}
+      normalizedQuery={normalizedQuery}
     />
   );
 }
 
-export function InsightCardDetails({ card, onNavigateToNode }: InsightCardDetailsProps) {
+export function InsightCardDetails({
+  card,
+  onNavigateToNode,
+  searchQuery = "",
+}: InsightCardDetailsProps) {
+  const normalizedQuery = normalizeInsightSearchQuery(searchQuery);
   const [openLists, setOpenLists] = useState<ReadonlySet<string>>(() => new Set());
+
+  useEffect(() => {
+    if (normalizedQuery.length === 0) {
+      return;
+    }
+    const keys = cardDetailListKeysNeedingOpen(card, normalizedQuery);
+    if (keys.length === 0) {
+      return;
+    }
+    setOpenLists((current) => {
+      const next = new Set(current);
+      let changed = false;
+      for (const key of keys) {
+        if (!next.has(key)) {
+          next.add(key);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [card, normalizedQuery]);
 
   function toggleList(key: string) {
     setOpenLists((current) => {
@@ -207,12 +267,16 @@ export function InsightCardDetails({ card, onNavigateToNode }: InsightCardDetail
         <section className="insight-detail-section" aria-label={INSIGHT_EXPLANATION_HEADING}>
           <h5 className="insight-detail-heading">{INSIGHT_EXPLANATION_HEADING}</h5>
           {plainDescription.length > 0 ? (
-            <p className="insight-card-details-summary">{plainDescription}</p>
+            <p className="insight-card-details-summary">
+              <InsightSearchHighlight text={plainDescription} normalizedQuery={normalizedQuery} />
+            </p>
           ) : null}
           {bullets.length > 0 ? (
             <ul className="insight-detail-bullets">
               {bullets.map((bullet, index) => (
-                <li key={`${card.id}-bullet-${index}`}>{bullet}</li>
+                <li key={`${card.id}-bullet-${index}`}>
+                  <InsightSearchHighlight text={bullet} normalizedQuery={normalizedQuery} />
+                </li>
               ))}
             </ul>
           ) : null}
@@ -229,7 +293,9 @@ export function InsightCardDetails({ card, onNavigateToNode }: InsightCardDetail
               <p className="insight-detail-sublabel">{INSIGHT_STRUCTURE_PARTS_LABEL}</p>
               <ul className="insight-detail-parts-list">
                 {parts.map((part, index) => (
-                  <li key={`${card.id}-part-${index}`}>{part}</li>
+                  <li key={`${card.id}-part-${index}`}>
+                    <InsightSearchHighlight text={part} normalizedQuery={normalizedQuery} />
+                  </li>
                 ))}
               </ul>
             </div>
@@ -240,7 +306,8 @@ export function InsightCardDetails({ card, onNavigateToNode }: InsightCardDetail
               <ul className="insight-detail-examples-list">
                 {examples.map((example, index) => (
                   <li key={`${card.id}-ex-${index}`}>
-                    <span className="insight-detail-example-mark">Beispiel:</span> {example}
+                    <span className="insight-detail-example-mark">Beispiel:</span>{" "}
+                    <InsightSearchHighlight text={example} normalizedQuery={normalizedQuery} />
                   </li>
                 ))}
               </ul>
@@ -261,6 +328,7 @@ export function InsightCardDetails({ card, onNavigateToNode }: InsightCardDetail
             }}
             regionId={`insight-detail-list-${card.id}-primary`}
             onNavigateToNode={onNavigateToNode}
+            normalizedQuery={normalizedQuery}
           />
         </section>
       ) : null}
@@ -284,6 +352,7 @@ export function InsightCardDetails({ card, onNavigateToNode }: InsightCardDetail
                     toggleList(key);
                   }}
                   onNavigateToNode={onNavigateToNode}
+                  normalizedQuery={normalizedQuery}
                 />
               );
             })}
@@ -303,6 +372,7 @@ export function InsightCardDetails({ card, onNavigateToNode }: InsightCardDetail
             }}
             regionId={`insight-detail-list-${card.id}-other`}
             onNavigateToNode={onNavigateToNode}
+            normalizedQuery={normalizedQuery}
           />
         </section>
       ) : null}

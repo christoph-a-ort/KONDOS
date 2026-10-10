@@ -1,5 +1,5 @@
 /**
- * P2-J-C/D/E/F – Structure insights view with cards, details, and navigation.
+ * P2-J-C/D/E/F/G – Structure insights view with cards, navigation, search/filters.
  *
  * Presentation + navigation callbacks only. No H/I/J-A, no filesystem.
  */
@@ -11,8 +11,31 @@ import type { InsightAnalysisPhase } from "./structureInsightAnalysis";
 import {
   formatInsightLocationHeading,
   insightViewModelExpansionKey,
-  listInsightLocationSections,
 } from "./structureInsightCardsHelpers";
+import {
+  DEFAULT_INSIGHT_FILTER_STATE,
+  INSIGHT_CATEGORY_FILTER_LABEL,
+  INSIGHT_CATEGORY_FILTER_OPTIONS,
+  INSIGHT_DETAILS_COLLAPSE_ALL_LABEL,
+  INSIGHT_DETAILS_EXPAND_ALL_LABEL,
+  INSIGHT_EVIDENCE_FILTER_LABEL,
+  INSIGHT_EVIDENCE_FILTER_OPTIONS,
+  INSIGHT_FILTER_EMPTY_MESSAGE,
+  INSIGHT_FILTER_RESET_LABEL,
+  INSIGHT_SEARCH_CLEAR_LABEL,
+  INSIGHT_SEARCH_LABEL,
+  INSIGHT_SEARCH_PLACEHOLDER,
+  cardNeedsDetailOpenForSearch,
+  countFilteredInsights,
+  filterInsightLocationSections,
+  filtersAreActive,
+  formatInsightHitCount,
+  isInsightCategoryFilter,
+  isInsightEvidenceFilter,
+  normalizeInsightSearchQuery,
+  resetInsightFilters,
+  type InsightFilterState,
+} from "./structureInsightFilters";
 import type { InsightFocusRequest } from "./structureInsightNavigation";
 import type { InsightLocationGroup, StructureInsightViewModel } from "./structureInsightViewModel";
 import {
@@ -102,39 +125,165 @@ export function StructureInsightsView({
   const expansionKey = insightViewModelExpansionKey(viewModel);
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [highlightedInsightId, setHighlightedInsightId] = useState<string | null>(null);
+  const [filters, setFilters] = useState<InsightFilterState>(() => DEFAULT_INSIGHT_FILTER_STATE);
+  /** Cards the user closed while the current normalized query is active (prevents reopen loop). */
+  const [suppressedAutoOpenIds, setSuppressedAutoOpenIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [autoOpenQueryKey, setAutoOpenQueryKey] = useState("");
   const locationSectionEls = useRef<Map<string, HTMLElement>>(new Map());
+  const searchInputId = "insight-search-input";
+  const evidenceFilterId = "insight-evidence-filter";
+  const categoryFilterId = "insight-category-filter";
 
   useEffect(() => {
     setExpandedIds(new Set());
     setHighlightedInsightId(null);
+    setFilters((current) => ({
+      ...current,
+      query: "",
+    }));
+    setSuppressedAutoOpenIds(new Set());
+    setAutoOpenQueryKey("");
   }, [expansionKey]);
 
-  const sections = useMemo(
-    () => (viewModel === null ? [] : listInsightLocationSections(viewModel)),
-    [viewModel],
+  const normalizedQuery = useMemo(
+    () => normalizeInsightSearchQuery(filters.query),
+    [filters.query],
   );
+
+  const sections = useMemo(() => {
+    if (viewModel === null) {
+      return [];
+    }
+    return filterInsightLocationSections(viewModel, filters);
+  }, [viewModel, filters]);
+
+  const visibleCount = useMemo(() => countFilteredInsights(sections), [sections]);
+  const totalCount = viewModel?.insights.length ?? 0;
+  const hitCountLabel = formatInsightHitCount(visibleCount, totalCount);
+  const detailsAllOpen =
+    visibleCount > 0 &&
+    sections.every((section) => section.cards.every((card) => expandedIds.has(card.id)));
+
+  useEffect(() => {
+    if (normalizedQuery !== autoOpenQueryKey) {
+      setSuppressedAutoOpenIds(new Set());
+      setAutoOpenQueryKey(normalizedQuery);
+    }
+  }, [normalizedQuery, autoOpenQueryKey]);
+
+  useEffect(() => {
+    if (normalizedQuery.length === 0 || viewModel === null) {
+      return;
+    }
+    setExpandedIds((current) => {
+      const next = new Set(current);
+      let changed = false;
+      for (const section of sections) {
+        for (const card of section.cards) {
+          if (suppressedAutoOpenIds.has(card.id)) {
+            continue;
+          }
+          if (cardNeedsDetailOpenForSearch(card, normalizedQuery) && !next.has(card.id)) {
+            next.add(card.id);
+            changed = true;
+          }
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [normalizedQuery, sections, suppressedAutoOpenIds, viewModel]);
 
   useEffect(() => {
     if (focusRequest === null) {
       return;
     }
+    setFilters(resetInsightFilters());
+    setSuppressedAutoOpenIds(new Set());
+    setAutoOpenQueryKey("");
     setHighlightedInsightId(focusRequest.firstInsightId);
+  }, [focusRequest?.id]);
+
+  useEffect(() => {
+    if (focusRequest === null) {
+      return;
+    }
     const sectionEl = locationSectionEls.current.get(focusRequest.locationId);
     if (sectionEl !== undefined) {
       sectionEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
-  }, [focusRequest?.id]);
+  }, [focusRequest?.id, sections]);
 
   function toggleCard(cardId: string) {
     setExpandedIds((current) => {
       const next = new Set(current);
       if (next.has(cardId)) {
         next.delete(cardId);
+        if (normalizedQuery.length > 0) {
+          setSuppressedAutoOpenIds((suppressed) => {
+            const updated = new Set(suppressed);
+            updated.add(cardId);
+            return updated;
+          });
+        }
       } else {
         next.add(cardId);
+        setSuppressedAutoOpenIds((suppressed) => {
+          if (!suppressed.has(cardId)) {
+            return suppressed;
+          }
+          const updated = new Set(suppressed);
+          updated.delete(cardId);
+          return updated;
+        });
       }
       return next;
     });
+  }
+
+  function expandAllVisibleDetails() {
+    setExpandedIds((current) => {
+      const next = new Set(current);
+      for (const section of sections) {
+        for (const card of section.cards) {
+          next.add(card.id);
+        }
+      }
+      return next;
+    });
+    setSuppressedAutoOpenIds(new Set());
+  }
+
+  function collapseAllVisibleDetails() {
+    const visibleIds = new Set<string>();
+    for (const section of sections) {
+      for (const card of section.cards) {
+        visibleIds.add(card.id);
+      }
+    }
+    setExpandedIds((current) => {
+      const next = new Set(current);
+      for (const id of visibleIds) {
+        next.delete(id);
+      }
+      return next;
+    });
+    if (normalizedQuery.length > 0) {
+      setSuppressedAutoOpenIds((current) => {
+        const next = new Set(current);
+        for (const id of visibleIds) {
+          next.add(id);
+        }
+        return next;
+      });
+    }
+  }
+
+  function resetSearchAndFilters() {
+    setFilters(resetInsightFilters());
+    setSuppressedAutoOpenIds(new Set());
+    setAutoOpenQueryKey("");
   }
 
   if (phase === "running") {
@@ -220,6 +369,8 @@ export function StructureInsightsView({
     );
   }
 
+  const showFilterEmpty = visibleCount === 0 && filtersAreActive(filters);
+
   return (
     <section className="insight-view tree-panel" aria-label="Erkenntnisse">
       <header className="insight-view-header">
@@ -239,53 +390,167 @@ export function StructureInsightsView({
         <p className="insight-evidence-info muted">{INSIGHT_EVIDENCE_INFO}</p>
       </header>
       <div className="insight-view-body">
-        <div className="insight-locations">
-          {sections.map(({ location, cards }) => {
-            if (cards.length === 0) {
-              return null;
-            }
-            const heading = formatInsightLocationHeading(location);
-            return (
-              <section
-                key={location.locationId}
-                className="insight-location"
-                aria-label={heading}
-                ref={(element) => {
-                  if (element === null) {
-                    locationSectionEls.current.delete(location.locationId);
-                  } else {
-                    locationSectionEls.current.set(location.locationId, element);
+        <div className="insight-filter-bar" role="search">
+          <div className="insight-filter-search">
+            <label className="insight-filter-label" htmlFor={searchInputId}>
+              {INSIGHT_SEARCH_LABEL}
+            </label>
+            <div className="insight-filter-search-row">
+              <input
+                id={searchInputId}
+                type="search"
+                className="insight-filter-search-input"
+                value={filters.query}
+                placeholder={INSIGHT_SEARCH_PLACEHOLDER}
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setFilters((current) => ({ ...current, query: value }));
+                }}
+              />
+              {filters.query.length > 0 ? (
+                <button
+                  type="button"
+                  className="insight-filter-clear"
+                  onClick={() => {
+                    setFilters((current) => ({ ...current, query: "" }));
+                  }}
+                >
+                  {INSIGHT_SEARCH_CLEAR_LABEL}
+                </button>
+              ) : null}
+            </div>
+          </div>
+          <div className="insight-filter-selects">
+            <div className="insight-filter-field">
+              <label className="insight-filter-label" htmlFor={evidenceFilterId}>
+                {INSIGHT_EVIDENCE_FILTER_LABEL}
+              </label>
+              <select
+                id={evidenceFilterId}
+                className="insight-filter-select"
+                value={filters.evidence}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (!isInsightEvidenceFilter(value)) {
+                    return;
                   }
+                  setFilters((current) => ({ ...current, evidence: value }));
                 }}
               >
-                <h3 className="insight-location-path">
-                  <LocationPath location={location} onNavigateToNode={onNavigateToNode} />
-                </h3>
-                <div className="insight-location-cards">
-                  {cards.map((card) => (
-                    <InsightCard
-                      key={card.id}
-                      card={card}
-                      expanded={expandedIds.has(card.id)}
-                      highlighted={highlightedInsightId === card.id}
-                      onToggleDetails={() => {
-                        toggleCard(card.id);
-                      }}
-                      onNavigateToLocation={
-                        onNavigateToNode !== undefined
-                          ? () => {
-                              onNavigateToNode(card.locationId);
-                            }
-                          : undefined
-                      }
-                      onNavigateToNode={onNavigateToNode}
-                    />
-                  ))}
-                </div>
-              </section>
-            );
-          })}
+                {INSIGHT_EVIDENCE_FILTER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="insight-filter-field">
+              <label className="insight-filter-label" htmlFor={categoryFilterId}>
+                {INSIGHT_CATEGORY_FILTER_LABEL}
+              </label>
+              <select
+                id={categoryFilterId}
+                className="insight-filter-select"
+                value={filters.category}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (!isInsightCategoryFilter(value)) {
+                    return;
+                  }
+                  setFilters((current) => ({ ...current, category: value }));
+                }}
+              >
+                {INSIGHT_CATEGORY_FILTER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="insight-filter-meta">
+            <p className="insight-filter-hit-count" aria-live="polite">
+              {hitCountLabel}
+            </p>
+            <button
+              type="button"
+              className="insight-filter-details-all"
+              onClick={() => {
+                if (detailsAllOpen) {
+                  collapseAllVisibleDetails();
+                } else {
+                  expandAllVisibleDetails();
+                }
+              }}
+              disabled={visibleCount === 0}
+            >
+              {detailsAllOpen
+                ? INSIGHT_DETAILS_COLLAPSE_ALL_LABEL
+                : INSIGHT_DETAILS_EXPAND_ALL_LABEL}
+            </button>
+          </div>
         </div>
+
+        {showFilterEmpty ? (
+          <div className="insight-filter-empty" role="status">
+            <p className="insight-filter-empty-message">{INSIGHT_FILTER_EMPTY_MESSAGE}</p>
+            <button
+              type="button"
+              className="insight-filter-reset"
+              onClick={resetSearchAndFilters}
+            >
+              {INSIGHT_FILTER_RESET_LABEL}
+            </button>
+          </div>
+        ) : (
+          <div className="insight-locations">
+            {sections.map(({ location, cards }) => {
+              const heading = formatInsightLocationHeading(location);
+              return (
+                <section
+                  key={location.locationId}
+                  className="insight-location"
+                  aria-label={heading}
+                  ref={(element) => {
+                    if (element === null) {
+                      locationSectionEls.current.delete(location.locationId);
+                    } else {
+                      locationSectionEls.current.set(location.locationId, element);
+                    }
+                  }}
+                >
+                  <h3 className="insight-location-path">
+                    <LocationPath location={location} onNavigateToNode={onNavigateToNode} />
+                  </h3>
+                  <div className="insight-location-cards">
+                    {cards.map((card) => (
+                      <InsightCard
+                        key={card.id}
+                        card={card}
+                        expanded={expandedIds.has(card.id)}
+                        highlighted={highlightedInsightId === card.id}
+                        searchQuery={filters.query}
+                        onToggleDetails={() => {
+                          toggleCard(card.id);
+                        }}
+                        onNavigateToLocation={
+                          onNavigateToNode !== undefined
+                            ? () => {
+                                onNavigateToNode(card.locationId);
+                              }
+                            : undefined
+                        }
+                        onNavigateToNode={onNavigateToNode}
+                      />
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        )}
       </div>
     </section>
   );

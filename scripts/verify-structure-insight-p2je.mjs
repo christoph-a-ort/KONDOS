@@ -64,8 +64,10 @@ assert(!detailsSrc.includes("selectTree"), "details: no tree select");
 assert(!detailsSrc.includes("explanationBullets.map") || detailsSrc.includes("bullets.map"), "details: bullets render");
 assert(!detailsSrc.toLowerCase().includes("confidencescore"), "details: no score");
 assert(!detailsSrc.includes("retryInsightAnalysis"), "details: no retry");
-assert(!detailsSrc.includes("Filter"), "details: no Filter");
-assert(!detailsSrc.includes("Suche"), "details: no Suche");
+// J-G may import structureInsightFilters / searchQuery for hit reveal; still no rating/retry.
+assert(!detailsSrc.includes("Bestätigen"), "details: no rating");
+assert(!detailsSrc.includes("retryInsightAnalysis"), "details: no retry");
+assert(!detailsSrc.includes("Suche und Filter"), "details: no filter reset UI");
 assert(!detailsSrc.includes("Bestätigen"), "details: no rating");
 assert(!detailsSrc.includes("invoke("), "details: no invoke");
 assert(!detailsSrc.includes("fs."), "details: no fs");

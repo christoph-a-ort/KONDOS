@@ -60,8 +60,9 @@ assert(!presentSrc.includes("startScan"), "view: no startScan");
 assert(!presentSrc.includes("invoke("), "view: no invoke");
 assert(!/\bfs\.|from ["']node:fs["']|from ["']fs["']/.test(presentSrc), "view: no filesystem module");
 assert(viewSrc.includes("InsightCard") || viewSrc.includes("insight-view-body"), "view: ready body present");
-assert(!/Filter|Suche/.test(viewSrc), "view: no Filter/Suche UI");
-assert(!viewSrc.includes("Alle Details"), "view: no Alle Details");
+// J-G may add Filter/Suche/Alle-Details UI; J-C still forbids retry and rating.
+assert(!viewSrc.includes("retryInsightAnalysis"), "view: no retry");
+assert(!/\bfs\.|from ["']node:fs["']|from ["']fs["']/.test(viewSrc), "view: no filesystem module");
 assert(!viewSrc.includes("Bestätigen"), "view: no user rating");
 assert(!treeViewSrc.includes("InsightCard"), "TreeView: no InsightCard");
 assert(!presentSrc.toLowerCase().includes("confidencescore"), "view: no score");

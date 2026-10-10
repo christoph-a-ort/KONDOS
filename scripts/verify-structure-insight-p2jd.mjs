@@ -68,19 +68,21 @@ assert(!cardSrc.toLowerCase().includes("confidenceScore"), "card: no score");
 assert(!/%/.test(cardSrc), "card: no percent");
 
 assert(viewSrc.includes("InsightCard"), "view: InsightCard");
-assert(viewSrc.includes("listInsightLocationSections"), "view: sections");
+assert(
+  viewSrc.includes("listInsightLocationSections") || viewSrc.includes("filterInsightLocationSections"),
+  "view: sections",
+);
 assert(viewSrc.includes("insight-location"), "view: location class");
 assert(viewSrc.includes("formatInsightLocationHeading"), "view: heading");
 assert(viewSrc.includes("expandedIds"), "view: local expand state");
 assert(viewSrc.includes("insightViewModelExpansionKey"), "view: expansion reset");
 assert(!viewSrc.includes(".sort("), "view: no sort");
 assert(!/onClick=\{[^}]*scrollIntoView|selectTree|focusTree|expandTree/i.test(viewSrc), "view: no tree nav");
-assert(!viewSrc.includes("Filter"), "view: no Filter");
-assert(!viewSrc.includes("Suche"), "view: no Suche");
-assert(!viewSrc.includes("Alle Details"), "view: no Alle Details");
+// J-G adds Filter/Suche/Alle-Details; J-D still forbids rating/retry and tree-select APIs.
 assert(!viewSrc.includes("Bestätigen"), "view: no rating");
 assert(!viewSrc.includes("Ablehnen"), "view: no rating reject");
 assert(!viewSrc.includes("retryInsightAnalysis"), "view: no retry");
+assert(viewSrc.includes("InsightCard"), "view: cards retained");
 assert(!viewSrc.includes("buildStructureInsightViewModel"), "view: no J-A");
 assert(!viewSrc.includes("buildStructureRuleCandidateInsight"), "view: no H");
 assert(!viewSrc.includes("buildStructureConfidenceInsight"), "view: no I");

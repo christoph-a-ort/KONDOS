@@ -25,6 +25,7 @@ import { runStructureInsightsViewCheck } from "./structureInsightsViewCheck";
 import { runStructureInsightCardsCheck } from "./structureInsightCardsCheck";
 import { runStructureInsightDetailsCheck } from "./structureInsightDetailsCheck";
 import { runStructureInsightNavigationCheck } from "./structureInsightNavigationCheck";
+import { runStructureInsightFiltersCheck } from "./structureInsightFiltersCheck";
 import { runP1cCheck } from "./p1cCheck";
 import { runP1dCheck } from "./p1dCheck";
 import { runP1e1Check } from "./contentSearchCheck";
@@ -341,6 +342,7 @@ export async function runTreeWorkbenchCheck(): Promise<void> {
   runStructureInsightCardsCheck();
   runStructureInsightDetailsCheck();
   runStructureInsightNavigationCheck();
+  runStructureInsightFiltersCheck();
 }
 
 function runTreeSearchCheck(nested: DirectoryNode): void {

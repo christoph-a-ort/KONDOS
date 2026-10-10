@@ -86,10 +86,11 @@ assert(!analysisSrc.includes("structureInsightNavigation"), "J-B unchanged");
 assert(!ruleSrc.includes("structureInsightNavigation"), "P2-H unchanged");
 assert(!confSrc.includes("structureInsightNavigation"), "P2-I unchanged");
 assert(!vmSrc.includes("structureInsightNavigation"), "P2-J-A unchanged");
-assert(!viewSrc.includes("Filter"), "view: no Filter");
-assert(!viewSrc.includes("Suche"), "view: no Suche");
+// J-G may add search/filter UI in StructureInsightsView; J-F still forbids retry/rating.
 assert(!viewSrc.includes("retryInsightAnalysis"), "view: no retry");
 assert(!cardSrc.includes("Bestätigen"), "card: no rating");
+assert(viewSrc.includes("onNavigateToNode"), "view: J-F navigation retained");
+assert(viewSrc.includes("focusRequest"), "view: J-F focus retained");
 
 const deps = JSON.parse(pkgSrc).dependencies ?? {};
 assert(!deps["react-router"] && !deps["react-router-dom"], "no router dep");
