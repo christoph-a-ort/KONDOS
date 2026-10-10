@@ -22,10 +22,12 @@ import {
 export type InsightAnalysisPhase = "idle" | "running" | "ready" | "failed";
 
 export interface InsightAnalysisError {
-  /** Stable machine code for later UI mapping (J-H). Not a user-facing string. */
+  /** Stable machine code for UI mapping. Not a user-facing headline. */
   code: "analysis-failed";
-  /** Internal diagnostic detail; not wired as visible product copy in J-B. */
+  /** Internal diagnostic message; shown only under technical details (J-H). */
   detail: string;
+  /** Error.name when the cause was an Error; omitted otherwise. */
+  name?: string;
 }
 
 export interface StructureInsightAnalysisDependencies {
@@ -144,14 +146,24 @@ export function scheduleStructureInsightAnalysis(
 }
 
 export function toInsightAnalysisError(cause: unknown): InsightAnalysisError {
-  const detail =
-    cause instanceof Error
-      ? cause.message
-      : typeof cause === "string"
-        ? cause
-        : "structure-insight-analysis-failed";
+  if (cause instanceof Error) {
+    const message = cause.message.trim();
+    return {
+      code: "analysis-failed",
+      detail: message.length > 0 ? message : "structure-insight-analysis-failed",
+      name: cause.name.trim().length > 0 ? cause.name : undefined,
+    };
+  }
+  if (typeof cause === "string") {
+    const trimmed = cause.trim();
+    return {
+      code: "analysis-failed",
+      detail: trimmed.length > 0 ? trimmed : "structure-insight-analysis-failed",
+    };
+  }
+  // null, undefined, or unknown objects: never dump arbitrary contents.
   return {
     code: "analysis-failed",
-    detail,
+    detail: "structure-insight-analysis-failed",
   };
 }

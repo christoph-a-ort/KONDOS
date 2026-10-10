@@ -78,10 +78,10 @@ assert(viewSrc.includes("expandedIds"), "view: local expand state");
 assert(viewSrc.includes("insightViewModelExpansionKey"), "view: expansion reset");
 assert(!viewSrc.includes(".sort("), "view: no sort");
 assert(!/onClick=\{[^}]*scrollIntoView|selectTree|focusTree|expandTree/i.test(viewSrc), "view: no tree nav");
-// J-G adds Filter/Suche/Alle-Details; J-D still forbids rating/retry and tree-select APIs.
+// J-G/J-H add Filter/Suche/Retry UI; J-D still forbids rating and owning analyze/schedule.
 assert(!viewSrc.includes("Bestätigen"), "view: no rating");
 assert(!viewSrc.includes("Ablehnen"), "view: no rating reject");
-assert(!viewSrc.includes("retryInsightAnalysis"), "view: no retry");
+assert(!viewSrc.includes("scheduleStructureInsightAnalysis"), "view: no schedule");
 assert(viewSrc.includes("InsightCard"), "view: cards retained");
 assert(!viewSrc.includes("buildStructureInsightViewModel"), "view: no J-A");
 assert(!viewSrc.includes("buildStructureRuleCandidateInsight"), "view: no H");

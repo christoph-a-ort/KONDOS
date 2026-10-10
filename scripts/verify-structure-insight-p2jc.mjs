@@ -20,6 +20,7 @@ function read(rel) {
 
 const viewSrc = read("src/ui/StructureInsightsView.tsx");
 const helpersSrc = read("src/ui/structureInsightsViewHelpers.ts");
+const errorHelpersSrc = read("src/ui/structureInsightErrorHelpers.ts");
 const checkSrc = read("src/ui/structureInsightsViewCheck.ts");
 const appSrc = read("src/App.tsx");
 const cssSrc = read("src/App.css");
@@ -30,7 +31,7 @@ const ruleSrc = read("src/ui/structureRuleCandidate.ts");
 const confSrc = read("src/ui/structureConfidenceAssessment.ts");
 const vmSrc = read("src/ui/structureInsightViewModel.ts");
 
-const presentSrc = `${viewSrc}\n${helpersSrc}`;
+const presentSrc = `${viewSrc}\n${helpersSrc}\n${errorHelpersSrc}`;
 
 assert(viewSrc.includes("StructureInsightsView"), "view export");
 assert(helpersSrc.includes("formatInsightReadyHeadline"), "headline helper");
@@ -40,34 +41,48 @@ assert(helpersSrc.includes("defaultMainView"), "default main view");
 assert(helpersSrc.includes("mainViewAfterScanStart"), "scan start view");
 assert(helpersSrc.includes("canSelectInsightsView"), "select gate");
 assert(helpersSrc.includes("shouldAutoSwitchMainViewOnPhase"), "no auto-switch helper");
-assert(presentSrc.includes("Erkenntnisse werden ermittelt"), "running copy");
+assert(
+  presentSrc.includes("Erkenntnisse werden ermittelt") ||
+    presentSrc.includes("untersucht die eingelesene Struktur") ||
+    viewSrc.includes("INSIGHT_RUNNING_MESSAGE"),
+  "running copy",
+);
 assert(presentSrc.includes("strukturelles Muster erkannt"), "singular ready");
 assert(presentSrc.includes("strukturelle Muster erkannt"), "plural ready");
-assert(presentSrc.includes("keine strukturellen Muster erkannt"), "true zero");
-assert(presentSrc.includes("teilweise eingeschränkt"), "partial");
-assert(presentSrc.includes("nicht ermittelt werden"), "failed");
-assert(presentSrc.includes("Ordnerstruktur steht weiterhin"), "failed structure note");
+assert(
+  presentSrc.toLowerCase().includes("keine strukturellen muster erkannt"),
+  "true zero",
+);
+assert(
+  presentSrc.includes("teilweise eingeschränkt") || presentSrc.includes("eingeschränkten Datengrundlage"),
+  "partial",
+);
+assert(
+  presentSrc.includes("nicht ermittelt werden") || presentSrc.includes("nicht abgeschlossen"),
+  "failed",
+);
+assert(presentSrc.includes("Ordnerstruktur") && presentSrc.includes("verfügbar"), "failed structure note");
 assert(presentSrc.includes("Noch nicht bewertet"), "unassessed label");
 assert(presentSrc.includes("keine Bewertung Ihrer Ablage"), "evidence info");
 assert(presentSrc.includes("countsByEvidence"), "uses VM evidence counts");
-assert(!presentSrc.includes("buildStructureRuleCandidateInsight"), "view: no P2-H");
-assert(!presentSrc.includes("buildStructureConfidenceInsight"), "view: no P2-I");
-assert(!presentSrc.includes("buildStructureInsightViewModel"), "view: no J-A builder");
-assert(!presentSrc.includes("analyzeStructureInsights"), "view: no analyze");
-assert(!presentSrc.includes("scheduleStructureInsightAnalysis"), "view: no schedule");
-assert(!presentSrc.includes("retryInsightAnalysis"), "view: no retry wire");
-assert(!presentSrc.includes("startScan"), "view: no startScan");
-assert(!presentSrc.includes("invoke("), "view: no invoke");
-assert(!/\bfs\.|from ["']node:fs["']|from ["']fs["']/.test(presentSrc), "view: no filesystem module");
+assert(!viewSrc.includes("buildStructureRuleCandidateInsight"), "view: no P2-H");
+assert(!viewSrc.includes("buildStructureConfidenceInsight"), "view: no P2-I");
+assert(!viewSrc.includes("buildStructureInsightViewModel"), "view: no J-A builder");
+assert(!viewSrc.includes("analyzeStructureInsights"), "view: no analyze");
+assert(!viewSrc.includes("scheduleStructureInsightAnalysis"), "view: no schedule");
+assert(!viewSrc.includes("startScan"), "view: no startScan");
+assert(!viewSrc.includes("invoke("), "view: no invoke");
+assert(!/\bfs\.|from ["']node:fs["']|from ["']fs["']/.test(viewSrc), "view: no filesystem module");
 assert(viewSrc.includes("InsightCard") || viewSrc.includes("insight-view-body"), "view: ready body present");
-// J-G may add Filter/Suche/Alle-Details UI; J-C still forbids retry and rating.
-assert(!viewSrc.includes("retryInsightAnalysis"), "view: no retry");
+// J-H wires retry via onRetryAnalysis callback; view must not own scan/analyze.
+assert(viewSrc.includes("onRetryAnalysis"), "view: retry callback prop (J-H)");
+assert(!viewSrc.includes("scheduleStructureInsightAnalysis"), "view: no schedule");
 assert(!/\bfs\.|from ["']node:fs["']|from ["']fs["']/.test(viewSrc), "view: no filesystem module");
 assert(!viewSrc.includes("Bestätigen"), "view: no user rating");
 assert(!treeViewSrc.includes("InsightCard"), "TreeView: no InsightCard");
-assert(!presentSrc.toLowerCase().includes("confidencescore"), "view: no score");
-assert(!presentSrc.includes("error.detail"), "view: no error.detail");
-assert(!presentSrc.includes("insightAnalysisError"), "view: no raw error prop");
+assert(!viewSrc.toLowerCase().includes("confidencescore"), "view: no score");
+assert(!viewSrc.includes("error.detail"), "view: no error.detail");
+assert(!viewSrc.includes("insightAnalysisError"), "view: no App error state name");
 
 assert(checkSrc.includes("runStructureInsightsViewCheck"), "check export");
 assert(checkSrc.includes("no auto on running"), "check: no auto running");
@@ -88,8 +103,8 @@ assert(appSrc.includes("main-view-panel-hidden"), "App: keep panels / hide inact
 assert(appSrc.includes("<TreeView"), "App: TreeView present");
 assert(!/mainView\s*===\s*["']structure["'][\s\S]{0,80}<TreeView/.test(appSrc) ||
   appSrc.includes("main-view-panel-hidden"), "App: TreeView not unmounted on switch");
-assert(!appSrc.includes("onClick={() => {\n                void retryInsightAnalysis"), "App: no retry button wire");
-assert(!appSrc.includes(">Erneut versuchen"), "App: no retry label");
+assert(appSrc.includes("onRetryAnalysis={retryInsightAnalysis}"), "App: retry wired (J-H)");
+assert(appSrc.includes("insightAnalysisInFlightRef"), "App: retry in-flight guard (J-H)");
 assert(!appSrc.includes("Alle | Hoch"), "App: no evidence filter strip");
 assert(!treeViewSrc.includes("StructureInsightsView"), "TreeView: no insights import");
 assert(!treeViewSrc.includes("insightViewModel"), "TreeView: no insight VM");

@@ -69,6 +69,13 @@ export function runStructureInsightAnalysisCheck(): void {
   assert(shouldAcceptInsightAnalysisResult(3, 3, 7, 8) === false, "reject other generation");
   assert(toInsightAnalysisError(new Error("boom")).code === "analysis-failed", "error code");
   assert(toInsightAnalysisError(new Error("boom")).detail === "boom", "error detail");
+  assert(toInsightAnalysisError(new Error("boom")).name === "Error", "error name");
+  assert(toInsightAnalysisError("x").detail === "x", "string error");
+  assert(toInsightAnalysisError(null).detail === "structure-insight-analysis-failed", "null error");
+  assert(
+    toInsightAnalysisError({ a: 1 }).detail === "structure-insight-analysis-failed",
+    "object error not dumped",
+  );
 
   // 1–3 Successful path + zero insights + view model shape
   const tiny = resultOf(dir("X:/Tiny", "Tiny", 0, [file("X:/Tiny/a.txt", "a.txt", 1)]));

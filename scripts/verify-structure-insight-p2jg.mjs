@@ -56,7 +56,8 @@ assert(viewSrc.includes("focusRequest"), "view: J-F focus retained");
 assert(viewSrc.includes("onNavigateToNode"), "view: J-F nav retained");
 assert(viewSrc.includes("setFilters(resetInsightFilters())"), "view: marker resets filters");
 assert(!viewSrc.includes("dangerouslySetInnerHTML"), "view: no html inject");
-assert(!viewSrc.includes("retryInsightAnalysis"), "view: no retry");
+// J-H may add onRetryAnalysis; J-G still forbids rating and owning the analysis scheduler.
+assert(!viewSrc.includes("scheduleStructureInsightAnalysis"), "view: no schedule");
 assert(!viewSrc.includes("Bestätigen"), "view: no rating");
 
 assert(cardSrc.includes("searchQuery"), "card: searchQuery");

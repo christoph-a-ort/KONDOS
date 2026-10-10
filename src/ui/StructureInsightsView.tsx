@@ -7,11 +7,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { InsightCard } from "./InsightCard";
-import type { InsightAnalysisPhase } from "./structureInsightAnalysis";
+import type { InsightAnalysisError, InsightAnalysisPhase } from "./structureInsightAnalysis";
 import {
   formatInsightLocationHeading,
   insightViewModelExpansionKey,
 } from "./structureInsightCardsHelpers";
+import {
+  INSIGHT_FAILED_HEADLINE,
+  INSIGHT_FAILED_STRUCTURE_NOTE,
+  INSIGHT_PARTIAL_GLOBAL_HEADLINE,
+  INSIGHT_PARTIAL_GLOBAL_NOTE,
+  INSIGHT_PARTIAL_ZERO_SUMMARY,
+  INSIGHT_RETRY_LABEL,
+  INSIGHT_RUNNING_MESSAGE,
+  INSIGHT_TECH_DETAILS_HIDE_LABEL,
+  INSIGHT_TECH_DETAILS_SHOW_LABEL,
+  INSIGHT_ZERO_EXPLANATION,
+  INSIGHT_ZERO_HEADLINE,
+  INSIGHT_ZERO_NEUTRAL_NOTE,
+  formatInsightAnalysisErrorDetailLines,
+  insightFailedDetailsRegionId,
+} from "./structureInsightErrorHelpers";
 import {
   DEFAULT_INSIGHT_FILTER_STATE,
   INSIGHT_CATEGORY_FILTER_LABEL,
@@ -59,6 +75,9 @@ export {
 export interface StructureInsightsViewProps {
   phase: InsightAnalysisPhase;
   viewModel: StructureInsightViewModel | null;
+  analysisError?: InsightAnalysisError | null;
+  /** Retry failed analysis using the current ScanResult (wired in App). */
+  onRetryAnalysis?: () => void;
   focusRequest?: InsightFocusRequest | null;
   onNavigateToNode?: (nodeId: string) => void;
 }
@@ -119,6 +138,8 @@ function LocationPath({
 export function StructureInsightsView({
   phase,
   viewModel,
+  analysisError = null,
+  onRetryAnalysis,
   focusRequest = null,
   onNavigateToNode,
 }: StructureInsightsViewProps) {
@@ -131,10 +152,12 @@ export function StructureInsightsView({
     () => new Set(),
   );
   const [autoOpenQueryKey, setAutoOpenQueryKey] = useState("");
+  const [techDetailsOpen, setTechDetailsOpen] = useState(false);
   const locationSectionEls = useRef<Map<string, HTMLElement>>(new Map());
   const searchInputId = "insight-search-input";
   const evidenceFilterId = "insight-evidence-filter";
   const categoryFilterId = "insight-category-filter";
+  const techDetailsId = insightFailedDetailsRegionId();
 
   useEffect(() => {
     setExpandedIds(new Set());
@@ -146,6 +169,10 @@ export function StructureInsightsView({
     setSuppressedAutoOpenIds(new Set());
     setAutoOpenQueryKey("");
   }, [expansionKey]);
+
+  useEffect(() => {
+    setTechDetailsOpen(false);
+  }, [phase, analysisError?.detail, analysisError?.name]);
 
   const normalizedQuery = useMemo(
     () => normalizeInsightSearchQuery(filters.query),
@@ -293,7 +320,7 @@ export function StructureInsightsView({
           <h2>Erkenntnisse</h2>
           <p className="insight-state" role="status" aria-live="polite">
             <span className="insight-activity" aria-hidden="true" />
-            Erkenntnisse werden ermittelt …
+            {INSIGHT_RUNNING_MESSAGE}
           </p>
         </header>
       </section>
@@ -301,16 +328,47 @@ export function StructureInsightsView({
   }
 
   if (phase === "failed") {
+    const detailLines = formatInsightAnalysisErrorDetailLines(analysisError);
+    const retryEnabled = onRetryAnalysis !== undefined;
     return (
       <section className="insight-view tree-panel" aria-label="Erkenntnisse">
         <header className="insight-view-header">
           <h2>Erkenntnisse</h2>
-          <p className="insight-state">
-            Die Erkenntnisse konnten für diesen eingelesenen Bestand nicht ermittelt werden.
-          </p>
-          <p className="insight-state-note muted">
-            Die eingelesene Ordnerstruktur steht weiterhin zur Verfügung.
-          </p>
+          <div className="insight-failed" role="alert">
+            <p className="insight-failed-headline">{INSIGHT_FAILED_HEADLINE}</p>
+            <p className="insight-failed-note muted">{INSIGHT_FAILED_STRUCTURE_NOTE}</p>
+            <div className="insight-failed-actions">
+              {retryEnabled ? (
+                <button
+                  type="button"
+                  className="insight-failed-retry"
+                  onClick={onRetryAnalysis}
+                >
+                  {INSIGHT_RETRY_LABEL}
+                </button>
+              ) : null}
+              {detailLines.length > 0 ? (
+                <button
+                  type="button"
+                  className="insight-failed-details-toggle"
+                  aria-expanded={techDetailsOpen}
+                  aria-controls={techDetailsId}
+                  onClick={() => {
+                    setTechDetailsOpen((current) => !current);
+                  }}
+                >
+                  {techDetailsOpen
+                    ? INSIGHT_TECH_DETAILS_HIDE_LABEL
+                    : INSIGHT_TECH_DETAILS_SHOW_LABEL}
+                </button>
+              ) : null}
+            </div>
+            {techDetailsOpen && detailLines.length > 0 ? (
+              <pre id={techDetailsId} className="insight-failed-details">
+                {detailLines.join("\n")}
+              </pre>
+            ) : null}
+          </div>
         </header>
       </section>
     );
@@ -338,10 +396,9 @@ export function StructureInsightsView({
       <section className="insight-view tree-panel" aria-label="Erkenntnisse">
         <header className="insight-view-header">
           <h2>Erkenntnisse</h2>
-          <p className="insight-summary">
-            Dotty hat im eingelesenen Bestand keine strukturellen Muster erkannt.
-          </p>
-          <p className="insight-state-note muted">Das ist keine Bewertung der Ablage.</p>
+          <p className="insight-summary">{INSIGHT_ZERO_HEADLINE}</p>
+          <p className="insight-state-note muted">{INSIGHT_ZERO_EXPLANATION}</p>
+          <p className="insight-state-note muted">{INSIGHT_ZERO_NEUTRAL_NOTE}</p>
           <p className="insight-evidence-info muted">{INSIGHT_EVIDENCE_INFO}</p>
         </header>
       </section>
@@ -354,15 +411,10 @@ export function StructureInsightsView({
         <header className="insight-view-header">
           <h2>Erkenntnisse</h2>
           <p className="insight-partial-note" role="note">
-            <strong>Analyse teilweise eingeschränkt</strong>
-            <span>
-              Für Teile des eingelesenen Bestands war die Datengrundlage eingeschränkt.
-            </span>
+            <strong>{INSIGHT_PARTIAL_GLOBAL_HEADLINE}</strong>
+            <span>{INSIGHT_PARTIAL_GLOBAL_NOTE}</span>
           </p>
-          <p className="insight-summary">
-            Es wurden keine strukturellen Muster ermittelt. Die Analyse war teilweise
-            eingeschränkt.
-          </p>
+          <p className="insight-summary">{INSIGHT_PARTIAL_ZERO_SUMMARY}</p>
           <p className="insight-evidence-info muted">{INSIGHT_EVIDENCE_INFO}</p>
         </header>
       </section>
@@ -381,10 +433,8 @@ export function StructureInsightsView({
         ) : null}
         {incomplete ? (
           <p className="insight-partial-note" role="note">
-            <strong>Analyse teilweise eingeschränkt</strong>
-            <span>
-              Für Teile des eingelesenen Bestands war die Datengrundlage eingeschränkt.
-            </span>
+            <strong>{INSIGHT_PARTIAL_GLOBAL_HEADLINE}</strong>
+            <span>{INSIGHT_PARTIAL_GLOBAL_NOTE}</span>
           </p>
         ) : null}
         <p className="insight-evidence-info muted">{INSIGHT_EVIDENCE_INFO}</p>

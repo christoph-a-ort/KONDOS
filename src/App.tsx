@@ -127,6 +127,8 @@ function App() {
   const resultRef = useRef(result);
   const resultScanIdRef = useRef(resultScanId);
   const insightAnalysisGenerationRef = useRef(0);
+  /** Immediate guard against double-click / overlapping insight analysis runs. */
+  const insightAnalysisInFlightRef = useRef(false);
   const navRequestIdRef = useRef(0);
   const handleDroppedPathsRef = useRef<(paths: string[]) => void>(() => {});
   const jsonStoreRef = useRef<WorkbenchPrefsJsonStore | null>(createJsonPrefsStore());
@@ -154,6 +156,7 @@ function App() {
 
   function clearInsightAnalysisState(): void {
     insightAnalysisGenerationRef.current += 1;
+    insightAnalysisInFlightRef.current = false;
     setInsightAnalysisPhase("idle");
     setInsightViewModel(null);
     setInsightAnalysisError(null);
@@ -210,6 +213,8 @@ function App() {
 
   function beginInsightAnalysisForScan(scanResult: ScanResult, scanId: number): void {
     const generation = insightAnalysisGenerationRef.current;
+    insightAnalysisInFlightRef.current = true;
+    clearInsightNavigationState();
     setInsightAnalysisPhase("running");
     setInsightAnalysisError(null);
     setInsightViewModel(null);
@@ -221,11 +226,13 @@ function App() {
       getCurrentScanId: () => resultScanIdRef.current,
       getCurrentGeneration: () => insightAnalysisGenerationRef.current,
       onReady: (viewModel) => {
+        insightAnalysisInFlightRef.current = false;
         setInsightViewModel(viewModel);
         setInsightAnalysisError(null);
         setInsightAnalysisPhase("ready");
       },
       onFailed: (analysisError) => {
+        insightAnalysisInFlightRef.current = false;
         setInsightViewModel(null);
         setInsightAnalysisError(analysisError);
         setInsightAnalysisPhase("failed");
@@ -233,20 +240,24 @@ function App() {
     });
   }
 
-  /** Recovery entry for later J-H UI — reuses current ScanResult, never starts a new scan. */
+  /** Reuses current ScanResult only — never starts a filesystem scan. */
   function retryInsightAnalysis(): void {
-    const scanResult = resultRef.current;
-    const scanId = resultScanIdRef.current;
-    if (scanResult === null || scanId === null || scanningRef.current) {
+    if (insightAnalysisInFlightRef.current || scanningRef.current) {
       return;
     }
+    if (insightAnalysisPhase !== "failed") {
+      return;
+    }
+    const scanResult = resultRef.current;
+    const scanId = resultScanIdRef.current;
+    if (scanResult === null || scanId === null) {
+      return;
+    }
+    insightAnalysisInFlightRef.current = true;
     insightAnalysisGenerationRef.current += 1;
     beginInsightAnalysisForScan(scanResult, scanId);
   }
 
-  // Retry UI arrives in J-H; keep the foundation callable without wiring a button.
-  void retryInsightAnalysis;
-  void insightAnalysisError;
   void insightAnalysisScanId;
 
   const insightsSelectable = canSelectInsightsView(result !== null && resultScanId !== null);
@@ -761,6 +772,8 @@ function App() {
                 <StructureInsightsView
                   phase={insightAnalysisPhase}
                   viewModel={insightViewModel}
+                  analysisError={insightAnalysisError}
+                  onRetryAnalysis={retryInsightAnalysis}
                   focusRequest={insightFocusRequest}
                   onNavigateToNode={requestRevealInTree}
                 />
