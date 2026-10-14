@@ -21,6 +21,7 @@ import {
   type SollNodeProjection,
   type VirtualSollPreview,
 } from "./virtualPlanPreview";
+import type { VirtualReorgProposal } from "./virtualPlanSuggestions";
 
 export type PlanCompareMode = "ist" | "soll" | "split";
 
@@ -169,6 +170,7 @@ export function VirtualPlanPreviewView({
 }: VirtualPlanPreviewViewProps) {
   const [mode, setMode] = useState<PlanCompareMode>("split");
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [proposalsOpen, setProposalsOpen] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
@@ -314,6 +316,36 @@ export function VirtualPlanPreviewView({
         ) : null}
       </div>
 
+      <div className="plan-proposals">
+        <button
+          type="button"
+          className="plan-details-toggle"
+          aria-expanded={proposalsOpen}
+          onClick={() => {
+            setProposalsOpen((open) => !open);
+          }}
+        >
+          {proposalsOpen ? "▾" : "▸"} Virtuelle Vorschläge ({preview.proposals.length})
+        </button>
+        {proposalsOpen ? (
+          <div className="plan-proposals-body">
+            <p className="plan-proposals-lede muted">
+              Begründbare virtuelle Neuorganisationsvorschläge. Noch nicht übernommen — keine
+              Übernahme in dieser Stufe.
+            </p>
+            {preview.proposals.length === 0 ? (
+              <p className="muted">Keine begründbaren virtuellen Vorschläge für diesen Scan.</p>
+            ) : (
+              <ul className="plan-case-list">
+                {preview.proposals.map((proposal) => (
+                  <ProposalCard key={proposal.id} proposal={proposal} />
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null}
+      </div>
+
       <div className="plan-details">
         <button
           type="button"
@@ -409,5 +441,75 @@ export function VirtualPlanPreviewView({
         ) : null}
       </div>
     </section>
+  );
+}
+
+function ProposalCard({ proposal }: { proposal: VirtualReorgProposal }) {
+  const [previewOpen, setPreviewOpen] = useState(true);
+  const c = proposal.completeness;
+
+  return (
+    <li className="plan-case-item plan-proposal-item">
+      <div className="plan-case-heading">
+        <strong>{proposal.title}</strong>
+        <span className="plan-proposal-badge">{proposal.categoryLabel}</span>
+        <span className="plan-proposal-status">Noch nicht übernommen</span>
+      </div>
+      <p className="plan-proposal-action muted">{proposal.actionLabel}</p>
+      <p className="plan-location muted" title={proposal.sourceFolderDisplayPath}>
+        Ausgangsordner: {shortenPath(proposal.sourceFolderDisplayPath)}
+      </p>
+      <p className="plan-proposal-counts">
+        Bestand: {c.sourceObjectCount} · virtuell anders eingeordnet: {c.regroupedObjectCount} ·
+        bleibt unverändert: {c.unchangedObjectCount}
+        {c.complete ? "" : " · Vorschau nicht vollständig belegbar"}
+      </p>
+      <p>{proposal.rationale}</p>
+      {proposal.observedFeatures.length > 0 ? (
+        <p className="muted">Erkannt: {proposal.observedFeatures.join(" · ")}</p>
+      ) : null}
+      <div className="plan-proposal-target" aria-label="Virtuelle Zielstruktur">
+        <button
+          type="button"
+          className="plan-proposal-target-toggle"
+          aria-expanded={previewOpen}
+          onClick={() => {
+            setPreviewOpen((open) => !open);
+          }}
+        >
+          {previewOpen ? "▾" : "▸"} Vollständige Zielvorschau des betroffenen Bereichs
+        </button>
+        {previewOpen ? (
+          <pre className="plan-proposal-preview">{proposal.virtualTarget.lines.join("\n")}</pre>
+        ) : null}
+      </div>
+      {proposal.uncertainties.length > 0 ? (
+        <details className="plan-proposal-uncertainties">
+          <summary>Unsicherheiten ({proposal.uncertainties.length})</summary>
+          <ul>
+            {proposal.uncertainties.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+      {proposal.overlapsWithProposalIds.length > 0 ? (
+        <p className="plan-proposal-overlap muted">
+          Überlappt mit anderen Vorschlägen — nicht unabhängig kombinierbar.
+        </p>
+      ) : null}
+      <details className="plan-tech-details">
+        <summary>Technische Details</summary>
+        <p className="muted">
+          Vorschlags-ID: {proposal.id} · Aktion: {proposal.actionKind}
+          {proposal.sourceInsightIds.length > 0
+            ? ` · Erkenntnis-IDs: ${proposal.sourceInsightIds.join(", ")}`
+            : ""}
+          {proposal.overlapsWithProposalIds.length > 0
+            ? ` · Überlappungen: ${proposal.overlapsWithProposalIds.join(", ")}`
+            : ""}
+        </p>
+      </details>
+    </li>
   );
 }

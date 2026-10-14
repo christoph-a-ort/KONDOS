@@ -100,6 +100,12 @@ export function runVirtualPlanPreviewCheck(): void {
   assert(preview.nodes.length === preview.observedNodeCount, "count matches");
   assert(preview.observedNodeCount === 6, "fixture node count");
   assert(!projectionHasStructuralChangeIntent(preview), "no structural intent");
+  assert(Array.isArray(preview.proposals), "proposals array present");
+  assert(preview.proposals.length === 0, "plain fixture has no proposals");
+  assert(
+    preview.proposals.every((proposal) => proposal.adopted === false),
+    "proposals never adopted",
+  );
   assert(
     preview.nodes.every((node) => node.changeKind === "unchanged"),
     "all unchanged",
@@ -356,4 +362,12 @@ export function runVirtualPlanPreviewCheck(): void {
   });
   assert(largePreview.nodes.length === 42, "large tree complete");
   assert(!projectionHasStructuralChangeIntent(largePreview), "large no changes");
+  assert(
+    largePreview.nodes.every((node) => node.changeKind === "unchanged"),
+    "large soll unchanged with proposals field",
+  );
+  assert(
+    largePreview.proposals.every((proposal) => proposal.adopted === false),
+    "large proposals not adopted into soll",
+  );
 }

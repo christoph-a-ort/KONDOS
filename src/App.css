@@ -2429,6 +2429,7 @@ button:disabled {
 }
 
 /* ——— P2-K.3a: Virtual planning IST/SOLL preview ——— */
+/* ——— P2-K.3b: Virtuelle Vorschläge (separat, nicht übernommen) ——— */
 
 .plan-view {
   display: flex;
@@ -2624,6 +2625,7 @@ button:disabled {
   color: #6a5420;
 }
 
+.plan-proposals,
 .plan-details {
   flex: 0 0 auto;
   min-width: 0;
@@ -2652,6 +2654,7 @@ button:disabled {
   outline-offset: 2px;
 }
 
+.plan-proposals-body,
 .plan-details-body {
   max-height: min(28vh, 240px);
   overflow: auto;
@@ -2713,6 +2716,106 @@ button:disabled {
 .plan-tech-details summary {
   cursor: pointer;
   color: #5c6b7c;
+}
+
+.plan-proposals-lede {
+  margin: 0 0 8px;
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+.plan-proposal-badge,
+.plan-proposal-status {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid #c5ced8;
+  background: #f4f6f8;
+  color: #3d4a58;
+}
+
+.plan-proposal-status {
+  border-color: #b7c4a3;
+  background: #f3f6ee;
+  color: #3f5230;
+}
+
+.plan-proposal-target {
+  margin-top: 6px;
+}
+
+.plan-proposal-target-label {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #3d4a58;
+}
+
+.plan-proposal-preview {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border: 1px solid #d5dbe3;
+  border-radius: 4px;
+  background: #f8fafc;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.plan-proposal-overlap {
+  font-weight: 600;
+}
+
+.plan-proposal-action {
+  margin: 2px 0 0;
+  font-size: 0.82rem;
+}
+
+.plan-proposal-counts {
+  margin: 4px 0 0;
+  font-size: 0.84rem;
+  color: #3d4a58;
+}
+
+.plan-proposal-target-toggle {
+  appearance: none;
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #3d4a58;
+  cursor: pointer;
+}
+
+.plan-proposal-target-toggle:focus-visible {
+  outline: 2px solid #2f6fed;
+  outline-offset: 2px;
+}
+
+.plan-proposal-uncertainties {
+  margin-top: 6px;
+  font-size: 0.8rem;
+}
+
+.plan-proposal-uncertainties summary {
+  cursor: pointer;
+  color: #5c6b7c;
+}
+
+.plan-proposal-uncertainties ul {
+  margin: 4px 0 0;
+  padding-left: 1.2rem;
 }
 
 @media (max-width: 900px) {

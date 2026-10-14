@@ -15,6 +15,10 @@ import {
   type SnapshotBinding,
   type VirtualPlan,
 } from "./virtualPlan";
+import {
+  buildVirtualReorgProposals,
+  type VirtualReorgProposal,
+} from "./virtualPlanSuggestions";
 
 export const VIRTUAL_PLAN_PREVIEW_BUILDER_VERSION = 1 as const;
 
@@ -65,6 +69,8 @@ export interface VirtualSollPreview {
   nodes: SollNodeProjection[];
   hints: StructureHint[];
   reviewCases: ReviewCase[];
+  /** P2-K.3b: separate proposals — never auto-applied to nodes/SOLL. */
+  proposals: VirtualReorgProposal[];
   flags: {
     incomplete: boolean;
     identityLimited: boolean;
@@ -360,6 +366,11 @@ export function buildVirtualSollPreview(options: {
   const conflict = assessDraftConflict(binding, draft, draftBlocked);
   const hints = buildHintsFromInsights(viewModel);
   const reviewCases = buildReviewCases({ binding, viewModel, draft, conflict });
+  const proposals = buildVirtualReorgProposals({
+    scanResult: options.scanResult,
+    binding,
+    insightViewModel: viewModel,
+  });
 
   const hintsByLocation = new Map<string, string[]>();
   for (const hint of hints) {
@@ -424,6 +435,7 @@ export function buildVirtualSollPreview(options: {
     nodes,
     hints,
     reviewCases,
+    proposals,
     flags: {
       incomplete: binding.incomplete,
       identityLimited: true,
