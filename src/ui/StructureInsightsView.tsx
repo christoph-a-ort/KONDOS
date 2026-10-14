@@ -65,6 +65,7 @@ export type { MainView } from "./structureInsightsViewHelpers";
 export {
   INSIGHT_EVIDENCE_INFO,
   canSelectInsightsView,
+  canSelectPlanningView,
   defaultMainView,
   formatInsightEvidenceSummary,
   formatInsightReadyHeadline,

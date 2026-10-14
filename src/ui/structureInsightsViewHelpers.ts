@@ -9,7 +9,7 @@ import type {
   StructureInsightViewModel,
 } from "./structureInsightViewModel";
 
-export type MainView = "structure" | "insights";
+export type MainView = "structure" | "insights" | "planning";
 
 /** Default and post-scan-start view — never auto-switches on analysis phase. */
 export function defaultMainView(): MainView {
@@ -21,6 +21,10 @@ export function mainViewAfterScanStart(): MainView {
 }
 
 export function canSelectInsightsView(hasSuccessfulScanResult: boolean): boolean {
+  return hasSuccessfulScanResult;
+}
+
+export function canSelectPlanningView(hasSuccessfulScanResult: boolean): boolean {
   return hasSuccessfulScanResult;
 }
 

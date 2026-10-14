@@ -30,6 +30,7 @@ import { runStructureInsightErrorHelpersCheck } from "./structureInsightErrorHel
 import { runStructureInsightPresentationCheck } from "./structureInsightPresentationCheck";
 import { runStructureInsightIntegrationCheck } from "./structureInsightIntegrationCheck";
 import { runVirtualPlanCheck } from "./virtualPlanCheck";
+import { runVirtualPlanPreviewCheck } from "./virtualPlanPreviewCheck";
 import { runP1cCheck } from "./p1cCheck";
 import { runP1dCheck } from "./p1dCheck";
 import { runP1e1Check } from "./contentSearchCheck";
@@ -351,6 +352,7 @@ export async function runTreeWorkbenchCheck(): Promise<void> {
   runStructureInsightPresentationCheck();
   runStructureInsightIntegrationCheck();
   runVirtualPlanCheck();
+  runVirtualPlanPreviewCheck();
 }
 
 function runTreeSearchCheck(nested: DirectoryNode): void {

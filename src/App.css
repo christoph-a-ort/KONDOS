@@ -1453,7 +1453,8 @@ button:disabled {
 }
 
 .main-workbench .tree-panel,
-.main-workbench .insight-view {
+.main-workbench .insight-view,
+.main-workbench .plan-view {
   flex: 1;
   min-height: 0;
   height: 100%;
@@ -2424,5 +2425,304 @@ button:disabled {
   .insight-filter-details-all,
   .insight-filter-reset {
     width: 100%;
+  }
+}
+
+/* ——— P2-K.3a: Virtual planning IST/SOLL preview ——— */
+
+.plan-view {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+  background: #fff;
+  border: 1px solid #d5dbe3;
+  border-radius: 10px;
+  padding: 10px 12px 8px;
+}
+
+.plan-view-header {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.plan-view-header h2 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.plan-lede {
+  margin: 0 0 6px;
+  font-size: 0.86rem;
+  line-height: 1.35;
+  color: #3d4a5c;
+}
+
+.plan-draft-note {
+  margin: 0 0 6px;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.plan-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 6px;
+}
+
+.plan-flag {
+  display: inline-block;
+  max-width: 100%;
+  padding: 2px 7px;
+  border-radius: 3px;
+  background: #f7f4ea;
+  border-left: 3px solid #c9a227;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: #4a4218;
+  overflow-wrap: anywhere;
+}
+
+.plan-mode-switcher {
+  margin: 0 0 8px;
+}
+
+.plan-workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.plan-workspace-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.plan-tree-pane {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.plan-tree-pane-title {
+  margin: 0 0 4px;
+  font-size: 0.9rem;
+  flex: 0 0 auto;
+}
+
+.plan-tree-viewport {
+  flex: 1 1 auto;
+  min-height: 160px;
+  overflow: auto;
+  border: 1px solid #d5dbe3;
+  border-radius: 6px;
+  background: #f8fafc;
+  position: relative;
+}
+
+.plan-tree-spacer {
+  position: relative;
+  width: 100%;
+}
+
+.plan-tree-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  padding-right: 8px;
+  border-bottom: 1px solid #e8edf3;
+  font-size: 0.86rem;
+  white-space: nowrap;
+  background: #f8fafc;
+}
+
+.plan-tree-twist,
+.plan-tree-twist-spacer {
+  flex: 0 0 auto;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #3d4a5c;
+  font: inherit;
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  text-align: center;
+  cursor: pointer;
+}
+
+.plan-tree-twist-spacer {
+  cursor: default;
+}
+
+.plan-tree-twist:focus-visible {
+  outline: 2px solid #2f6fed;
+  outline-offset: 1px;
+}
+
+.plan-kind {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #5c6b7c;
+  width: 1.8rem;
+}
+
+.plan-tree-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #243041;
+}
+
+.plan-tree-meta {
+  flex: 0 0 auto;
+  margin: 4px 0 0;
+  font-size: 0.75rem;
+}
+
+.plan-badge {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.plan-badge-unchanged {
+  background: #e7f0e8;
+  color: #2d4a32;
+}
+
+.plan-badge-structureHint {
+  background: #e7f0f8;
+  color: #1a4a73;
+}
+
+.plan-badge-reviewCase {
+  background: #f7f4ea;
+  color: #5a4a18;
+}
+
+.plan-badge-incomplete {
+  background: #f3eee4;
+  color: #6a5420;
+}
+
+.plan-details {
+  flex: 0 0 auto;
+  min-width: 0;
+  margin-top: 8px;
+  border-top: 1px solid #d5dbe3;
+  padding-top: 6px;
+}
+
+.plan-details-toggle {
+  appearance: none;
+  width: 100%;
+  margin: 0;
+  padding: 4px 2px;
+  border: none;
+  background: transparent;
+  color: #243041;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+
+.plan-details-toggle:focus-visible {
+  outline: 2px solid #2f6fed;
+  outline-offset: 2px;
+}
+
+.plan-details-body {
+  max-height: min(28vh, 240px);
+  overflow: auto;
+  margin-top: 6px;
+  padding-right: 2px;
+}
+
+.plan-cases,
+.plan-hints {
+  margin: 0 0 10px;
+}
+
+.plan-cases h3,
+.plan-hints h3 {
+  margin: 0 0 6px;
+  font-size: 0.88rem;
+}
+
+.plan-case-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-case-item {
+  padding: 8px 10px;
+  border: 1px solid #d5dbe3;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.plan-case-item p {
+  margin: 4px 0 0;
+  font-size: 0.86rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.plan-case-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.plan-location {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.8rem;
+}
+
+.plan-tech-details {
+  margin-top: 6px;
+  font-size: 0.78rem;
+}
+
+.plan-tech-details summary {
+  cursor: pointer;
+  color: #5c6b7c;
+}
+
+@media (max-width: 900px) {
+  .plan-workspace-split {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .plan-workspace-split .plan-tree-pane {
+    min-height: 220px;
+    height: 220px;
   }
 }

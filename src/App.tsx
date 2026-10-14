@@ -35,10 +35,22 @@ import { TreeView } from "./ui/TreeView";
 import {
   StructureInsightsView,
   canSelectInsightsView,
+  canSelectPlanningView,
   insightNavCountLabel,
   mainViewAfterScanStart,
   type MainView,
 } from "./ui/StructureInsightsView";
+import { VirtualPlanPreviewView } from "./ui/VirtualPlanPreviewView";
+import { loadVirtualPlanDraft } from "./ui/virtualPlanApi";
+import {
+  makeSnapshotBinding,
+  parseVirtualPlan,
+  type DraftLoadResult,
+} from "./ui/virtualPlan";
+import {
+  buildVirtualSollPreview,
+  planIdForBinding,
+} from "./ui/virtualPlanPreview";
 import {
   scheduleStructureInsightAnalysis,
   type InsightAnalysisError,
@@ -103,6 +115,8 @@ function App() {
   const [insightAnalysisError, setInsightAnalysisError] = useState<InsightAnalysisError | null>(null);
   const [insightAnalysisScanId, setInsightAnalysisScanId] = useState<number | null>(null);
   const [mainView, setMainView] = useState<MainView>("structure");
+  const [planDraftLoad, setPlanDraftLoad] = useState<DraftLoadResult | null>(null);
+  const [planDraftLoading, setPlanDraftLoading] = useState(false);
   const [treeRevealRequest, setTreeRevealRequest] = useState<TreeRevealRequest | null>(null);
   const [insightFocusRequest, setInsightFocusRequest] = useState<InsightFocusRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -165,6 +179,8 @@ function App() {
     setInsightViewModel(null);
     setInsightAnalysisError(null);
     setInsightAnalysisScanId(null);
+    setPlanDraftLoad(null);
+    setPlanDraftLoading(false);
     clearInsightNavigationState();
     setMainView(mainViewAfterScanStart());
   }
@@ -276,7 +292,56 @@ function App() {
   void insightAnalysisScanId;
 
   const insightsSelectable = canSelectInsightsView(result !== null && resultScanId !== null);
+  const planningSelectable = canSelectPlanningView(result !== null && resultScanId !== null);
   const insightsNavCount = insightNavCountLabel(insightAnalysisPhase, insightViewModel);
+
+  const virtualPlanPreview = useMemo(() => {
+    if (result === null || resultScanId === null) {
+      return null;
+    }
+    const existingDraft = planDraftLoad?.kind === "valid" ? planDraftLoad.plan : null;
+    const draftBlocked = planDraftLoad?.kind === "blocked";
+    return buildVirtualSollPreview({
+      scanResult: result,
+      scanConfig: config,
+      sourceScanId: resultScanId,
+      insightViewModel,
+      existingDraft,
+      draftBlocked,
+    });
+  }, [result, resultScanId, config, insightViewModel, planDraftLoad]);
+
+  useEffect(() => {
+    if (!planningSelectable || mainView !== "planning" || result === null || resultScanId === null) {
+      return;
+    }
+    let cancelled = false;
+    setPlanDraftLoading(true);
+    const binding = makeSnapshotBinding(result, config, resultScanId);
+    const planId = planIdForBinding(binding);
+    void loadVirtualPlanDraft(planId)
+      .then((raw) => {
+        if (cancelled) {
+          return;
+        }
+        if (raw === null) {
+          setPlanDraftLoad({ kind: "missing" });
+        } else {
+          setPlanDraftLoad(parseVirtualPlan(raw));
+        }
+        setPlanDraftLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setPlanDraftLoad({ kind: "blocked", reason: "corrupt" });
+        setPlanDraftLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [planningSelectable, mainView, result, resultScanId, config]);
 
   useEffect(() => {
     let disposed = false;
@@ -726,7 +791,7 @@ function App() {
             <button
               type="button"
               className="insight-view-tab"
-              aria-pressed={mainView === "structure" || !insightsSelectable}
+              aria-pressed={mainView === "structure"}
               onClick={() => {
                 setMainView("structure");
               }}
@@ -751,16 +816,29 @@ function App() {
                 </span>
               ) : null}
             </button>
+            <button
+              type="button"
+              className="insight-view-tab"
+              aria-pressed={planningSelectable && mainView === "planning"}
+              disabled={!planningSelectable}
+              onClick={() => {
+                if (planningSelectable) {
+                  setMainView("planning");
+                }
+              }}
+            >
+              Planung
+            </button>
           </div>
           <div className="main-view-panels">
             <div
               className={
-                insightsSelectable && mainView === "insights"
-                  ? "main-view-panel main-view-panel-hidden"
-                  : "main-view-panel"
+                mainView === "structure"
+                  ? "main-view-panel"
+                  : "main-view-panel main-view-panel-hidden"
               }
-              aria-hidden={insightsSelectable && mainView === "insights"}
-              inert={insightsSelectable && mainView === "insights" ? true : undefined}
+              aria-hidden={mainView !== "structure"}
+              inert={mainView !== "structure" ? true : undefined}
             >
               <TreeView
                 result={result}
@@ -800,6 +878,24 @@ function App() {
                   onRetryAnalysis={retryInsightAnalysis}
                   focusRequest={insightFocusRequest}
                   onNavigateToNode={requestRevealInTree}
+                />
+              </div>
+            ) : null}
+            {planningSelectable ? (
+              <div
+                className={
+                  mainView === "planning"
+                    ? "main-view-panel"
+                    : "main-view-panel main-view-panel-hidden"
+                }
+                aria-hidden={mainView !== "planning"}
+                inert={mainView !== "planning" ? true : undefined}
+              >
+                <VirtualPlanPreviewView
+                  preview={virtualPlanPreview}
+                  scanResult={result}
+                  draftLoad={planDraftLoad}
+                  loadingDraft={planDraftLoading}
                 />
               </div>
             ) : null}

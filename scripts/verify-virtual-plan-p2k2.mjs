@@ -22,7 +22,9 @@ assert(rust.includes("discard_virtual_plan_draft"), "explicit discard only");
 assert(productionRust.includes("app_data_dir") && productionRust.includes("virtual-plans"), "drafts stay in app data");
 assert(!productionRust.includes("std::fs::copy") && !productionRust.includes("scan_result"), "no user fs action");
 assert(check.includes("corrupt blocked") && check.includes("unknown version blocked"), "checks");
-assert(!app.includes("virtualPlan"), "no planning UI in K.2");
+// K.3a may wire planning UI on App; still no silent draft writes from App in K.2/K.3a.
+assert(!app.includes("saveVirtualPlanDraft("), "no silent draft save from App");
+assert(!app.includes("discardVirtualPlanDraft("), "no draft discard from App in K.2 baseline");
 const { runVirtualPlanCheck } = await import(pathToFileURL(join(root, "src/ui/virtualPlanCheck.ts")).href);
 runVirtualPlanCheck();
 console.log("virtual plan p2k2 checks passed");
