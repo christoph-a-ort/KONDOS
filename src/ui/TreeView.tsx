@@ -90,6 +90,10 @@ import {
   shouldAcceptTreeRevealRequest,
   type TreeRevealRequest,
 } from "./structureInsightNavigation";
+import {
+  canCommitPendingTreeReveal,
+  resolveInsightTreeReveal,
+} from "./structureInsightIntegration";
 
 interface TreeViewProps {
   result: ScanResult | null;
@@ -280,6 +284,8 @@ function PopulatedTreeView({
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const pendingRevealRef = useRef<string | null>(null);
+  /** Reveal after user explicitly resets Anzeigefilter (insight→tree when hidden). */
+  const pendingRevealAfterFilterResetRef = useRef<string | null>(null);
   const openInFlightRef = useRef(false);
   const pathNoticeTimerRef = useRef<number | null>(null);
   const widthsRef = useRef(widths);
@@ -306,6 +312,8 @@ function PopulatedTreeView({
     setWarningNotice(null);
     setWarningOfferReset(false);
     setReportDialogOpen(false);
+    pendingRevealRef.current = null;
+    pendingRevealAfterFilterResetRef.current = null;
   }
 
   const columns = visibleColumns(visibility);
@@ -589,6 +597,7 @@ function PopulatedTreeView({
     setExpandedIds(defaultExpandedIds(result.root.id));
     setWarningNotice(null);
     setWarningOfferReset(false);
+    // Keep pendingRevealAfterFilterResetRef; effect reveals once unfiltered viewRoot is ready.
   }
 
   function handleSearchChange(value: string) {
@@ -608,10 +617,20 @@ function PopulatedTreeView({
   }
 
   function revealTreeNode(id: string) {
-    const rootForAncestors = viewRoot ?? result.root;
-    if (findNodeById(result.root, id) === undefined) {
+    const plan = resolveInsightTreeReveal(result.root, viewRoot, id);
+    if (plan.kind === "missing") {
       return;
     }
+    if (plan.kind === "hidden-by-filter") {
+      pendingRevealAfterFilterResetRef.current = plan.nodeId;
+      setWarningNotice(plan.notice);
+      setWarningOfferReset(plan.offerFilterReset);
+      return;
+    }
+    pendingRevealAfterFilterResetRef.current = null;
+    setWarningNotice(null);
+    setWarningOfferReset(false);
+    const rootForAncestors = viewRoot ?? result.root;
     setExpandedIds((current) =>
       withAncestorsExpanded(current, ancestorDirectoryIds(rootForAncestors, id)),
     );
@@ -868,15 +887,32 @@ function PopulatedTreeView({
   const actionsDisabled = scanning;
 
   useEffect(() => {
-    const id = pendingRevealRef.current;
-    if (id === null) {
+    const waitingForFilter = pendingRevealAfterFilterResetRef.current;
+    if (waitingForFilter === null) {
       return;
     }
-    if (rowIndexById(rows, id) >= 0) {
-      pendingRevealRef.current = null;
-      scrollRowIntoView(id, rows);
+    if (viewRoot !== null && nodeVisibleInDisplayTree(viewRoot, waitingForFilter)) {
+      pendingRevealAfterFilterResetRef.current = null;
+      revealTreeNode(waitingForFilter);
     }
-  }, [rows]);
+  }, [viewRoot, appliedFilter]);
+
+  useEffect(() => {
+    const id = pendingRevealRef.current;
+    const rowIndex = id === null ? -1 : rowIndexById(rows, id);
+    const viewportClientHeight = viewportRef.current?.clientHeight ?? viewportHeight;
+    if (
+      !canCommitPendingTreeReveal({
+        pendingNodeId: id,
+        rowIndex,
+        viewportClientHeight,
+      })
+    ) {
+      return;
+    }
+    pendingRevealRef.current = null;
+    scrollRowIntoView(id as string, rows);
+  }, [rows, viewportHeight]);
 
   useEffect(() => {
     if (selectedId === null) {

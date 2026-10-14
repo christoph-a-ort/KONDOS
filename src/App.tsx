@@ -53,6 +53,10 @@ import {
   type TreeRevealRequest,
 } from "./ui/structureInsightNavigation";
 import {
+  captureInsightAnalysisUiSnapshot,
+  type InsightAnalysisUiSnapshot,
+} from "./ui/structureInsightIntegration";
+import {
   txtExportColumns,
   type ColumnVisibility,
   type ColumnWidths,
@@ -163,6 +167,17 @@ function App() {
     setInsightAnalysisScanId(null);
     clearInsightNavigationState();
     setMainView(mainViewAfterScanStart());
+  }
+
+  /** Restore prior insight UI after a rejected scan begin (invalid path/config). */
+  function restoreInsightAnalysisUiSnapshot(snapshot: InsightAnalysisUiSnapshot): void {
+    insightAnalysisInFlightRef.current = false;
+    setInsightAnalysisPhase(snapshot.phase);
+    setInsightViewModel(snapshot.viewModel);
+    setInsightAnalysisError(snapshot.error);
+    setInsightAnalysisScanId(snapshot.analysisScanId);
+    clearInsightNavigationState();
+    setMainView(snapshot.mainView);
   }
 
   function requestRevealInTree(nodeId: string): void {
@@ -425,6 +440,13 @@ function App() {
     clearExportNotice();
     const previousResult = resultRef.current;
     const previousScanId = resultScanIdRef.current;
+    const previousInsightUi = captureInsightAnalysisUiSnapshot({
+      phase: insightAnalysisPhase,
+      viewModel: insightViewModel,
+      error: insightAnalysisError,
+      analysisScanId: insightAnalysisScanId,
+      mainView,
+    });
     clearInsightAnalysisState();
     setResult(null);
     assignResultScanId(null);
@@ -466,8 +488,10 @@ function App() {
         setResult(null);
         assignResultScanId(null);
       } else {
+        // Rejected begin (invalidPath/invalidConfig): restore prior scan + insight analysis.
         setResult(previousResult);
         assignResultScanId(previousScanId);
+        restoreInsightAnalysisUiSnapshot(previousInsightUi);
       }
       if (isCancelledError(cause)) {
         setError(null);
