@@ -2,6 +2,8 @@ use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(test)]
+use std::cell::RefCell;
 
 use tauri::{AppHandle, Manager};
 
@@ -36,7 +38,7 @@ pub fn workbench_prefs_path(app_data_dir: &Path) -> PathBuf {
 }
 
 /// Reads the prefs file. Missing file → `Ok(None)`. Invalid JSON / non-object → error.
-pub fn read_workbench_prefs_file(path: &Path) -> Result<Option<String>, AppError> {
+pub(crate) fn read_workbench_prefs_file(path: &Path) -> Result<Option<String>, AppError> {
     match fs::read_to_string(path) {
         Ok(raw) => {
             validate_prefs_json(&raw)?;
@@ -52,7 +54,7 @@ pub fn read_workbench_prefs_file(path: &Path) -> Result<Option<String>, AppError
 }
 
 /// Validates and atomically writes prefs JSON to `path`.
-pub fn write_workbench_prefs_file(path: &Path, prefs_json: &str) -> Result<(), AppError> {
+pub(crate) fn write_workbench_prefs_file(path: &Path, prefs_json: &str) -> Result<(), AppError> {
     validate_prefs_json(prefs_json)?;
 
     let parent = path.parent().filter(|dir| !dir.as_os_str().is_empty());
@@ -88,6 +90,22 @@ pub fn write_workbench_prefs_file(path: &Path, prefs_json: &str) -> Result<(), A
     Ok(())
 }
 
+#[cfg(test)]
+thread_local! { static ATOMIC_WRITE_FAULT: RefCell<Option<&'static str>> = const { RefCell::new(None) }; }
+#[cfg(test)]
+pub(crate) fn set_atomic_write_fault(fault: Option<&'static str>) {
+    ATOMIC_WRITE_FAULT.with(|current| *current.borrow_mut() = fault);
+}
+#[cfg(test)]
+fn injected_fault(stage: &str) -> io::Result<()> {
+    if ATOMIC_WRITE_FAULT.with(|current| current.borrow().as_deref() == Some(stage)) {
+        return Err(io::Error::new(io::ErrorKind::Other, "injected atomic write failure"));
+    }
+    Ok(())
+}
+#[cfg(not(test))]
+fn injected_fault(_: &str) -> io::Result<()> { Ok(()) }
+
 fn validate_prefs_json(raw: &str) -> Result<(), AppError> {
     let value: serde_json::Value = serde_json::from_str(raw).map_err(|_| {
         AppError::invalid_config("Die Workbench-Einstellungen sind kein gültiges JSON.")
@@ -101,6 +119,7 @@ fn validate_prefs_json(raw: &str) -> Result<(), AppError> {
 }
 
 fn write_temp(temp: &Path, contents: &str) -> io::Result<()> {
+    injected_fault("temp")?;
     let mut file = File::create(temp)?;
     file.write_all(contents.as_bytes())?;
     file.flush()?;
@@ -129,6 +148,7 @@ fn temp_path_for(target: &Path) -> PathBuf {
 }
 
 fn replace_file(temp: &Path, target: &Path) -> io::Result<()> {
+    injected_fault("replace")?;
     match fs::rename(temp, target) {
         Ok(()) => Ok(()),
         Err(err) => {
