@@ -19,6 +19,10 @@ import {
   buildVirtualReorgProposals,
   type VirtualReorgProposal,
 } from "./virtualPlanSuggestions";
+import {
+  assessVirtualProposalUsefulness,
+  type VirtualProposalUsefulnessAssessment,
+} from "./virtualPlanProposalUsefulness";
 
 export const VIRTUAL_PLAN_PREVIEW_BUILDER_VERSION = 1 as const;
 
@@ -71,6 +75,8 @@ export interface VirtualSollPreview {
   reviewCases: ReviewCase[];
   /** P2-K.3b: separate proposals — never auto-applied to nodes/SOLL. */
   proposals: VirtualReorgProposal[];
+  /** P2-K.3c: read-only organizational assessment, never a user decision. */
+  proposalUsefulness: VirtualProposalUsefulnessAssessment[];
   flags: {
     incomplete: boolean;
     identityLimited: boolean;
@@ -429,6 +435,15 @@ export function buildVirtualSollPreview(options: {
     }
   }
 
+  const depthByNodeId = new Map(nodes.map((node) => [node.nodeId, node.depth]));
+  const proposalUsefulness = proposals.map((proposal) =>
+    assessVirtualProposalUsefulness({
+      proposal,
+      binding,
+      sourceFolderDepth: depthByNodeId.get(proposal.sourceFolderNodeId) ?? 0,
+    }),
+  );
+
   return {
     builderVersion: VIRTUAL_PLAN_PREVIEW_BUILDER_VERSION,
     binding,
@@ -436,6 +451,7 @@ export function buildVirtualSollPreview(options: {
     hints,
     reviewCases,
     proposals,
+    proposalUsefulness,
     flags: {
       incomplete: binding.incomplete,
       identityLimited: true,

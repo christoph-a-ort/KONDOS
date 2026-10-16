@@ -22,6 +22,7 @@ import {
   type VirtualSollPreview,
 } from "./virtualPlanPreview";
 import type { VirtualReorgProposal } from "./virtualPlanSuggestions";
+import type { VirtualProposalUsefulnessAssessment } from "./virtualPlanProposalUsefulness";
 
 export type PlanCompareMode = "ist" | "soll" | "split";
 
@@ -191,6 +192,17 @@ export function VirtualPlanPreviewView({
     return map;
   }, [preview]);
 
+  const usefulnessByProposalId = useMemo(
+    () =>
+      new Map(
+        (preview?.proposalUsefulness ?? []).map((assessment) => [
+          assessment.proposalId,
+          assessment,
+        ]),
+      ),
+    [preview],
+  );
+
   const draftNote = useMemo(() => {
     if (loadingDraft) {
       return "Entwurf wird geladen …";
@@ -338,7 +350,11 @@ export function VirtualPlanPreviewView({
             ) : (
               <ul className="plan-case-list">
                 {preview.proposals.map((proposal) => (
-                  <ProposalCard key={proposal.id} proposal={proposal} />
+                  <ProposalCard
+                    key={proposal.id}
+                    proposal={proposal}
+                    usefulness={usefulnessByProposalId.get(proposal.id)}
+                  />
                 ))}
               </ul>
             )}
@@ -444,7 +460,13 @@ export function VirtualPlanPreviewView({
   );
 }
 
-function ProposalCard({ proposal }: { proposal: VirtualReorgProposal }) {
+function ProposalCard({
+  proposal,
+  usefulness,
+}: {
+  proposal: VirtualReorgProposal;
+  usefulness: VirtualProposalUsefulnessAssessment | undefined;
+}) {
   const [previewOpen, setPreviewOpen] = useState(true);
   const c = proposal.completeness;
 
@@ -464,6 +486,52 @@ function ProposalCard({ proposal }: { proposal: VirtualReorgProposal }) {
         bleibt unverändert: {c.unchangedObjectCount}
         {c.complete ? "" : " · Vorschau nicht vollständig belegbar"}
       </p>
+      {usefulness !== undefined ? (
+        <details className="plan-proposal-usefulness">
+          <summary>
+            Organisatorischer Nutzen:{" "}
+            <span className={`plan-usefulness-label plan-usefulness-${usefulness.category}`}>
+              {usefulness.categoryLabel}
+            </span>
+          </summary>
+          <p>{usefulness.expectedBenefit}</p>
+          {usefulness.expectedDrawbacks.length > 0 ? (
+            <>
+              <p className="plan-proposal-usefulness-heading">Mögliche Nachteile</p>
+              <ul>
+                {usefulness.expectedDrawbacks.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          <p className="plan-proposal-usefulness-heading">Beobachtete Merkmale</p>
+          <ul>
+            {usefulness.observedFeatures.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+          {usefulness.uncertainties.length > 0 ? (
+            <>
+              <p className="plan-proposal-usefulness-heading">Verbleibende Unsicherheiten</p>
+              <ul>
+                {usefulness.uncertainties.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          {usefulness.overlapsWithProposalIds.length > 0 ? (
+            <p className="muted">
+              Alternative Vorschläge überlappen; keine automatische Auswahl oder Priorisierung.
+            </p>
+          ) : null}
+          <p className="muted">
+            Diese Einschätzung ist keine Freigabe. Die bestehende Struktur kann beibehalten
+            werden.
+          </p>
+        </details>
+      ) : null}
       <p>{proposal.rationale}</p>
       {proposal.observedFeatures.length > 0 ? (
         <p className="muted">Erkannt: {proposal.observedFeatures.join(" · ")}</p>

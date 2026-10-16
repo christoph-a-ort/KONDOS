@@ -2430,6 +2430,7 @@ button:disabled {
 
 /* ——— P2-K.3a: Virtual planning IST/SOLL preview ——— */
 /* ——— P2-K.3b: Virtuelle Vorschläge (separat, nicht übernommen) ——— */
+/* ——— P2-K.3c: Read-only organizational usefulness assessment ——— */
 
 .plan-view {
   display: flex;
@@ -2816,6 +2817,60 @@ button:disabled {
 .plan-proposal-uncertainties ul {
   margin: 4px 0 0;
   padding-left: 1.2rem;
+}
+
+.plan-proposal-usefulness {
+  margin-top: 7px;
+  padding: 7px 9px;
+  border: 1px solid #d5dbe3;
+  border-radius: 5px;
+  background: #f8fafc;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.plan-proposal-usefulness summary {
+  cursor: pointer;
+  color: #344352;
+  font-weight: 600;
+}
+
+.plan-proposal-usefulness p {
+  margin: 6px 0 0;
+}
+
+.plan-proposal-usefulness ul {
+  margin: 4px 0 0;
+  padding-left: 1.2rem;
+}
+
+.plan-proposal-usefulness-heading {
+  font-weight: 600;
+  color: #3d4a58;
+}
+
+.plan-usefulness-label {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid #c5ced8;
+  border-radius: 4px;
+  background: #f4f6f8;
+  color: #3d4a58;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.plan-usefulness-likelyHelpful {
+  border-color: #b7c4a3;
+  background: #f3f6ee;
+  color: #3f5230;
+}
+
+.plan-usefulness-unclear,
+.plan-usefulness-notAssessable,
+.plan-usefulness-likelyNotHelpful {
+  background: #f6f6f4;
+  color: #4d514e;
 }
 
 @media (max-width: 900px) {

@@ -101,6 +101,11 @@ export function runVirtualPlanPreviewCheck(): void {
   assert(preview.observedNodeCount === 6, "fixture node count");
   assert(!projectionHasStructuralChangeIntent(preview), "no structural intent");
   assert(Array.isArray(preview.proposals), "proposals array present");
+  assert(Array.isArray(preview.proposalUsefulness), "usefulness array present");
+  assert(
+    preview.proposalUsefulness.length === preview.proposals.length,
+    "every proposal has an assessment",
+  );
   assert(preview.proposals.length === 0, "plain fixture has no proposals");
   assert(
     preview.proposals.every((proposal) => proposal.adopted === false),
