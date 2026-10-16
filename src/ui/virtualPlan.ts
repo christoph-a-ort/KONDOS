@@ -30,15 +30,36 @@ export interface ObservedObjectRef {
 }
 export interface VirtualPlanItem {
   id: string; observed: ObservedObjectRef; virtualTargetPath: string;
+  /** Initial target from the explicitly selected proposal, for virtual reset only. */
+  originalVirtualTargetPath?: string;
   virtualRename?: string; status: VirtualPlanItemStatus;
   sourceInsightIds: string[]; alternatives: string[]; rationale?: string;
 }
+/** A synthetic folder used only inside a virtual plan, never a user filesystem path. */
+export interface VirtualPlanFolder {
+  id: string;
+  sourceProposalId: string;
+  parentVirtualPath: string;
+  name: string;
+  originalName: string;
+}
 export interface OpenCase { id: string; planItemId?: string; reason: "identityUnavailable" | "incompleteSnapshot" | "ambiguous"; }
-export interface DecisionRecord { id: string; revision: number; planId: string; planItemId?: string; kind: "exclude" | "approveVirtual" | "revokeVirtual" | "edit"; origin: "user"; createdAtMs: number; }
+export interface DecisionRecord {
+  id: string; revision: number; planId: string; planItemId?: string;
+  kind: "exclude" | "approveVirtual" | "revokeVirtual" | "edit";
+  origin: "user"; createdAtMs: number;
+  /** P2-K.4: local undo data; virtual only and bounded to one user action. */
+  previousVirtualTargetPath?: string;
+  previousStatus?: VirtualPlanItemStatus;
+  virtualFolderId?: string;
+  previousFolderName?: string;
+}
 export interface PreferenceRecord { id: string; scope: VirtualPlanScope; description: string; revision: number; active: boolean; origin: "user"; }
 export interface VirtualPlan {
   schemaVersion: typeof VIRTUAL_PLAN_SCHEMA_VERSION; planId: string; builderVersion: number; revision: number;
   status: VirtualPlanStatus; scope: VirtualPlanScope; binding: SnapshotBinding; items: VirtualPlanItem[];
+  /** Optional for compatibility with P2-K.2 drafts created before K.4. */
+  virtualFolders?: VirtualPlanFolder[];
   openCases: OpenCase[]; decisions: DecisionRecord[]; preferences: PreferenceRecord[];
 }
 export type DraftLoadResult =

@@ -63,7 +63,10 @@ assert(app.includes("loadVirtualPlanDraft"), "App loads draft");
 assert(app.includes("scanResult={result}"), "App passes scanResult");
 assert(app.includes("Planung"), "App planning tab");
 assert(app.includes('"planning"'), "App planning mainView");
-assert(!app.includes("saveVirtualPlanDraft("), "App no silent save");
+assert(
+  !app.includes("saveVirtualPlanDraft(") || app.includes("saveEditableVirtualPlan"),
+  "App persistence is explicit, not silent",
+);
 assert(!app.includes("discardVirtualPlanDraft("), "App no discard in K.3a");
 
 assert(css.includes("P2-K.3a"), "css marker");

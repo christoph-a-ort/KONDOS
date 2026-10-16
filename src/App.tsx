@@ -41,16 +41,27 @@ import {
   type MainView,
 } from "./ui/StructureInsightsView";
 import { VirtualPlanPreviewView } from "./ui/VirtualPlanPreviewView";
-import { loadVirtualPlanDraft } from "./ui/virtualPlanApi";
+import { loadVirtualPlanDraft, saveVirtualPlanDraft } from "./ui/virtualPlanApi";
 import {
   makeSnapshotBinding,
   parseVirtualPlan,
   type DraftLoadResult,
+  type VirtualPlan,
 } from "./ui/virtualPlan";
 import {
   buildVirtualSollPreview,
   planIdForBinding,
 } from "./ui/virtualPlanPreview";
+import {
+  createVirtualPlanFromProposal,
+  prepareVirtualPlanForSave,
+  validateVirtualPlan,
+} from "./ui/virtualPlanEditor";
+import {
+  assessVirtualPlanApproval,
+  prepareVirtualPlanApproval,
+} from "./ui/virtualPlanApproval";
+import type { VirtualReorgProposal } from "./ui/virtualPlanSuggestions";
 import {
   scheduleStructureInsightAnalysis,
   type InsightAnalysisError,
@@ -117,6 +128,9 @@ function App() {
   const [mainView, setMainView] = useState<MainView>("structure");
   const [planDraftLoad, setPlanDraftLoad] = useState<DraftLoadResult | null>(null);
   const [planDraftLoading, setPlanDraftLoading] = useState(false);
+  const [editableVirtualPlan, setEditableVirtualPlan] = useState<VirtualPlan | null>(null);
+  const [planSaving, setPlanSaving] = useState(false);
+  const [planSaveMessage, setPlanSaveMessage] = useState<string | null>(null);
   const [treeRevealRequest, setTreeRevealRequest] = useState<TreeRevealRequest | null>(null);
   const [insightFocusRequest, setInsightFocusRequest] = useState<InsightFocusRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -326,8 +340,11 @@ function App() {
         }
         if (raw === null) {
           setPlanDraftLoad({ kind: "missing" });
+          setEditableVirtualPlan(null);
         } else {
-          setPlanDraftLoad(parseVirtualPlan(raw));
+          const parsed = parseVirtualPlan(raw);
+          setPlanDraftLoad(parsed);
+          setEditableVirtualPlan(parsed.kind === "valid" ? parsed.plan : null);
         }
         setPlanDraftLoading(false);
       })
@@ -336,12 +353,106 @@ function App() {
           return;
         }
         setPlanDraftLoad({ kind: "blocked", reason: "corrupt" });
+        setEditableVirtualPlan(null);
         setPlanDraftLoading(false);
       });
     return () => {
       cancelled = true;
     };
   }, [planningSelectable, mainView, result, resultScanId, config]);
+
+  function selectVirtualProposalForEditing(proposal: VirtualReorgProposal): void {
+    if (result === null || virtualPlanPreview === null) {
+      return;
+    }
+    const created = createVirtualPlanFromProposal({
+      proposal,
+      scanResult: result,
+      binding: virtualPlanPreview.binding,
+    });
+    if (!created.ok) {
+      setPlanSaveMessage(created.error);
+      return;
+    }
+    setEditableVirtualPlan(created.plan);
+    setPlanSaveMessage("Virtueller Entwurf aus dem ausgewählten Vorschlag angelegt. Noch nicht gespeichert.");
+  }
+
+  function changeEditableVirtualPlan(plan: VirtualPlan): void {
+    setEditableVirtualPlan(plan);
+    setPlanSaveMessage("Lokale virtuelle Bearbeitung noch nicht gespeichert.");
+  }
+
+  function saveEditableVirtualPlan(): void {
+    if (
+      editableVirtualPlan === null ||
+      result === null ||
+      resultScanId === null ||
+      virtualPlanPreview === null ||
+      planSaving
+    ) {
+      return;
+    }
+    const currentBinding = makeSnapshotBinding(result, config, resultScanId);
+    const validation = validateVirtualPlan(editableVirtualPlan, result, currentBinding);
+    if (!validation.valid) {
+      setPlanSaveMessage(validation.errors[0] ?? "Der virtuelle Entwurf kann nicht gespeichert werden.");
+      return;
+    }
+    const expectedRevision = planDraftLoad?.kind === "valid" ? planDraftLoad.plan.revision : 0;
+    const candidate = prepareVirtualPlanForSave(editableVirtualPlan, expectedRevision);
+    setPlanSaving(true);
+    setPlanSaveMessage(null);
+    void saveVirtualPlanDraft(candidate.planId, expectedRevision, JSON.stringify(candidate))
+      .then(() => {
+        setEditableVirtualPlan(candidate);
+        setPlanDraftLoad({ kind: "valid", plan: candidate });
+        setPlanSaveMessage(`Entwurf gespeichert (Revision ${candidate.revision}).`);
+      })
+      .catch(() => {
+        setPlanSaveMessage("Der virtuelle Entwurf konnte nicht gespeichert werden. Es wurde keine Erfolgsmeldung erzeugt.");
+      })
+      .finally(() => {
+        setPlanSaving(false);
+      });
+  }
+
+  function approveEditableVirtualPlan(): void {
+    if (
+      editableVirtualPlan === null ||
+      result === null ||
+      resultScanId === null ||
+      planSaving
+    ) {
+      return;
+    }
+    const currentBinding = makeSnapshotBinding(result, config, resultScanId);
+    const approval = assessVirtualPlanApproval({
+      plan: editableVirtualPlan,
+      scanResult: result,
+      binding: currentBinding,
+      draftLoad: planDraftLoad,
+    });
+    if (!approval.eligible || planDraftLoad?.kind !== "valid") {
+      setPlanSaveMessage(approval.blockers[0] ?? "Der virtuelle Plan kann nicht bestätigt werden.");
+      return;
+    }
+    const candidate = prepareVirtualPlanApproval(editableVirtualPlan, planDraftLoad.plan.revision);
+    setPlanSaving(true);
+    setPlanSaveMessage(null);
+    void saveVirtualPlanDraft(candidate.planId, planDraftLoad.plan.revision, JSON.stringify(candidate))
+      .then(() => {
+        setEditableVirtualPlan(candidate);
+        setPlanDraftLoad({ kind: "valid", plan: candidate });
+        setPlanSaveMessage("Virtueller Plan bestätigt. Es wurden keine Dateien oder Ordner verändert.");
+      })
+      .catch(() => {
+        setPlanSaveMessage("Der virtuelle Plan konnte nicht bestätigt werden. Es wurde keine Erfolgsmeldung erzeugt.");
+      })
+      .finally(() => {
+        setPlanSaving(false);
+      });
+  }
 
   useEffect(() => {
     let disposed = false;
@@ -896,6 +1007,13 @@ function App() {
                   scanResult={result}
                   draftLoad={planDraftLoad}
                   loadingDraft={planDraftLoading}
+                  editablePlan={editableVirtualPlan}
+                  planSaving={planSaving}
+                  planSaveMessage={planSaveMessage}
+                  onSelectProposal={selectVirtualProposalForEditing}
+                  onPlanChange={changeEditableVirtualPlan}
+                  onSavePlan={saveEditableVirtualPlan}
+                  onApprovePlan={approveEditableVirtualPlan}
                 />
               </div>
             ) : null}

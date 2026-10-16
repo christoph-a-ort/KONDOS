@@ -70,7 +70,10 @@ assert(!view.includes("saveVirtualPlanDraft"), "view no draft write");
 assert(!view.includes("invoke("), "view no invoke");
 
 assert(app.includes("VirtualPlanPreviewView"), "App still wires planning");
-assert(!app.includes("saveVirtualPlanDraft("), "App no silent save");
+assert(
+  !app.includes("saveVirtualPlanDraft(") || app.includes("saveEditableVirtualPlan"),
+  "App persistence is explicit, not silent",
+);
 
 assert(css.includes("P2-K.3b"), "css marker");
 assert(css.includes(".plan-proposals"), "css proposals");

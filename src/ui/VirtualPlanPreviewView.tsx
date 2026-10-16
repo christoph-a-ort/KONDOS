@@ -14,6 +14,7 @@ import {
 } from "./treeRows";
 import { DEFAULT_TREE_SORT } from "./treeSort";
 import type { DraftLoadResult } from "./virtualPlan";
+import type { VirtualPlan } from "./virtualPlan";
 import {
   looksLikeTechnicalFeatureKey,
   reviewFeatureLabel,
@@ -23,14 +24,27 @@ import {
 } from "./virtualPlanPreview";
 import type { VirtualReorgProposal } from "./virtualPlanSuggestions";
 import type { VirtualProposalUsefulnessAssessment } from "./virtualPlanProposalUsefulness";
+import {
+  assessVirtualPlanApproval,
+  type VirtualPlanApprovalAssessment,
+} from "./virtualPlanApproval";
+import { VirtualPlanEditorPanel } from "./VirtualPlanEditorPanel";
 
 export type PlanCompareMode = "ist" | "soll" | "split";
+type PlanningMainView = "editor" | "compare" | "review";
 
 export interface VirtualPlanPreviewViewProps {
   preview: VirtualSollPreview | null;
   scanResult: ScanResult | null;
   draftLoad: DraftLoadResult | null;
   loadingDraft: boolean;
+  editablePlan: VirtualPlan | null;
+  planSaving: boolean;
+  planSaveMessage: string | null;
+  onSelectProposal: (proposal: VirtualReorgProposal) => void;
+  onPlanChange: (plan: VirtualPlan) => void;
+  onSavePlan: () => void;
+  onApprovePlan: () => void;
 }
 
 function suggestionLabel(kind: SollNodeProjection["suggestionKind"]): string {
@@ -86,6 +100,7 @@ function VirtualTreePane(props: {
     () => deriveVisibleRows(props.scanResult.root, props.expandedIds, DEFAULT_TREE_SORT),
     [props.scanResult, props.expandedIds],
   );
+  const viewportContentHeight = Math.min(Math.max(rows.length * ROW_HEIGHT + 2, ROW_HEIGHT + 2), 420);
 
   const window = computeTreeWindow(rows.length, scrollTop, viewportHeight);
   const slice = rows.slice(window.start, window.end);
@@ -100,6 +115,7 @@ function VirtualTreePane(props: {
       <div
         className="plan-tree-viewport"
         ref={viewportRef}
+        style={{ height: `${viewportContentHeight}px` }}
         onScroll={onScroll}
         role="tree"
         aria-label={props.title}
@@ -168,8 +184,16 @@ export function VirtualPlanPreviewView({
   scanResult,
   draftLoad,
   loadingDraft,
+  editablePlan,
+  planSaving,
+  planSaveMessage,
+  onSelectProposal,
+  onPlanChange,
+  onSavePlan,
+  onApprovePlan,
 }: VirtualPlanPreviewViewProps) {
   const [mode, setMode] = useState<PlanCompareMode>("split");
+  const [mainView, setMainView] = useState<PlanningMainView>("editor");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [proposalsOpen, setProposalsOpen] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
@@ -181,6 +205,12 @@ export function VirtualPlanPreviewView({
     }
     setExpandedIds(defaultExpandedIds(scanResult.root.id));
   }, [scanResult]);
+
+  useEffect(() => {
+    if (editablePlan !== null) {
+      setMainView("editor");
+    }
+  }, [editablePlan]);
 
   const projectionById = useMemo(() => {
     const map = new Map<string, SollNodeProjection>();
@@ -202,6 +232,21 @@ export function VirtualPlanPreviewView({
       ),
     [preview],
   );
+  const selectedProposal = useMemo(() => {
+    const proposalId = editablePlan?.virtualFolders?.[0]?.sourceProposalId;
+    return proposalId === undefined ? undefined : preview?.proposals.find((proposal) => proposal.id === proposalId);
+  }, [editablePlan, preview]);
+  const approval: VirtualPlanApprovalAssessment | null = useMemo(() => {
+    if (editablePlan === null || scanResult === null || preview === null) {
+      return null;
+    }
+    return assessVirtualPlanApproval({
+      plan: editablePlan,
+      scanResult,
+      binding: preview.binding,
+      draftLoad,
+    });
+  }, [editablePlan, scanResult, preview, draftLoad]);
 
   const draftNote = useMemo(() => {
     if (loadingDraft) {
@@ -271,40 +316,74 @@ export function VirtualPlanPreviewView({
           {preview.flags.draftBlocked ? <span className="plan-flag">Entwurf gesperrt</span> : null}
         </div>
         {draftNote !== null ? <p className="plan-draft-note muted">{draftNote}</p> : null}
-        <div className="insight-view-switcher plan-mode-switcher" role="group" aria-label="IST oder SOLL">
+        <div className="insight-view-switcher plan-main-switcher" role="group" aria-label="Planungsansicht">
           <button
             type="button"
             className="insight-view-tab"
-            aria-pressed={mode === "ist"}
+            aria-pressed={mainView === "editor"}
             onClick={() => {
-              setMode("ist");
+              setMainView("editor");
             }}
           >
-            IST
+            Vorschlag bearbeiten
           </button>
           <button
             type="button"
             className="insight-view-tab"
-            aria-pressed={mode === "soll"}
+            aria-pressed={mainView === "compare"}
             onClick={() => {
-              setMode("soll");
+              setMainView("compare");
             }}
           >
-            SOLL
+            IST / SOLL vergleichen
           </button>
           <button
             type="button"
             className="insight-view-tab"
-            aria-pressed={mode === "split"}
+            aria-pressed={mainView === "review"}
             onClick={() => {
-              setMode("split");
+              setMainView("review");
             }}
           >
-            Nebeneinander
+            Hinweise und Prüffälle
           </button>
         </div>
       </header>
 
+      {mainView === "compare" ? (
+        <>
+          <div className="insight-view-switcher plan-mode-switcher" role="group" aria-label="IST oder SOLL">
+            <button
+              type="button"
+              className="insight-view-tab"
+              aria-pressed={mode === "ist"}
+              onClick={() => {
+                setMode("ist");
+              }}
+            >
+              IST
+            </button>
+            <button
+              type="button"
+              className="insight-view-tab"
+              aria-pressed={mode === "soll"}
+              onClick={() => {
+                setMode("soll");
+              }}
+            >
+              SOLL
+            </button>
+            <button
+              type="button"
+              className="insight-view-tab"
+              aria-pressed={mode === "split"}
+              onClick={() => {
+                setMode("split");
+              }}
+            >
+              Nebeneinander
+            </button>
+          </div>
       <div className={mode === "split" ? "plan-workspace plan-workspace-split" : "plan-workspace"}>
         {mode === "ist" || mode === "split" ? (
           <VirtualTreePane
@@ -327,8 +406,11 @@ export function VirtualPlanPreviewView({
           />
         ) : null}
       </div>
+        </>
+      ) : null}
 
-      <div className="plan-proposals">
+      {mainView === "editor" && editablePlan === null ? (
+        <div className="plan-proposals">
         <button
           type="button"
           className="plan-details-toggle"
@@ -354,15 +436,35 @@ export function VirtualPlanPreviewView({
                     key={proposal.id}
                     proposal={proposal}
                     usefulness={usefulnessByProposalId.get(proposal.id)}
+                    onSelect={onSelectProposal}
                   />
                 ))}
               </ul>
             )}
           </div>
         ) : null}
-      </div>
+        </div>
+      ) : null}
 
-      <div className="plan-details">
+      {mainView === "editor" && editablePlan !== null ? (
+        <VirtualPlanEditorPanel
+          plan={editablePlan}
+          saving={planSaving}
+          saveMessage={planSaveMessage}
+          proposalTitle={selectedProposal?.title ?? "Ausgewählter virtueller Vorschlag"}
+          usefulnessLabel={
+            selectedProposal === undefined
+              ? null
+              : usefulnessByProposalId.get(selectedProposal.id)?.categoryLabel ?? null
+          }
+          approval={approval}
+          onPlanChange={onPlanChange}
+          onSave={onSavePlan}
+          onApprove={onApprovePlan}
+        />
+      ) : null}
+
+      {mainView === "review" ? <div className="plan-details">
         <button
           type="button"
           className="plan-details-toggle"
@@ -455,7 +557,7 @@ export function VirtualPlanPreviewView({
             </section>
           </div>
         ) : null}
-      </div>
+      </div> : null}
     </section>
   );
 }
@@ -463,9 +565,11 @@ export function VirtualPlanPreviewView({
 function ProposalCard({
   proposal,
   usefulness,
+  onSelect,
 }: {
   proposal: VirtualReorgProposal;
   usefulness: VirtualProposalUsefulnessAssessment | undefined;
+  onSelect: (proposal: VirtualReorgProposal) => void;
 }) {
   const [previewOpen, setPreviewOpen] = useState(true);
   const c = proposal.completeness;
@@ -478,6 +582,15 @@ function ProposalCard({
         <span className="plan-proposal-status">Noch nicht übernommen</span>
       </div>
       <p className="plan-proposal-action muted">{proposal.actionLabel}</p>
+      <button
+        type="button"
+        className="plan-proposal-select"
+        onClick={() => {
+          onSelect(proposal);
+        }}
+      >
+        Als bearbeitbaren Entwurf auswählen
+      </button>
       <p className="plan-location muted" title={proposal.sourceFolderDisplayPath}>
         Ausgangsordner: {shortenPath(proposal.sourceFolderDisplayPath)}
       </p>

@@ -33,6 +33,7 @@ import { runVirtualPlanCheck } from "./virtualPlanCheck";
 import { runVirtualPlanPreviewCheck } from "./virtualPlanPreviewCheck";
 import { runVirtualPlanSuggestionsCheck } from "./virtualPlanSuggestionsCheck";
 import { runVirtualPlanProposalUsefulnessCheck } from "./virtualPlanProposalUsefulnessCheck";
+import { runVirtualPlanEditorCheck } from "./virtualPlanEditorCheck";
 import { runP1cCheck } from "./p1cCheck";
 import { runP1dCheck } from "./p1dCheck";
 import { runP1e1Check } from "./contentSearchCheck";
@@ -357,6 +358,7 @@ export async function runTreeWorkbenchCheck(): Promise<void> {
   runVirtualPlanPreviewCheck();
   runVirtualPlanSuggestionsCheck();
   runVirtualPlanProposalUsefulnessCheck();
+  runVirtualPlanEditorCheck();
 }
 
 function runTreeSearchCheck(nested: DirectoryNode): void {

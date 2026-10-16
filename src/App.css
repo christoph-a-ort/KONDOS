@@ -2431,11 +2431,12 @@ button:disabled {
 /* ——— P2-K.3a: Virtual planning IST/SOLL preview ——— */
 /* ——— P2-K.3b: Virtuelle Vorschläge (separat, nicht übernommen) ——— */
 /* ——— P2-K.3c: Read-only organizational usefulness assessment ——— */
+/* ——— P2-K.4b/c: Explicit virtual plan editing ——— */
 
 .plan-view {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: auto;
   min-height: 0;
   background: #fff;
   border: 1px solid #d5dbe3;
@@ -2491,7 +2492,7 @@ button:disabled {
 }
 
 .plan-workspace {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-height: 0;
   min-width: 0;
   display: flex;
@@ -2508,10 +2509,8 @@ button:disabled {
 .plan-tree-pane {
   min-width: 0;
   min-height: 0;
-  height: 100%;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
 
 .plan-tree-pane-title {
@@ -2521,8 +2520,9 @@ button:disabled {
 }
 
 .plan-tree-viewport {
-  flex: 1 1 auto;
-  min-height: 160px;
+  flex: 0 0 auto;
+  min-height: 0;
+  max-height: 420px;
   overflow: auto;
   border: 1px solid #d5dbe3;
   border-radius: 6px;
@@ -2777,6 +2777,22 @@ button:disabled {
   font-size: 0.82rem;
 }
 
+.plan-proposal-select {
+  margin-top: 6px;
+  padding: 4px 8px;
+  border: 1px solid #aeb9c6;
+  border-radius: 4px;
+  background: #fff;
+  color: #344352;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.plan-proposal-select:hover {
+  background: #f4f6f8;
+}
+
 .plan-proposal-counts {
   margin: 4px 0 0;
   font-size: 0.84rem;
@@ -2873,14 +2889,267 @@ button:disabled {
   color: #4d514e;
 }
 
+.plan-editor {
+  flex: 0 0 auto;
+  max-height: min(52vh, 560px);
+  min-width: 0;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid #c5ced8;
+  border-radius: 6px;
+  background: #fff;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.plan-editor-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.plan-editor h3,
+.plan-editor h4 {
+  margin: 0;
+  color: #344352;
+}
+
+.plan-editor h3 {
+  font-size: 0.92rem;
+}
+
+.plan-editor h4 {
+  font-size: 0.84rem;
+}
+
+.plan-editor-heading p {
+  margin: 3px 0 0;
+  font-size: 0.8rem;
+}
+
+.plan-editor-summary {
+  color: #3d4a5c;
+  font-weight: 600;
+}
+
+.plan-approval-summary {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid #d5dbe3;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.plan-approval-summary.is-eligible {
+  background: #f5f8f2;
+  border-color: #b7c4a3;
+}
+
+.plan-approval-summary.is-blocked {
+  background: #f8f8f6;
+}
+
+.plan-approval-summary ul {
+  margin: 1px 0 0;
+  padding-left: 18px;
+}
+
+.plan-editor-section {
+  margin-top: 10px;
+}
+
+.plan-editor-section summary {
+  cursor: pointer;
+  color: #344352;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.plan-editor-folder-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+  min-width: 0;
+}
+
+.plan-editor-folder,
+.plan-editor-file {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 3px;
+}
+
+.plan-editor-folder {
+  flex: 1 1 180px;
+  max-width: 280px;
+  padding: 3px 5px;
+  border: 1px solid #e1e6eb;
+  border-radius: 4px;
+  background: #f8fafc;
+}
+
+.plan-editor-folder input,
+.plan-editor-file select {
+  min-width: 0;
+  padding: 3px 5px;
+  border: 1px solid #b8c3ce;
+  border-radius: 3px;
+  background: #fff;
+  color: #263442;
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.plan-editor-folder-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #344352;
+  font-size: 0.8rem;
+}
+
+.plan-editor-folder-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.plan-editor-file-list {
+  margin-top: 4px;
+  min-width: 0;
+}
+
+.plan-editor-file-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(130px, 0.45fr);
+  gap: 6px;
+  padding: 2px 6px;
+  color: #5b6570;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.plan-editor-file {
+  grid-template-columns: minmax(0, 1fr) minmax(130px, 0.45fr);
+  align-items: center;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.78rem;
+  padding: 2px 5px;
+  border-bottom: 1px solid #e8edf3;
+}
+
+.plan-editor-file > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-editor-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin: 10px -10px 0;
+  padding: 8px 10px 0;
+  border-top: 1px solid #d5dbe3;
+  background: #fff;
+}
+
+.plan-editor-secondary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.plan-editor-primary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+}
+
+.plan-editor-approval-blockers {
+  max-width: 360px;
+  color: #5b5151;
+  font-size: 0.74rem;
+  line-height: 1.25;
+}
+
+.plan-editor-approve {
+  border-color: #8ca1b5 !important;
+  background: #f5f8fb !important;
+}
+
+.plan-editor-actions button,
+.plan-editor-folder button {
+  padding: 4px 8px;
+  border: 1px solid #aeb9c6;
+  border-radius: 4px;
+  background: #fff;
+  color: #344352;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.plan-editor-actions button:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.plan-editor-notice {
+  margin: 6px 0 0;
+  font-size: 0.8rem;
+}
+
+.plan-editor-projection {
+  margin-top: 10px;
+  font-size: 0.8rem;
+}
+
+.plan-editor-projection summary {
+  cursor: pointer;
+  color: #3d4a58;
+  font-weight: 600;
+}
+
+.plan-editor-projection-list {
+  margin-top: 5px;
+  border: 1px solid #d5dbe3;
+  border-radius: 4px;
+  background: #f8fafc;
+}
+
+.plan-editor-projection-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  gap: 6px;
+  padding: 4px 6px;
+  border-bottom: 1px solid #e3e7eb;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.76rem;
+}
+
+.plan-editor-projection-row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 900px) {
   .plan-workspace-split {
     grid-template-columns: 1fr;
-    overflow: auto;
-  }
-
-  .plan-workspace-split .plan-tree-pane {
-    min-height: 220px;
-    height: 220px;
   }
 }
