@@ -77,6 +77,9 @@ pub fn load_virtual_plan_draft(app: AppHandle, plan_id: String) -> Result<Option
 #[tauri::command]
 pub fn load_virtual_plan_preferences(app: AppHandle) -> Result<Option<String>, AppError> {
   let file = preferences_path(&app)?;
+  load_preferences_at(&file)
+}
+fn load_preferences_at(file: &Path) -> Result<Option<String>, AppError> {
   let _guard = DRAFT_STORE_LOCK.get_or_init(|| Mutex::new(())).lock().map_err(|_| AppError::internal())?;
   match read_workbench_prefs_file(&file) {
     Ok(None) => Ok(None),
@@ -87,13 +90,16 @@ pub fn load_virtual_plan_preferences(app: AppHandle) -> Result<Option<String>, A
 #[tauri::command]
 pub fn save_virtual_plan_preferences(app: AppHandle, expected_revision: u64, preferences_json: String) -> Result<(), AppError> {
   let file = preferences_path(&app)?;
+  save_preferences_at(&file, expected_revision, &preferences_json)
+}
+fn save_preferences_at(file: &Path, expected_revision: u64, preferences_json: &str) -> Result<(), AppError> {
   let _guard = DRAFT_STORE_LOCK.get_or_init(|| Mutex::new(())).lock().map_err(|_| AppError::internal())?;
-  let next = preferences_revision(&preferences_json)?;
+  let next = preferences_revision(preferences_json)?;
   if next != expected_revision + 1 { return Err(AppError::invalid_config("Ungültige Präferenzrevision.")); }
   match read_workbench_prefs_file(&file) {
-    Ok(None) if expected_revision == 0 => write_workbench_prefs_file(&file, &preferences_json),
+    Ok(None) if expected_revision == 0 => write_workbench_prefs_file(file, preferences_json),
     Ok(None) => Err(AppError::invalid_config("Präferenzen wurden zwischenzeitlich entfernt.")),
-    Ok(Some(raw)) if preferences_revision(&raw)? == expected_revision => write_workbench_prefs_file(&file, &preferences_json),
+    Ok(Some(raw)) if preferences_revision(&raw)? == expected_revision => write_workbench_prefs_file(file, preferences_json),
     Ok(Some(_)) => Err(AppError::invalid_config("Präferenzen wurden zwischenzeitlich geändert.")),
     Err(error) => Err(error),
   }
@@ -185,6 +191,7 @@ mod tests {
   use super::super::workbench_prefs::set_atomic_write_fault;
   fn dir() -> PathBuf { let p=std::env::temp_dir().join(format!("dotty-vplan-{}-{}",std::process::id(),SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos())); fs::create_dir_all(&p).unwrap(); p }
   fn json(id:&str, rev:u64)->String { format!(r#"{{"schemaVersion":1,"planId":"{id}","revision":{rev},"items":[],"openCases":[],"decisions":[],"preferences":[]}}"#) }
+  fn preferences_json(rev:u64, description:&str)->String { format!(r#"{{"schemaVersion":1,"revision":{rev},"preferences":[{{"id":"p1","description":"{description}","origin":"user","active":true}}]}}"#) }
   #[test] fn save_load_revision_and_stale_rejected() { let d=dir(); let p=draft_path(&d,"a").unwrap(); save_at(&p,"a",0,&json("a",1)).unwrap(); assert_eq!(load_at(&p,"a").unwrap().unwrap(),json("a",1)); save_at(&p,"a",1,&json("a",2)).unwrap(); assert!(save_at(&p,"a",1,&json("a",2)).is_err()); let _=fs::remove_dir_all(d); }
   #[test] fn corrupt_direct_save_preserves_and_blocks() { let d=dir(); let p=draft_path(&d,"a").unwrap(); fs::write(&p,"{bad").unwrap(); assert!(save_at(&p,"a",0,&json("a",1)).is_err()); assert_eq!(fs::read_to_string(&p).unwrap(),"{bad"); assert!(blocked(&p).exists()); assert!(load_at(&p,"a").is_err()); let _=fs::remove_dir_all(d); }
   #[test] fn marker_contents_do_not_unlock_and_other_draft_works() { let d=dir(); let a=draft_path(&d,"a").unwrap(); let b=draft_path(&d,"b").unwrap(); fs::write(&a,"bad").unwrap(); assert!(load_at(&a,"a").is_err()); fs::write(blocked(&a),"garbage").unwrap(); assert!(save_at(&a,"a",0,&json("a",1)).is_err()); save_at(&b,"b",0,&json("b",1)).unwrap(); discard_at(&a).unwrap(); assert!(load_at(&b,"b").unwrap().is_some()); let _=fs::remove_dir_all(d); }
@@ -194,4 +201,7 @@ mod tests {
   #[test] fn atomic_failures_preserve_previous_and_cleanup_temp() { let d=dir(); let p=draft_path(&d,"a").unwrap(); save_at(&p,"a",0,&json("a",1)).unwrap(); for fault in ["temp","replace"] { set_atomic_write_fault(Some(fault)); assert!(save_at(&p,"a",1,&json("a",2)).is_err()); set_atomic_write_fault(None); assert_eq!(fs::read_to_string(&p).unwrap(),json("a",1)); assert_eq!(fs::read_dir(&d).unwrap().count(),1); } let _=fs::remove_dir_all(d); }
   #[test] fn concurrent_save_and_discard_has_no_resurrection() { let d=dir(); let p=Arc::new(draft_path(&d,"a").unwrap()); save_at(&p,"a",0,&json("a",1)).unwrap(); let gate=Arc::new(Barrier::new(3)); let s=Arc::clone(&p); let g=Arc::clone(&gate); let save=thread::spawn(move|| { g.wait(); save_at(&s,"a",1,&json("a",2)) }); let q=Arc::clone(&p); let g=Arc::clone(&gate); let discard=thread::spawn(move|| { g.wait(); discard_at(&q) }); gate.wait(); let _=save.join(); let _=discard.join().unwrap(); assert!(!p.exists()); assert!(!blocked(&p).exists()); let _=fs::remove_dir_all(d); }
   #[test] fn list_keeps_multiple_drafts_distinct_and_marks_corruption() { let d=dir(); save_at(&draft_path(&d,"a").unwrap(),"a",0,&json("a",1)).unwrap(); save_at(&draft_path(&d,"b").unwrap(),"b",0,&json("b",1)).unwrap(); fs::write(draft_path(&d,"c").unwrap(),"bad").unwrap(); let listed=list_at(&d).unwrap(); assert_eq!(listed.len(),3); assert_eq!(listed.iter().filter(|entry|entry.draft_json.is_some()).count(),2); assert!(listed.iter().any(|entry|entry.plan_id=="c" && entry.blocked)); assert!(blocked(&draft_path(&d,"c").unwrap()).exists()); let _=fs::remove_dir_all(d); }
+  #[test] fn preferences_revision_conflict_and_corruption_preserve_data() { let d=dir(); let p=d.join(PREFERENCES_FILE); let first=preferences_json(1,"Erste"); save_preferences_at(&p,0,&first).unwrap(); let second=preferences_json(2,"Zweite"); save_preferences_at(&p,1,&second).unwrap(); assert!(save_preferences_at(&p,1,&second).is_err()); assert_eq!(fs::read_to_string(&p).unwrap(),second); fs::write(&p,"{bad").unwrap(); assert!(save_preferences_at(&p,2,&preferences_json(3,"Dritte")).is_err()); assert_eq!(fs::read_to_string(&p).unwrap(),"{bad"); let _=fs::remove_dir_all(d); }
+  #[test] fn preferences_atomic_failure_preserves_previous() { let d=dir(); let p=d.join(PREFERENCES_FILE); let first=preferences_json(1,"Erste"); save_preferences_at(&p,0,&first).unwrap(); set_atomic_write_fault(Some("replace")); assert!(save_preferences_at(&p,1,&preferences_json(2,"Zweite")).is_err()); set_atomic_write_fault(None); assert_eq!(fs::read_to_string(&p).unwrap(),first); let _=fs::remove_dir_all(d); }
+  #[test] fn concurrent_preference_writes_have_one_winner() { let d=dir(); let p=Arc::new(d.join(PREFERENCES_FILE)); save_preferences_at(&p,0,&preferences_json(1,"Erste")).unwrap(); let mut joins=Vec::new(); for description in ["Zweite","Dritte"] { let p=Arc::clone(&p); joins.push(thread::spawn(move||save_preferences_at(&p,1,&preferences_json(2,description)).is_ok())); } assert_eq!(joins.into_iter().map(|join|join.join().unwrap()).filter(|ok|*ok).count(),1); let _=fs::remove_dir_all(d); }
 }

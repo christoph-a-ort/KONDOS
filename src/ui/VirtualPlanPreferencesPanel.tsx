@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { VirtualPlan } from "./virtualPlan";
 import {
   addSelectedPreferenceCandidates,
-  deriveVirtualPlanPreferenceCandidates,
+  analyzeVirtualPlanPreferenceCandidates,
   parseVirtualPlanPreferenceStore,
   updateVirtualPlanPreference,
   type VirtualPlanPreferenceStore,
@@ -16,10 +16,13 @@ export function VirtualPlanPreferencesPanel({ plan, revalidationCurrent }: { pla
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [descriptionEdits, setDescriptionEdits] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<string | null>(null);
-  const candidates = useMemo(
-    () => plan !== null && revalidationCurrent ? deriveVirtualPlanPreferenceCandidates(plan) : [],
+  const analysis = useMemo(
+    () => plan !== null && revalidationCurrent
+      ? analyzeVirtualPlanPreferenceCandidates(plan)
+      : { candidates: [], conflicts: [] },
     [plan, revalidationCurrent],
   );
+  const candidates = analysis.candidates;
 
   useEffect(() => {
     void loadVirtualPlanPreferences()
@@ -50,6 +53,9 @@ export function VirtualPlanPreferencesPanel({ plan, revalidationCurrent }: { pla
       <details className="plan-preference-candidates">
         <summary>Präferenzen aus Entscheidungen übernehmen ({candidates.length})</summary>
         {!revalidationCurrent ? <p className="muted">Nur ein aktuell gültiger, virtuell bestätigter Plan kann Kandidaten liefern.</p> : null}
+        {analysis.conflicts.length > 0 ? (
+          <p className="muted">{analysis.conflicts.map((conflict) => conflict.description).join(" ")}</p>
+        ) : null}
         {candidates.map((candidate) => (
           <label className="plan-preference-candidate" key={candidate.id}>
             <input

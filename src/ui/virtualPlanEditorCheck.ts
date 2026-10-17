@@ -21,6 +21,7 @@ import {
 import { revalidateVirtualPlan } from "./virtualPlanRevalidation";
 import {
   addSelectedPreferenceCandidates,
+  analyzeVirtualPlanPreferenceCandidates,
   deriveVirtualPlanPreferenceCandidates,
   parseVirtualPlanPreferenceStore,
   updateVirtualPlanPreference,
@@ -323,4 +324,49 @@ export function runVirtualPlanEditorCheck(): void {
   assert(!deactivated.preferences[0]!.active, "preference can be revoked");
   assert(deactivated.preferences[0]!.sourceDecisionId === savedPreferences.preferences[0]!.sourceDecisionId, "source decision remains immutable");
   assert(parseVirtualPlanPreferenceStore("{bad") === null, "corrupt preference data is rejected");
+
+  const assignmentDecision = assigned.plan.decisions.find((decision) => decision.planItemId === note.id)!;
+  const finalTarget = assigned.plan.items.find((item) => item.id === note.id)!.virtualTargetPath;
+  const supersededAssignment = {
+    ...assignmentDecision,
+    id: "superseded-assignment",
+    previousVirtualTargetPath: "Docs/A",
+  };
+  const finalAssignment = {
+    ...assignmentDecision,
+    id: "final-assignment",
+    previousVirtualTargetPath: "Docs/B",
+  };
+  const conflictResolvedPlan = {
+    ...approvedWithUserEdit,
+    items: approvedWithUserEdit.items.map((item) => item.id === note.id ? { ...item, virtualTargetPath: finalTarget } : item),
+    decisions: [...approvedWithUserEdit.decisions, supersededAssignment, finalAssignment],
+  };
+  const resolvedAnalysis = analyzeVirtualPlanPreferenceCandidates(conflictResolvedPlan);
+  assert(
+    resolvedAnalysis.candidates.filter((candidate) => candidate.sourceDecisionId === "superseded-assignment").length === 0,
+    "superseded assignment creates no current preference candidate",
+  );
+  assert(
+    resolvedAnalysis.candidates.filter((candidate) => candidate.sourceDecisionId === "final-assignment").length === 1,
+    "final assignment alone creates current preference candidate",
+  );
+  const renameDecision = assigned.plan.decisions.find((decision) => decision.virtualFolderId === folder.id)!;
+  const supersededRename = { ...renameDecision, id: "superseded-rename", previousFolderName: "2011" };
+  const finalRename = { ...renameDecision, id: "final-rename", previousFolderName: "Zwischenstand" };
+  const renameResolvedPlan = {
+    ...approvedWithUserEdit,
+    decisions: [...approvedWithUserEdit.decisions, supersededRename, finalRename],
+  };
+  const renameAnalysis = analyzeVirtualPlanPreferenceCandidates(renameResolvedPlan);
+  assert(
+    renameAnalysis.candidates.filter((candidate) => candidate.sourceDecisionId === "superseded-rename").length === 0,
+    "superseded folder rename creates no current preference candidate",
+  );
+  assert(
+    renameAnalysis.candidates.filter((candidate) => candidate.sourceDecisionId === "final-rename").length === 1,
+    "final folder rename alone creates current preference candidate",
+  );
+  const resetApproved = prepareVirtualPlanApproval(reset.plan, reset.plan.revision);
+  assert(deriveVirtualPlanPreferenceCandidates(resetApproved).length === 0, "reset decisions create no preference candidate");
 }

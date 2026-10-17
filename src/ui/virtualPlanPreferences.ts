@@ -1,6 +1,6 @@
 /** P2-K.5b/c – Pure preference candidates and immutable preference-store edits. */
 
-import type { PreferenceRecord, VirtualPlan } from "./virtualPlan";
+import type { DecisionRecord, PreferenceRecord, VirtualPlan } from "./virtualPlan";
 
 export const VIRTUAL_PLAN_PREFERENCES_SCHEMA_VERSION = 1 as const;
 
@@ -19,6 +19,14 @@ export interface VirtualPlanPreferenceCandidate {
   rationale: string;
   limitation: string;
 }
+export interface VirtualPlanPreferenceConflict {
+  sourceDecisionId: string;
+  description: string;
+}
+export interface VirtualPlanPreferenceAnalysis {
+  candidates: VirtualPlanPreferenceCandidate[];
+  conflicts: VirtualPlanPreferenceConflict[];
+}
 
 function key(value: string): string {
   let hash = 2166136261;
@@ -26,14 +34,25 @@ function key(value: string): string {
   return `vpp_${(hash >>> 0).toString(16)}`;
 }
 
-export function deriveVirtualPlanPreferenceCandidates(plan: VirtualPlan): VirtualPlanPreferenceCandidate[] {
-  if (plan.status !== "virtuallyApproved") return [];
+export function analyzeVirtualPlanPreferenceCandidates(plan: VirtualPlan): VirtualPlanPreferenceAnalysis {
+  if (plan.status !== "virtuallyApproved") return { candidates: [], conflicts: [] };
   const candidates: VirtualPlanPreferenceCandidate[] = [];
+  const conflicts: VirtualPlanPreferenceConflict[] = [];
+  const lastItemDecision = new Map<string, DecisionRecord>();
+  const lastFolderDecision = new Map<string, DecisionRecord>();
   for (const decision of plan.decisions) {
-    if (decision.origin !== "user" || decision.kind !== "edit") continue;
-    if (decision.virtualFolderId !== undefined && decision.previousFolderName !== undefined) {
-      const folder = plan.virtualFolders?.find((entry) => entry.id === decision.virtualFolderId);
-      if (folder === undefined || folder.name === decision.previousFolderName) continue;
+    if (decision.origin !== "user") continue;
+    if (decision.planItemId !== undefined) lastItemDecision.set(decision.planItemId, decision);
+    if (decision.virtualFolderId !== undefined) lastFolderDecision.set(decision.virtualFolderId, decision);
+  }
+  for (const decision of lastFolderDecision.values()) {
+    if (decision.kind !== "edit" || decision.previousFolderName === undefined || decision.virtualFolderId === undefined) continue;
+    const folder = plan.virtualFolders?.find((entry) => entry.id === decision.virtualFolderId);
+    if (folder === undefined) {
+      conflicts.push({ sourceDecisionId: decision.id, description: "Die letzte Ordnerentscheidung kann keinem aktuellen virtuellen Zielordner eindeutig zugeordnet werden." });
+      continue;
+    }
+    if (folder.name !== decision.previousFolderName) {
       const semanticKey = `rename:${plan.scope.kind}:${folder.parentVirtualPath}:${folder.name}`;
       candidates.push({
         id: key(`${decision.id}:${semanticKey}`), semanticKey,
@@ -42,11 +61,16 @@ export function deriveVirtualPlanPreferenceCandidates(plan: VirtualPlan): Virtua
         rationale: "Ausdrückliche Umbenennung eines virtuellen Zielordners durch den Benutzer.",
         limitation: "Gilt nur als Hinweis im festgelegten Scanbereich und löst keine Umbenennung aus.",
       });
+    }
+  }
+  for (const decision of lastItemDecision.values()) {
+    if (decision.kind !== "edit" || decision.previousVirtualTargetPath === undefined || decision.planItemId === undefined) continue;
+    const item = plan.items.find((entry) => entry.id === decision.planItemId);
+    if (item === undefined) {
+      conflicts.push({ sourceDecisionId: decision.id, description: "Die letzte Dateientscheidung kann keinem aktuellen Objekt eindeutig zugeordnet werden." });
       continue;
     }
-    if (decision.planItemId !== undefined && decision.previousVirtualTargetPath !== undefined) {
-      const item = plan.items.find((entry) => entry.id === decision.planItemId);
-      if (item === undefined || item.virtualTargetPath === decision.previousVirtualTargetPath) continue;
+    if (item.virtualTargetPath !== decision.previousVirtualTargetPath) {
       const semanticKey = `assignment:${plan.scope.kind}:${item.observed.relativePath}:${item.virtualTargetPath}`;
       candidates.push({
         id: key(`${decision.id}:${semanticKey}`), semanticKey,
@@ -57,9 +81,16 @@ export function deriveVirtualPlanPreferenceCandidates(plan: VirtualPlan): Virtua
       });
     }
   }
-  return candidates
-    .filter((candidate, index, all) => all.findIndex((other) => other.semanticKey === candidate.semanticKey) === index)
-    .sort((left, right) => left.id.localeCompare(right.id));
+  return {
+    candidates: candidates
+      .filter((candidate, index, all) => all.findIndex((other) => other.semanticKey === candidate.semanticKey) === index)
+      .sort((left, right) => left.id.localeCompare(right.id)),
+    conflicts,
+  };
+}
+
+export function deriveVirtualPlanPreferenceCandidates(plan: VirtualPlan): VirtualPlanPreferenceCandidate[] {
+  return analyzeVirtualPlanPreferenceCandidates(plan).candidates;
 }
 
 export function addSelectedPreferenceCandidates(
