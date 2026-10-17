@@ -54,7 +54,10 @@ export interface DecisionRecord {
   virtualFolderId?: string;
   previousFolderName?: string;
 }
-export interface PreferenceRecord { id: string; scope: VirtualPlanScope; description: string; revision: number; active: boolean; origin: "user"; }
+export interface PreferenceRecord {
+  id: string; scope: VirtualPlanScope; description: string; revision: number; active: boolean; origin: "user";
+  sourceDecisionId?: string; rationale?: string; limitation?: string; semanticKey?: string;
+}
 export interface VirtualPlan {
   schemaVersion: typeof VIRTUAL_PLAN_SCHEMA_VERSION; planId: string; builderVersion: number; revision: number;
   status: VirtualPlanStatus; scope: VirtualPlanScope; binding: SnapshotBinding; items: VirtualPlanItem[];

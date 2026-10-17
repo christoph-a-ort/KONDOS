@@ -13,8 +13,8 @@ import {
   deriveVisibleRows,
 } from "./treeRows";
 import { DEFAULT_TREE_SORT } from "./treeSort";
-import type { DraftLoadResult } from "./virtualPlan";
-import type { VirtualPlan } from "./virtualPlan";
+import { parseVirtualPlan, type DraftLoadResult, type VirtualPlan } from "./virtualPlan";
+import type { VirtualPlanDraftListEntry } from "./virtualPlanApi";
 import {
   looksLikeTechnicalFeatureKey,
   reviewFeatureLabel,
@@ -28,7 +28,9 @@ import {
   assessVirtualPlanApproval,
   type VirtualPlanApprovalAssessment,
 } from "./virtualPlanApproval";
+import { revalidateVirtualPlan, type VirtualPlanRevalidation } from "./virtualPlanRevalidation";
 import { VirtualPlanEditorPanel } from "./VirtualPlanEditorPanel";
+import { VirtualPlanPreferencesPanel } from "./VirtualPlanPreferencesPanel";
 
 export type PlanCompareMode = "ist" | "soll" | "split";
 type PlanningMainView = "editor" | "compare" | "review";
@@ -41,10 +43,13 @@ export interface VirtualPlanPreviewViewProps {
   editablePlan: VirtualPlan | null;
   planSaving: boolean;
   planSaveMessage: string | null;
+  historicalPlanEntries: VirtualPlanDraftListEntry[];
+  historicalPlansLoading: boolean;
   onSelectProposal: (proposal: VirtualReorgProposal) => void;
   onPlanChange: (plan: VirtualPlan) => void;
   onSavePlan: () => void;
   onApprovePlan: () => void;
+  onRecheckHistoricalPlans: () => void;
 }
 
 function suggestionLabel(kind: SollNodeProjection["suggestionKind"]): string {
@@ -187,15 +192,20 @@ export function VirtualPlanPreviewView({
   editablePlan,
   planSaving,
   planSaveMessage,
+  historicalPlanEntries,
+  historicalPlansLoading,
   onSelectProposal,
   onPlanChange,
   onSavePlan,
   onApprovePlan,
+  onRecheckHistoricalPlans,
 }: VirtualPlanPreviewViewProps) {
   const [mode, setMode] = useState<PlanCompareMode>("split");
   const [mainView, setMainView] = useState<PlanningMainView>("editor");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [proposalsOpen, setProposalsOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [viewedHistoricalPlanId, setViewedHistoricalPlanId] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
@@ -247,6 +257,32 @@ export function VirtualPlanPreviewView({
       draftLoad,
     });
   }, [editablePlan, scanResult, preview, draftLoad]);
+  const currentPlanRevalidation = useMemo(
+    () => editablePlan === null || scanResult === null ? null : revalidateVirtualPlan({
+      plan: editablePlan, blocked: false, scanResult, currentBinding: preview?.binding ?? editablePlan.binding,
+    }),
+    [editablePlan, preview, scanResult],
+  );
+  const historicalPlans = useMemo(() => {
+    if (scanResult === null || preview === null) {
+      return [];
+    }
+    const currentPlanId = `vp_${preview.binding.snapshotFingerprint}`;
+    return historicalPlanEntries
+      .filter((entry) => entry.planId !== currentPlanId)
+      .map((entry) => {
+        const parsed = entry.draftJson === null ? { kind: "blocked" as const } : parseVirtualPlan(entry.draftJson);
+        const plan = parsed.kind === "valid" ? parsed.plan : null;
+        const revalidation: VirtualPlanRevalidation = revalidateVirtualPlan({
+          plan,
+          blocked: entry.blocked || parsed.kind === "blocked",
+          scanResult,
+          currentBinding: preview.binding,
+        });
+        return { entry, plan, revalidation };
+      })
+      .filter(({ plan }) => plan?.binding.normalizedRootPath === preview.binding.normalizedRootPath);
+  }, [historicalPlanEntries, preview, scanResult]);
 
   const draftNote = useMemo(() => {
     if (loadingDraft) {
@@ -447,21 +483,84 @@ export function VirtualPlanPreviewView({
       ) : null}
 
       {mainView === "editor" && editablePlan !== null ? (
-        <VirtualPlanEditorPanel
-          plan={editablePlan}
-          saving={planSaving}
-          saveMessage={planSaveMessage}
-          proposalTitle={selectedProposal?.title ?? "Ausgewählter virtueller Vorschlag"}
-          usefulnessLabel={
-            selectedProposal === undefined
-              ? null
-              : usefulnessByProposalId.get(selectedProposal.id)?.categoryLabel ?? null
-          }
-          approval={approval}
-          onPlanChange={onPlanChange}
-          onSave={onSavePlan}
-          onApprove={onApprovePlan}
-        />
+        <>
+          <VirtualPlanEditorPanel
+            plan={editablePlan}
+            saving={planSaving}
+            saveMessage={planSaveMessage}
+            proposalTitle={selectedProposal?.title ?? "Ausgewählter virtueller Vorschlag"}
+            usefulnessLabel={
+              selectedProposal === undefined
+                ? null
+                : usefulnessByProposalId.get(selectedProposal.id)?.categoryLabel ?? null
+            }
+            approval={approval}
+            onPlanChange={onPlanChange}
+            onSave={onSavePlan}
+            onApprove={onApprovePlan}
+          />
+          <VirtualPlanPreferencesPanel
+            plan={editablePlan}
+            revalidationCurrent={currentPlanRevalidation?.kind === "current"}
+          />
+        </>
+      ) : null}
+
+      {mainView === "editor" ? (
+        <details
+          className="plan-history"
+          open={historyOpen}
+          onToggle={(event) => {
+            setHistoryOpen((event.currentTarget as HTMLDetailsElement).open);
+          }}
+        >
+          <summary>
+            Frühere virtuelle Pläne ({historicalPlans.length})
+          </summary>
+          <div className="plan-history-actions">
+            <button type="button" onClick={onRecheckHistoricalPlans} disabled={historicalPlansLoading}>
+              {historicalPlansLoading ? "Prüft …" : "Erneut prüfen"}
+            </button>
+            <span className="muted">Die Prüfung ändert keinen gespeicherten Plan.</span>
+          </div>
+          {historicalPlans.length === 0 ? (
+            <p className="muted">Keine früheren Pläne für andere Snapshots dieser Scanwurzel gefunden.</p>
+          ) : (
+            <div className="plan-history-list">
+              {historicalPlans.map(({ entry, plan, revalidation }) => (
+                <article className="plan-history-item" key={entry.planId}>
+                  <div>
+                    <strong>{plan?.status === "virtuallyApproved" ? "Historisch virtuell bestätigt" : "Historischer Entwurf"}</strong>
+                    <span className={`plan-history-status plan-history-${revalidation.kind}`}>{revalidation.label}</span>
+                  </div>
+                  <p className="muted">
+                    Wurzel: {plan?.binding.normalizedRootPath ?? "nicht lesbar"}
+                    {entry.modifiedAtMs === null
+                      ? ""
+                      : ` · Geändert: ${new Date(entry.modifiedAtMs).toLocaleString("de-DE")}`}
+                  </p>
+                  {revalidation.reasons.length > 0 ? (
+                    <p className="muted">{revalidation.reasons.join(" ")}</p>
+                  ) : null}
+                  <button type="button" onClick={() => setViewedHistoricalPlanId(entry.planId)}>
+                    Früheren Plan ansehen
+                  </button>
+                  {viewedHistoricalPlanId === entry.planId ? (
+                    <div className="plan-history-readonly">
+                      <p>
+                        Nur lesend: Revision {plan?.revision ?? "unbekannt"} · {plan?.items.length ?? 0} beobachtete
+                        Objekte · {plan?.decisions.length ?? 0} Entscheidungen
+                      </p>
+                      <p className="muted">
+                        Die ursprüngliche Scanbindung wird nicht auf den aktuellen Scan umgebunden.
+                      </p>
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          )}
+        </details>
       ) : null}
 
       {mainView === "review" ? <div className="plan-details">

@@ -18,6 +18,13 @@ import {
   assessVirtualPlanApproval,
   prepareVirtualPlanApproval,
 } from "./virtualPlanApproval";
+import { revalidateVirtualPlan } from "./virtualPlanRevalidation";
+import {
+  addSelectedPreferenceCandidates,
+  deriveVirtualPlanPreferenceCandidates,
+  parseVirtualPlanPreferenceStore,
+  updateVirtualPlanPreference,
+} from "./virtualPlanPreferences";
 
 function assert(value: boolean, label: string): void {
   if (!value) throw new Error(label);
@@ -252,4 +259,68 @@ export function runVirtualPlanEditorCheck(): void {
     "approval records user decision",
   );
   assert(!renameVirtualPlanFolder(approved, folder.id, "Nach Freigabe").ok, "approved plan is not silently editable");
+
+  assert(
+    revalidateVirtualPlan({ plan: persisted, blocked: false, scanResult: result, currentBinding: binding }).kind === "current",
+    "unchanged snapshot revalidates current",
+  );
+  assert(
+    revalidateVirtualPlan({
+      plan: persisted,
+      blocked: false,
+      scanResult: result,
+      currentBinding: { ...binding, sourceScanId: binding.sourceScanId + 1 },
+    }).kind === "stale",
+    "changed scan id revalidates stale",
+  );
+  assert(
+    revalidateVirtualPlan({
+      plan: persisted,
+      blocked: false,
+      scanResult: result,
+      currentBinding: { ...binding, snapshotFingerprint: "vp1-changed" },
+    }).kind === "stale",
+    "changed fingerprint revalidates stale",
+  );
+  assert(
+    revalidateVirtualPlan({
+      plan: persisted,
+      blocked: false,
+      scanResult: result,
+      currentBinding: { ...binding, scanConfig: { ...binding.scanConfig, maxDepth: binding.scanConfig.maxDepth + 1 } },
+    }).kind === "stale",
+    "changed scan config revalidates stale",
+  );
+  const addedObjectResult: ScanResult = {
+    ...result,
+    root: { ...result.root, children: [...result.root.children, file("C:\\Fixture\\zusatz.txt", "zusatz.txt", 1)] },
+  };
+  assert(
+    revalidateVirtualPlan({ plan: persisted, blocked: false, scanResult: addedObjectResult, currentBinding: binding }).kind === "stale",
+    "changed object set revalidates stale",
+  );
+  assert(
+    revalidateVirtualPlan({ plan: approved, blocked: false, scanResult: result, currentBinding: binding }).kind === "current",
+    "approved historical plan remains historically valid without rebinding",
+  );
+  assert(
+    revalidateVirtualPlan({ plan: null, blocked: true, scanResult: result, currentBinding: binding }).kind === "blocked",
+    "blocked draft remains blocked",
+  );
+
+  assert(deriveVirtualPlanPreferenceCandidates(original).length === 0, "unconfirmed plan creates no preference candidates");
+  const approvedWithUserEdit = prepareVirtualPlanApproval(assigned.plan, assigned.plan.revision);
+  const candidates = deriveVirtualPlanPreferenceCandidates(approvedWithUserEdit);
+  assert(candidates.length === 2, "explicit user decisions create preference candidates");
+  const preferenceStore = { schemaVersion: 1 as const, revision: 0, preferences: [] };
+  const savedPreferences = addSelectedPreferenceCandidates(preferenceStore, candidates);
+  assert(savedPreferences.preferences.length === 2 && savedPreferences.revision === 1, "selected preferences persist once");
+  assert(addSelectedPreferenceCandidates(savedPreferences, candidates) === savedPreferences, "duplicate preference prevented");
+  const deactivated = updateVirtualPlanPreference(savedPreferences, savedPreferences.preferences[0]!.id, {
+    description: "Bearbeitete Präferenz",
+    active: false,
+  });
+  assert(!deactivated.preferences[0]!.active, "preference can be revoked");
+  assert(deactivated.preferences[0]!.sourceDecisionId === savedPreferences.preferences[0]!.sourceDecisionId, "source decision remains immutable");
+  assert(parseVirtualPlanPreferenceStore("{bad") === null, "corrupt preference data is rejected");
 }

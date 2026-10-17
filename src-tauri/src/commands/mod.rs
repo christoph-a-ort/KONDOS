@@ -14,4 +14,4 @@ pub use open::open_with_default;
 pub use report::{export_inventory_report_pdf, export_inventory_report_xlsx};
 pub use scan::{cancel_scan, classify_scan_root, start_scan};
 pub use workbench_prefs::{load_workbench_prefs, save_workbench_prefs};
-pub use virtual_plan::{discard_virtual_plan_draft, load_virtual_plan_draft, save_virtual_plan_draft};
+pub use virtual_plan::{discard_virtual_plan_draft, list_virtual_plan_drafts, load_virtual_plan_draft, load_virtual_plan_preferences, save_virtual_plan_draft, save_virtual_plan_preferences};

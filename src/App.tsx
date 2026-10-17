@@ -41,7 +41,12 @@ import {
   type MainView,
 } from "./ui/StructureInsightsView";
 import { VirtualPlanPreviewView } from "./ui/VirtualPlanPreviewView";
-import { loadVirtualPlanDraft, saveVirtualPlanDraft } from "./ui/virtualPlanApi";
+import {
+  listVirtualPlanDrafts,
+  loadVirtualPlanDraft,
+  saveVirtualPlanDraft,
+  type VirtualPlanDraftListEntry,
+} from "./ui/virtualPlanApi";
 import {
   makeSnapshotBinding,
   parseVirtualPlan,
@@ -131,6 +136,8 @@ function App() {
   const [editableVirtualPlan, setEditableVirtualPlan] = useState<VirtualPlan | null>(null);
   const [planSaving, setPlanSaving] = useState(false);
   const [planSaveMessage, setPlanSaveMessage] = useState<string | null>(null);
+  const [historicalPlanEntries, setHistoricalPlanEntries] = useState<VirtualPlanDraftListEntry[]>([]);
+  const [historicalPlansLoading, setHistoricalPlansLoading] = useState(false);
   const [treeRevealRequest, setTreeRevealRequest] = useState<TreeRevealRequest | null>(null);
   const [insightFocusRequest, setInsightFocusRequest] = useState<InsightFocusRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -361,6 +368,28 @@ function App() {
     };
   }, [planningSelectable, mainView, result, resultScanId, config]);
 
+  function refreshHistoricalVirtualPlans(): void {
+    if (!planningSelectable || result === null || resultScanId === null) {
+      return;
+    }
+    setHistoricalPlansLoading(true);
+    void listVirtualPlanDrafts()
+      .then((entries) => {
+        setHistoricalPlanEntries(entries);
+      })
+      .catch(() => {
+        // The current plan remains usable; history discovery is read-only.
+        setHistoricalPlanEntries([]);
+      })
+      .finally(() => {
+        setHistoricalPlansLoading(false);
+      });
+  }
+
+  useEffect(() => {
+    refreshHistoricalVirtualPlans();
+  }, [planningSelectable, mainView, result, resultScanId, config]);
+
   function selectVirtualProposalForEditing(proposal: VirtualReorgProposal): void {
     if (result === null || virtualPlanPreview === null) {
       return;
@@ -408,6 +437,7 @@ function App() {
         setEditableVirtualPlan(candidate);
         setPlanDraftLoad({ kind: "valid", plan: candidate });
         setPlanSaveMessage(`Entwurf gespeichert (Revision ${candidate.revision}).`);
+        refreshHistoricalVirtualPlans();
       })
       .catch(() => {
         setPlanSaveMessage("Der virtuelle Entwurf konnte nicht gespeichert werden. Es wurde keine Erfolgsmeldung erzeugt.");
@@ -445,6 +475,7 @@ function App() {
         setEditableVirtualPlan(candidate);
         setPlanDraftLoad({ kind: "valid", plan: candidate });
         setPlanSaveMessage("Virtueller Plan bestätigt. Es wurden keine Dateien oder Ordner verändert.");
+        refreshHistoricalVirtualPlans();
       })
       .catch(() => {
         setPlanSaveMessage("Der virtuelle Plan konnte nicht bestätigt werden. Es wurde keine Erfolgsmeldung erzeugt.");
@@ -1010,10 +1041,13 @@ function App() {
                   editablePlan={editableVirtualPlan}
                   planSaving={planSaving}
                   planSaveMessage={planSaveMessage}
+                  historicalPlanEntries={historicalPlanEntries}
+                  historicalPlansLoading={historicalPlansLoading}
                   onSelectProposal={selectVirtualProposalForEditing}
                   onPlanChange={changeEditableVirtualPlan}
                   onSavePlan={saveEditableVirtualPlan}
                   onApprovePlan={approveEditableVirtualPlan}
+                  onRecheckHistoricalPlans={refreshHistoricalVirtualPlans}
                 />
               </div>
             ) : null}
