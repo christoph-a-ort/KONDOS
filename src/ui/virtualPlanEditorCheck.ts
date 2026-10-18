@@ -19,6 +19,7 @@ import {
   prepareVirtualPlanApproval,
 } from "./virtualPlanApproval";
 import { revalidateVirtualPlan } from "./virtualPlanRevalidation";
+import { buildVirtualPlanDryRun } from "./virtualPlanDryRun";
 import {
   addSelectedPreferenceCandidates,
   analyzeVirtualPlanPreferenceCandidates,
@@ -369,4 +370,11 @@ export function runVirtualPlanEditorCheck(): void {
   );
   const resetApproved = prepareVirtualPlanApproval(reset.plan, reset.plan.revision);
   assert(deriveVirtualPlanPreferenceCandidates(resetApproved).length === 0, "reset decisions create no preference candidate");
+
+  const dryRun = buildVirtualPlanDryRun({ plan: approvedWithUserEdit, scanResult: result, binding, current: true });
+  assert(dryRun.status === "restricted", "current approved plan produces restricted dry run");
+  assert(dryRun.operations.some((operation) => operation.kind === "createVirtualFolder"), "dry run plans virtual target folder");
+  assert(dryRun.operations.some((operation) => operation.kind === "moveFile"), "dry run plans file move");
+  assert(buildVirtualPlanDryRun({ plan: original, scanResult: result, binding, current: true }).status === "blocked", "unapproved plan blocks dry run");
+  assert(buildVirtualPlanDryRun({ plan: approvedWithUserEdit, scanResult: result, binding, current: false }).status === "blocked", "stale plan blocks dry run");
 }

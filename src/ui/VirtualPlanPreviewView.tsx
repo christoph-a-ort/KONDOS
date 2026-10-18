@@ -31,6 +31,7 @@ import {
 import { revalidateVirtualPlan, type VirtualPlanRevalidation } from "./virtualPlanRevalidation";
 import { VirtualPlanEditorPanel } from "./VirtualPlanEditorPanel";
 import { VirtualPlanPreferencesPanel } from "./VirtualPlanPreferencesPanel";
+import { VirtualPlanDryRunPanel } from "./VirtualPlanDryRunPanel";
 
 export type PlanCompareMode = "ist" | "soll" | "split";
 type PlanningMainView = "editor" | "compare" | "review";
@@ -502,6 +503,12 @@ export function VirtualPlanPreviewView({
           <VirtualPlanPreferencesPanel
             plan={editablePlan}
             revalidationCurrent={currentPlanRevalidation?.kind === "current"}
+          />
+          <VirtualPlanDryRunPanel
+            plan={editablePlan}
+            scanResult={scanResult}
+            binding={preview.binding}
+            current={currentPlanRevalidation?.kind === "current"}
           />
         </>
       ) : null}

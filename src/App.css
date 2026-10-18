@@ -12,11 +12,19 @@
 
 body {
   margin: 0;
+  height: 100%;
+}
+
+#root {
+  height: 100%;
 }
 
 .app {
-  min-height: 100vh;
+  height: 100%;
   padding: 16px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .app-header {
@@ -28,6 +36,33 @@ body {
 
 .app-header-text {
   min-width: 0;
+}
+
+.ui-zoom-control {
+  display: inline-flex;
+  align-items: stretch;
+  margin-left: auto;
+}
+
+.ui-zoom-control button {
+  min-width: 2rem;
+  padding: 4px 7px;
+  border-radius: 0;
+  font-size: 0.85rem;
+}
+
+.ui-zoom-control button:first-child {
+  border-radius: 5px 0 0 5px;
+}
+
+.ui-zoom-control button:last-child {
+  border-radius: 0 5px 5px 0;
+}
+
+.ui-zoom-control .ui-zoom-value {
+  min-width: 3.9rem;
+  color: #344352;
+  font-variant-numeric: tabular-nums;
 }
 
 .dottyfm-logo {
@@ -42,6 +77,16 @@ body {
   .dottyfm-logo {
     height: 48px;
     margin-block: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .app-header {
+    flex-wrap: wrap;
+  }
+
+  .ui-zoom-control {
+    margin-left: 0;
   }
 }
 
@@ -101,7 +146,14 @@ header p,
   grid-template-columns: 320px minmax(0, 1fr);
   gap: 16px;
   margin-top: 16px;
-  align-items: start;
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.layout > aside {
+  min-height: 0;
+  overflow: auto;
 }
 
 .panel,
@@ -1369,9 +1421,9 @@ button:disabled {
 
 .main-workbench {
   min-width: 0;
-  min-height: 70vh;
-  height: calc(100vh - 96px);
-  max-height: calc(100vh - 96px);
+  min-height: 0;
+  height: auto;
+  max-height: none;
   display: flex;
   flex-direction: column;
 }
@@ -2891,16 +2943,12 @@ button:disabled {
 
 .plan-editor {
   flex: 0 0 auto;
-  max-height: min(52vh, 560px);
   min-width: 0;
   margin-top: 8px;
   padding: 10px;
   border: 1px solid #c5ced8;
   border-radius: 6px;
   background: #fff;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
 
 .plan-editor-heading {
@@ -3264,6 +3312,45 @@ button:disabled {
 
 .plan-preference-list input {
   width: min(100%, 480px);
+}
+
+.plan-dry-run {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid #d5dbe3;
+  border-radius: 6px;
+  background: #f8fafc;
+  font-size: 0.82rem;
+}
+.plan-dry-run > summary, .plan-dry-run-report summary { cursor: pointer; color: #344352; font-weight: 600; }
+.plan-dry-run-report { margin-top: 6px; padding: 6px; border: 1px solid #d5dbe3; border-radius: 4px; background: #fff; }
+.plan-dry-run-report.is-blocked { background: #f8f6f4; }
+.plan-dry-run-operations {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 32rem), 1fr));
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.plan-dry-run-operation {
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid #e1e6eb;
+  border-radius: 4px;
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+
+.plan-dry-run-path {
+  display: block;
+  margin-top: 2px;
+  font-family: ui-monospace, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.plan-dry-run-operation .muted {
+  display: block;
+  margin-top: 4px;
 }
 
 @media (max-width: 900px) {

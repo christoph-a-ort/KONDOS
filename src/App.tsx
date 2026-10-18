@@ -100,6 +100,18 @@ import {
   type WorkbenchPrefsJsonStore,
 } from "./ui/workbenchPrefs";
 import { isTauriRuntime, loadWorkbenchPrefsJson, saveWorkbenchPrefsJson } from "./ui/workbenchPrefsApi";
+import {
+  applyUiZoom,
+  getUiZoomStorage,
+  isUiZoomResetShortcut,
+  persistUiZoom,
+  readStoredUiZoom,
+  stepUiZoom,
+  UI_ZOOM_DEFAULT,
+  UI_ZOOM_MAX,
+  UI_ZOOM_MIN,
+  zoomDirectionForWheel,
+} from "./ui/uiZoom";
 import "./App.css";
 import dottyFmLogo from "./assets/dottyfm-logo.png";
 
@@ -118,6 +130,7 @@ function createJsonPrefsStore(): WorkbenchPrefsJsonStore | null {
 }
 
 function App() {
+  const [uiZoom, setUiZoom] = useState(() => readStoredUiZoom(getUiZoomStorage()));
   const [prefsReady, setPrefsReady] = useState(false);
   const [preferStoredWidths, setPreferStoredWidths] = useState(false);
   const [config, setConfig] = useState<ScanConfig>(() => prefsToScanConfig(defaultWorkbenchPrefs()));
@@ -168,6 +181,52 @@ function App() {
   const insightAnalysisGenerationRef = useRef(0);
   /** Immediate guard against double-click / overlapping insight analysis runs. */
   const insightAnalysisInFlightRef = useRef(false);
+
+  useEffect(() => {
+    persistUiZoom(getUiZoomStorage(), uiZoom);
+    if (!isTauriRuntime()) {
+      applyUiZoom(document.documentElement, uiZoom);
+      return;
+    }
+
+    let disposed = false;
+    applyUiZoom(document.documentElement, UI_ZOOM_DEFAULT);
+    void getCurrentWebview()
+      .setZoom(uiZoom / 100)
+      .catch(() => {
+        // Keep the UI usable in an unexpectedly restricted webview.
+        if (!disposed) {
+          applyUiZoom(document.documentElement, uiZoom);
+        }
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [uiZoom]);
+
+  useEffect(() => {
+    const onWheel = (event: WheelEvent) => {
+      const direction = zoomDirectionForWheel(event);
+      if (direction === null) {
+        return;
+      }
+      event.preventDefault();
+      setUiZoom((current) => stepUiZoom(current, direction));
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isUiZoomResetShortcut(event)) {
+        return;
+      }
+      event.preventDefault();
+      setUiZoom(UI_ZOOM_DEFAULT);
+    };
+    window.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
   const navRequestIdRef = useRef(0);
   const handleDroppedPathsRef = useRef<(paths: string[]) => void>(() => {});
   const jsonStoreRef = useRef<WorkbenchPrefsJsonStore | null>(createJsonPrefsStore());
@@ -868,6 +927,33 @@ function App() {
         <div className="app-header-text">
           <h1>DottyFM</h1>
           <p>Ordner- und Dateistrukturen erfassen, anzeigen und exportieren.</p>
+        </div>
+        <div className="ui-zoom-control" role="group" aria-label="Oberflächenzoom">
+          <button
+            type="button"
+            aria-label="Oberfläche verkleinern"
+            disabled={uiZoom <= UI_ZOOM_MIN}
+            onClick={() => setUiZoom((current) => stepUiZoom(current, -1))}
+          >
+            −
+          </button>
+          <button
+            type="button"
+            className="ui-zoom-value"
+            aria-label="Zoom auf 100 Prozent zurücksetzen"
+            title="Zoom auf 100 % zurücksetzen (Strg + 0)"
+            onClick={() => setUiZoom(UI_ZOOM_DEFAULT)}
+          >
+            {uiZoom} %
+          </button>
+          <button
+            type="button"
+            aria-label="Oberfläche vergrößern"
+            disabled={uiZoom >= UI_ZOOM_MAX}
+            onClick={() => setUiZoom((current) => stepUiZoom(current, 1))}
+          >
+            +
+          </button>
         </div>
         <img
           className="dottyfm-logo"
