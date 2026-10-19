@@ -6,6 +6,10 @@ pub mod report;
 pub mod scan;
 pub mod workbench_prefs;
 pub mod virtual_plan;
+pub mod execution_journal;
+pub mod execution_binding;
+pub mod simulation_lock;
+pub mod scan_root_coordination;
 
 pub use content::{cancel_prepare_content, search_file_content, start_prepare_content};
 pub use explorer::{open_in_explorer, path_exists};
@@ -15,3 +19,8 @@ pub use report::{export_inventory_report_pdf, export_inventory_report_xlsx};
 pub use scan::{cancel_scan, classify_scan_root, start_scan};
 pub use workbench_prefs::{load_workbench_prefs, save_workbench_prefs};
 pub use virtual_plan::{discard_virtual_plan_draft, list_virtual_plan_drafts, load_virtual_plan_draft, load_virtual_plan_preferences, save_virtual_plan_draft, save_virtual_plan_preferences};
+pub use execution_journal::{load_execution_journal, save_execution_journal};
+pub use execution_binding::{
+    inspect_bound_execution, prepare_bound_release, progress_bound_execution,
+    release_bound_execution, start_bound_execution,
+};
