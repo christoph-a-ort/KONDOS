@@ -14,6 +14,10 @@ export interface VirtualPlanJournal {
   status: JournalStatus; operationStatus: Record<string, JournalOperationStatus>;
   events: ReadonlyArray<JournalEvent>; reason: string | null;
   scanRoot: string; ownerRunId: string; bindingStatus: JournalBindingStatus;
+  preflight?: {
+    schemaVersion: 1; currentIndex: number; halted: boolean; reason: string | null;
+    outcomes: Record<string, string>;
+  };
 }
 
 const terminal = new Set<JournalStatus>(["simulatedComplete", "simulatedRecovered", "blocked"]);

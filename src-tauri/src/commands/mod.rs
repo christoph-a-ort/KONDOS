@@ -8,6 +8,7 @@ pub mod workbench_prefs;
 pub mod virtual_plan;
 pub mod execution_journal;
 pub mod execution_binding;
+pub mod execution_preflight;
 pub mod simulation_lock;
 pub mod scan_root_coordination;
 
@@ -24,3 +25,4 @@ pub use execution_binding::{
     inspect_bound_execution, prepare_bound_release, progress_bound_execution,
     release_bound_execution, start_bound_execution,
 };
+pub use execution_preflight::inspect_planned_operation;

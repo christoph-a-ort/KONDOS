@@ -18,7 +18,7 @@ use commands::{
     discard_virtual_plan_draft, list_virtual_plan_drafts, load_virtual_plan_draft, load_virtual_plan_preferences, save_virtual_plan_draft, save_virtual_plan_preferences,
     load_execution_journal, save_execution_journal,
     inspect_bound_execution, start_bound_execution, progress_bound_execution,
-    prepare_bound_release, release_bound_execution,
+    prepare_bound_release, release_bound_execution, inspect_planned_operation,
     search_file_content, start_prepare_content, start_scan, suggest_export_filename,
 };
 use state::AppState;
@@ -63,6 +63,7 @@ pub fn run() {
             ,load_execution_journal, save_execution_journal
             ,inspect_bound_execution, start_bound_execution, progress_bound_execution
             ,prepare_bound_release, release_bound_execution
+            ,inspect_planned_operation
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
