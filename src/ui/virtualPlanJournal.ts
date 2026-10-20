@@ -2,8 +2,8 @@
 import type { SnapshotBinding, VirtualPlan } from "./virtualPlan";
 import type { VirtualDryRunOperation, VirtualDryRunReport } from "./virtualPlanDryRun";
 
-export type JournalStatus = "prepared" | "checking" | "simulating" | "simulatedComplete" | "interrupted" | "failed" | "recoveryRequired" | "recovering" | "simulatedRecovered" | "blocked";
-export type JournalOperationStatus = "pending" | "checked" | "started" | "simulatedComplete" | "failed" | "rollbackStarted" | "simulatedRolledBack";
+export type JournalStatus = "prepared" | "checking" | "simulating" | "simulatedComplete" | "interrupted" | "failed" | "recoveryRequired" | "recovering" | "simulatedRecovered" | "blocked" | "executing" | "executionHalted";
+export type JournalOperationStatus = "pending" | "checked" | "started" | "simulatedComplete" | "failed" | "rollbackStarted" | "simulatedRolledBack" | "executed" | "unverified";
 export type JournalBindingStatus = "reserved" | "releasePrepared" | "released";
 export type BoundExecutionStatus = "unbound" | "reserved" | "releasePrepared" | "released" | "inconsistent" | "blocked";
 export interface JournalEvent { sequence: number; atMs: number; message: string; operationId?: string }
@@ -20,18 +20,20 @@ export interface VirtualPlanJournal {
   };
 }
 
-const terminal = new Set<JournalStatus>(["simulatedComplete", "simulatedRecovered", "blocked"]);
+const terminal = new Set<JournalStatus>(["simulatedComplete", "simulatedRecovered", "blocked", "executionHalted"]);
 const allowed: Readonly<Record<JournalStatus, ReadonlySet<JournalStatus>>> = {
-  prepared: new Set(["checking", "blocked"]),
+  prepared: new Set(["checking", "blocked", "executing"]),
   checking: new Set(["simulating", "failed", "interrupted", "blocked"]),
   simulating: new Set(["simulatedComplete", "failed", "interrupted", "recoveryRequired"]),
-  simulatedComplete: new Set(["recovering"]),
+  simulatedComplete: new Set(["recovering", "executing"]),
   interrupted: new Set(["recoveryRequired", "recovering", "blocked"]),
   failed: new Set(["recoveryRequired", "recovering", "blocked"]),
   recoveryRequired: new Set(["recovering", "blocked"]),
   recovering: new Set(["simulatedRecovered", "failed", "recoveryRequired"]),
-  simulatedRecovered: new Set(),
+  simulatedRecovered: new Set(["executing"]),
   blocked: new Set(),
+  executing: new Set(["executing", "executionHalted", "blocked", "recoveryRequired"]),
+  executionHalted: new Set(["blocked"]),
 };
 
 function event(journal: VirtualPlanJournal, message: string, operationId?: string): VirtualPlanJournal {

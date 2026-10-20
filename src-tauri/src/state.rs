@@ -20,6 +20,7 @@ enum Occupancy {
     Scanning(ActiveScan),
     Exporting,
     PreparingContent(ActivePrepare),
+    Executing,
 }
 
 struct Snapshot {
@@ -55,7 +56,10 @@ impl AppState {
     }
 
     pub fn is_close_blocked(&self) -> bool {
-        self.is_exporting() || self.is_preparing_content()
+        matches!(
+            *lock_occupancy(&self.occupancy),
+            Occupancy::Exporting | Occupancy::PreparingContent(_) | Occupancy::Executing
+        )
     }
 
     pub fn try_begin_scan(&self, scan_id: u64) -> Result<ScanGuard<'_>, AppError> {
@@ -74,6 +78,11 @@ impl AppState {
             Occupancy::PreparingContent(_) => {
                 return Err(AppError::invalid_config(
                     "Dateiinhalte werden gerade vorbereitet. Bitte warten oder abbrechen.",
+                ));
+            }
+            Occupancy::Executing => {
+                return Err(AppError::invalid_config(
+                    "Es läuft gerade eine echte Ordneranlage. Bitte warten.",
                 ));
             }
             Occupancy::Idle => {}
@@ -154,6 +163,11 @@ impl AppState {
                     "Dateiinhalte werden gerade vorbereitet. Der Export ist erst danach möglich.",
                 ));
             }
+            Occupancy::Executing => {
+                return Err(AppError::export_failed(
+                    "Es läuft gerade eine echte Ordneranlage. Der Export ist erst danach möglich.",
+                ));
+            }
             Occupancy::Idle => {}
         }
 
@@ -204,6 +218,11 @@ impl AppState {
                     "Dateiinhalte werden gerade vorbereitet. Der Export ist erst danach möglich.",
                 ));
             }
+            Occupancy::Executing => {
+                return Err(AppError::export_failed(
+                    "Es läuft gerade eine echte Ordneranlage. Der Export ist erst danach möglich.",
+                ));
+            }
             Occupancy::Idle => {}
         }
 
@@ -242,6 +261,11 @@ impl AppState {
             Occupancy::PreparingContent(_) => {
                 return Err(AppError::invalid_config(
                     "Dateiinhalte werden bereits vorbereitet.",
+                ));
+            }
+            Occupancy::Executing => {
+                return Err(AppError::invalid_config(
+                    "Es läuft gerade eine echte Ordneranlage. Dateiinhalte können erst danach vorbereitet werden.",
                 ));
             }
             Occupancy::Idle => {}
@@ -298,6 +322,9 @@ impl AppState {
             Occupancy::PreparingContent(_) => Err(AppError::invalid_config(
                 "Dateiinhalte werden gerade vorbereitet. Die Inhaltssuche ist erst danach möglich.",
             )),
+            Occupancy::Executing => Err(AppError::invalid_config(
+                "Es läuft gerade eine echte Ordneranlage. Die Inhaltssuche ist erst danach möglich.",
+            )),
         }
     }
 
@@ -313,7 +340,41 @@ impl AppState {
             Occupancy::PreparingContent(_) => Err(AppError::invalid_config(
                 "Dateiinhalte werden gerade vorbereitet. Die Datei kann erst danach geöffnet werden.",
             )),
+            Occupancy::Executing => Err(AppError::invalid_config(
+                "Es läuft gerade eine echte Ordneranlage. Die Datei kann erst danach geöffnet werden.",
+            )),
         }
+    }
+
+    /// Holds occupancy until drop so a scan cannot start during a real folder create.
+    pub fn try_begin_execution(&self) -> Result<ExecutionGuard<'_>, AppError> {
+        let mut occupancy = lock_occupancy(&self.occupancy);
+        match &*occupancy {
+            Occupancy::Scanning(_) => {
+                return Err(AppError::invalid_config(
+                    "Es läuft bereits eine Analyse. Eine echte Ordneranlage ist erst danach möglich.",
+                ));
+            }
+            Occupancy::Exporting => {
+                return Err(AppError::invalid_config(
+                    "Es läuft gerade ein Export. Eine echte Ordneranlage ist erst danach möglich.",
+                ));
+            }
+            Occupancy::PreparingContent(_) => {
+                return Err(AppError::invalid_config(
+                    "Dateiinhalte werden gerade vorbereitet. Eine echte Ordneranlage ist erst danach möglich.",
+                ));
+            }
+            Occupancy::Executing => {
+                return Err(AppError::invalid_config(
+                    "Es läuft bereits eine echte Ordneranlage. Bitte warten.",
+                ));
+            }
+            Occupancy::Idle => {}
+        }
+
+        *occupancy = Occupancy::Executing;
+        Ok(ExecutionGuard { state: self })
     }
 
     pub fn snapshot_for_content(&self, scan_id: u64) -> Result<Arc<ScanResult>, AppError> {
@@ -391,6 +452,7 @@ impl AppState {
             (Occupancy::Scanning(active), OccupancyFinish::Scan(id)) => active.id == id,
             (Occupancy::Exporting, OccupancyFinish::Export) => true,
             (Occupancy::PreparingContent(active), OccupancyFinish::Prepare(id)) => active.id == id,
+            (Occupancy::Executing, OccupancyFinish::Execution) => true,
             _ => false,
         };
         if matches {
@@ -404,6 +466,7 @@ enum OccupancyFinish {
     Scan(u64),
     Export,
     Prepare(u64),
+    Execution,
 }
 
 fn lock_occupancy(occupancy: &Mutex<Occupancy>) -> std::sync::MutexGuard<'_, Occupancy> {
@@ -474,6 +537,16 @@ pub struct ReportExportGuard<'a> {
 impl Drop for ReportExportGuard<'_> {
     fn drop(&mut self) {
         self.state.finish_occupancy(OccupancyFinish::Export);
+    }
+}
+
+pub struct ExecutionGuard<'a> {
+    state: &'a AppState,
+}
+
+impl Drop for ExecutionGuard<'_> {
+    fn drop(&mut self) {
+        self.state.finish_occupancy(OccupancyFinish::Execution);
     }
 }
 
@@ -631,5 +704,29 @@ mod tests {
         state.store_snapshot(1, empty_result());
         let _export = state.try_begin_export(1).expect("export");
         assert!(state.try_begin_scan(2).is_err());
+    }
+
+    #[test]
+    fn scan_during_execution_is_rejected() {
+        let state = AppState::new();
+        let guard = state.try_begin_execution().expect("execution");
+        assert!(state.is_close_blocked());
+        assert!(state.try_begin_scan(2).is_err());
+        drop(guard);
+        state.try_begin_scan(2).expect("scan after execution");
+    }
+
+    #[test]
+    fn execution_during_scan_is_rejected() {
+        let state = AppState::new();
+        let _scan = state.try_begin_scan(1).expect("scan");
+        assert!(state.try_begin_execution().is_err());
+    }
+
+    #[test]
+    fn overlapping_executions_are_rejected() {
+        let state = AppState::new();
+        let _first = state.try_begin_execution().expect("first");
+        assert!(state.try_begin_execution().is_err());
     }
 }

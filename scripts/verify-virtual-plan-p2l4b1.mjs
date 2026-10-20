@@ -1,0 +1,31 @@
+import { register } from "node:module";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+register(pathToFileURL(join(root, "scripts/ts-resolve-hook.mjs")).href);
+const read = (file) => readFileSync(join(root, file), "utf8");
+const assert = (value, label) => { if (!value) throw new Error(label); };
+const model = read("src/ui/virtualPlanExecution.ts");
+const panel = read("src/ui/VirtualPlanExecutionPanel.tsx");
+const api = read("src/ui/virtualPlanExecutionApi.ts");
+const rust = read("src-tauri/src/commands/execution_mkdir.rs");
+const testRoot = read("src-tauri/src/commands/execution_test_root.rs");
+assert(model.includes("shouldAutoExecuteNext") && model.includes("shouldAutoResumeExecution"), "no auto execute");
+assert(model.includes("Ordner anlegen") && model.includes("REAL_FOLDER_CHANGE_NOTICE"), "operation label and real-change notice");
+assert(!/rename\(|copyFile|unlink|rmdir/.test(model), "execution model has no delete/move");
+assert(api.includes("execute_create_folder") && api.includes("approve_test_scan_root"), "real mkdir commands");
+assert(panel.includes("Echte Ordneranlage jetzt ausführen") && panel.includes("REAL_FOLDER_CHANGE_NOTICE"), "confirmation UI");
+assert(model.includes("Jetzt erfolgt eine echte Dateisystemänderung"), "real-change notice text");
+assert(panel.includes("Testpfad ausdrücklich freigeben") && panel.includes("Ein Name mit „Test“ reicht nicht"), "exact test-root approval");
+assert(!panel.includes("Dateien verschieben") || panel.includes("nicht verschoben"), "file operations remain forbidden");
+assert(rust.includes("create_single_folder") && rust.includes("FILE_CREATE"), "handle-relative create");
+assert(rust.includes("try_begin_execution") && rust.includes("acquire_at"), "occupancy and scan-root coordination during mkdir");
+assert(rust.includes("after-mkdir") && rust.includes("Keine automatische Wiederholung"), "crash window and no retry");
+assert(!/\bfs::remove_dir/.test(rust.split("#[cfg(test)]")[0]), "product path does not delete folders");
+assert(testRoot.includes("Dieser konkrete Testpfad") && testRoot.includes("name_test_is_not_approval"), "path-exact approval");
+const { runVirtualPlanExecutionCheck } = await import(
+  pathToFileURL(join(root, "src/ui/virtualPlanExecutionCheck.ts")).href,
+);
+runVirtualPlanExecutionCheck();
+console.log("virtual plan p2l4b1 checks passed");

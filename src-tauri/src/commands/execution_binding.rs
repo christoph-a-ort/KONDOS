@@ -272,6 +272,24 @@ pub(crate) fn progress_bound_run_at(
     journal_json: &str,
 ) -> Result<(), AppError> {
     let _guard = acquire_at(app_data, scan_root)?;
+    progress_bound_run_locked(
+        app_data,
+        scan_root,
+        owner,
+        journal_id,
+        expected_revision,
+        journal_json,
+    )
+}
+
+pub(crate) fn progress_bound_run_locked(
+    app_data: &Path,
+    scan_root: &str,
+    owner: &str,
+    journal_id: &str,
+    expected_revision: u64,
+    journal_json: &str,
+) -> Result<(), AppError> {
     let reservation = read_reservation_at(app_data, scan_root)?
         .ok_or_else(|| AppError::invalid_config("Keine Reservierung vorhanden."))?;
     let journal_path = journal(&journal_store(app_data), journal_id)?;

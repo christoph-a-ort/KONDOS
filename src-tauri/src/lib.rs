@@ -19,6 +19,7 @@ use commands::{
     load_execution_journal, save_execution_journal,
     inspect_bound_execution, start_bound_execution, progress_bound_execution,
     prepare_bound_release, release_bound_execution, inspect_planned_operation,
+    inspect_test_scan_root, approve_test_scan_root, execute_create_folder,
     search_file_content, start_prepare_content, start_scan, suggest_export_filename,
 };
 use state::AppState;
@@ -64,6 +65,7 @@ pub fn run() {
             ,inspect_bound_execution, start_bound_execution, progress_bound_execution
             ,prepare_bound_release, release_bound_execution
             ,inspect_planned_operation
+            ,inspect_test_scan_root, approve_test_scan_root, execute_create_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -34,6 +34,7 @@ import { VirtualPlanPreferencesPanel } from "./VirtualPlanPreferencesPanel";
 import { VirtualPlanDryRunPanel } from "./VirtualPlanDryRunPanel";
 import { VirtualPlanJournalPanel } from "./VirtualPlanJournalPanel";
 import { VirtualPlanPreflightPanel } from "./VirtualPlanPreflightPanel";
+import { VirtualPlanExecutionPanel } from "./VirtualPlanExecutionPanel";
 
 export type PlanCompareMode = "ist" | "soll" | "split";
 type PlanningMainView = "editor" | "compare" | "review";
@@ -519,6 +520,12 @@ export function VirtualPlanPreviewView({
             current={currentPlanRevalidation?.kind === "current"}
           />
           <VirtualPlanPreflightPanel
+            plan={editablePlan}
+            scanResult={scanResult}
+            binding={preview.binding}
+            current={currentPlanRevalidation?.kind === "current"}
+          />
+          <VirtualPlanExecutionPanel
             plan={editablePlan}
             scanResult={scanResult}
             binding={preview.binding}
