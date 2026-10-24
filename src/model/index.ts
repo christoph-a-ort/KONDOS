@@ -31,4 +31,4 @@ export {
   isFile,
 } from "./types";
 
-export { clampDepth, createDefaultScanConfig } from "./scanConfig";
+export { clampDepth, createDefaultScanConfig, withRequiredScanIdentityMetadata } from "./scanConfig";

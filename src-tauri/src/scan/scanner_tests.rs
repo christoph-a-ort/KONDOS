@@ -124,20 +124,6 @@ fn json_of(node: &FsNode) -> serde_json::Value {
     serde_json::to_value(node).expect("json")
 }
 
-fn assert_no_optional_meta(node: &FsNode) {
-    let value = json_of(node);
-    assert!(value.get("sizeBytes").is_none());
-    assert!(value.get("createdAtMs").is_none());
-    assert!(value.get("modifiedAtMs").is_none());
-    if let Some(children) = value.get("children").and_then(|item| item.as_array()) {
-        for child in children {
-            assert!(child.get("sizeBytes").is_none());
-            assert!(child.get("createdAtMs").is_none());
-            assert!(child.get("modifiedAtMs").is_none());
-        }
-    }
-}
-
 /// S.01–S.03, S.40
 #[test]
 fn root_is_depth_zero_and_empty_root_has_no_children() {
@@ -430,15 +416,19 @@ fn without_extension_filter_all_regular_files_are_kept() {
     assert!(names.contains(&"Makefile".to_string()));
 }
 
-/// S.28–S.31
+/// S.28–S.31 — size/modified always captured; created remains optional.
 #[test]
-fn optional_metadata_is_omitted_unless_enabled() {
+fn identity_metadata_is_always_captured_created_stays_optional() {
     let tree = TempTree::new("meta");
     tree.write_file("data.bin", b"abc");
     tree.mkdir("folder");
 
-    let off = tree.scan(|_| {});
-    assert_no_optional_meta(&off.root);
+    // Legacy false flags must not suppress size/modified capture.
+    let off = tree.scan(|config| {
+        config.include_size = false;
+        config.include_created_at = false;
+        config.include_modified_at = false;
+    });
     let off_file = as_dir(&off.root)
         .iter()
         .find(|node| matches!(node, FsNode::File { name, .. } if name == "data.bin"))
@@ -450,9 +440,9 @@ fn optional_metadata_is_omitted_unless_enabled() {
             modified_at_ms,
             ..
         } => {
-            assert_eq!(*size_bytes, None);
+            assert_eq!(*size_bytes, Some(3));
             assert_eq!(*created_at_ms, None);
-            assert_eq!(*modified_at_ms, None);
+            assert!(modified_at_ms.is_some());
         }
         FsNode::Directory { .. } => panic!("expected file"),
     }

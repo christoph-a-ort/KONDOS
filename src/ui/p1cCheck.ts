@@ -180,6 +180,7 @@ async function runPrefsHydrationCheck(): Promise<void> {
   assert(fullHydrated.prefs.excludeHidden === false, "hydrate: excludeHidden kept");
   assert(fullHydrated.prefs.extensionInput.includes(".pdf"), "hydrate: extensionInput kept");
   assert(fullHydrated.prefs.includeCreatedAt === true, "hydrate: includeCreatedAt kept");
+  assert(fullHydrated.prefs.includeSize === true && fullHydrated.prefs.includeModifiedAt === true, "hydrate: identity metadata forced on");
   assert(fullHydrated.prefs.columnVisibility.size === false, "hydrate: columnVisibility kept");
   assert(fullHydrated.prefs.columnWidths.name === 300, "hydrate: columnWidths kept");
   assert(fullHydrated.prefs.sort.column === "size", "hydrate: sort kept");
@@ -255,7 +256,8 @@ function runPrefsCheck(): void {
   assert(loaded.maxDepth === 4, "prefs: depth");
   assert(loaded.excludeHidden === false, "prefs: hidden");
   assert(loaded.extensionInput.includes(".pdf"), "prefs: scan extensions normalized");
-  assert(loaded.includeSize === false && loaded.includeCreatedAt === true, "prefs: metadata");
+  assert(loaded.includeSize === true && loaded.includeModifiedAt === true, "prefs: identity metadata forced on despite legacy false");
+  assert(loaded.includeCreatedAt === true, "prefs: created kept");
   assert(loaded.columnVisibility.size === false && loaded.columnVisibility.created === true, "prefs: columns");
   assert(loaded.columnWidths.name === 320, "prefs: widths");
   assert(loaded.sort.column === "modified" && loaded.sort.direction === "desc", "prefs: sort");
@@ -274,7 +276,7 @@ function runPrefsCheck(): void {
   });
   assert(fallback.maxDepth === MAX_DEPTH, "prefs: invalid depth falls back");
   assert(fallback.includeSize === true, "prefs: invalid boolean falls back");
-  assert(fallback.columnVisibility.size === true, "prefs: invalid column falls back");
+  assert(fallback.columnVisibility.size === false, "prefs: invalid column falls back to default off");
   assert(fallback.columnWidths.name >= 180, "prefs: width clamped");
   assert(fallback.sort.column === "name", "prefs: invalid sort falls back");
   assert(!("searchQuery" in fallback), "prefs: session-only search not stored");

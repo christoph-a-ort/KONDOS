@@ -82,7 +82,7 @@ impl AppState {
             }
             Occupancy::Executing => {
                 return Err(AppError::invalid_config(
-                    "Es läuft gerade eine echte Ordneranlage. Bitte warten.",
+                    "Es läuft gerade eine echte Dateioperation. Bitte warten.",
                 ));
             }
             Occupancy::Idle => {}
@@ -165,7 +165,7 @@ impl AppState {
             }
             Occupancy::Executing => {
                 return Err(AppError::export_failed(
-                    "Es läuft gerade eine echte Ordneranlage. Der Export ist erst danach möglich.",
+                    "Es läuft gerade eine echte Dateioperation. Der Export ist erst danach möglich.",
                 ));
             }
             Occupancy::Idle => {}
@@ -220,7 +220,7 @@ impl AppState {
             }
             Occupancy::Executing => {
                 return Err(AppError::export_failed(
-                    "Es läuft gerade eine echte Ordneranlage. Der Export ist erst danach möglich.",
+                    "Es läuft gerade eine echte Dateioperation. Der Export ist erst danach möglich.",
                 ));
             }
             Occupancy::Idle => {}
@@ -265,7 +265,7 @@ impl AppState {
             }
             Occupancy::Executing => {
                 return Err(AppError::invalid_config(
-                    "Es läuft gerade eine echte Ordneranlage. Dateiinhalte können erst danach vorbereitet werden.",
+                    "Es läuft gerade eine echte Dateioperation. Dateiinhalte können erst danach vorbereitet werden.",
                 ));
             }
             Occupancy::Idle => {}
@@ -323,7 +323,7 @@ impl AppState {
                 "Dateiinhalte werden gerade vorbereitet. Die Inhaltssuche ist erst danach möglich.",
             )),
             Occupancy::Executing => Err(AppError::invalid_config(
-                "Es läuft gerade eine echte Ordneranlage. Die Inhaltssuche ist erst danach möglich.",
+                "Es läuft gerade eine echte Dateioperation. Die Inhaltssuche ist erst danach möglich.",
             )),
         }
     }
@@ -341,33 +341,33 @@ impl AppState {
                 "Dateiinhalte werden gerade vorbereitet. Die Datei kann erst danach geöffnet werden.",
             )),
             Occupancy::Executing => Err(AppError::invalid_config(
-                "Es läuft gerade eine echte Ordneranlage. Die Datei kann erst danach geöffnet werden.",
+                "Es läuft gerade eine echte Dateioperation. Die Datei kann erst danach geöffnet werden.",
             )),
         }
     }
 
-    /// Holds occupancy until drop so a scan cannot start during a real folder create.
+    /// Holds occupancy until drop so a scan cannot start during a real file operation.
     pub fn try_begin_execution(&self) -> Result<ExecutionGuard<'_>, AppError> {
         let mut occupancy = lock_occupancy(&self.occupancy);
         match &*occupancy {
             Occupancy::Scanning(_) => {
                 return Err(AppError::invalid_config(
-                    "Es läuft bereits eine Analyse. Eine echte Ordneranlage ist erst danach möglich.",
+                    "Es läuft bereits eine Analyse. Eine echte Dateioperation ist erst danach möglich.",
                 ));
             }
             Occupancy::Exporting => {
                 return Err(AppError::invalid_config(
-                    "Es läuft gerade ein Export. Eine echte Ordneranlage ist erst danach möglich.",
+                    "Es läuft gerade ein Export. Eine echte Dateioperation ist erst danach möglich.",
                 ));
             }
             Occupancy::PreparingContent(_) => {
                 return Err(AppError::invalid_config(
-                    "Dateiinhalte werden gerade vorbereitet. Eine echte Ordneranlage ist erst danach möglich.",
+                    "Dateiinhalte werden gerade vorbereitet. Eine echte Dateioperation ist erst danach möglich.",
                 ));
             }
             Occupancy::Executing => {
                 return Err(AppError::invalid_config(
-                    "Es läuft bereits eine echte Ordneranlage. Bitte warten.",
+                    "Es läuft bereits eine echte Dateioperation. Bitte warten.",
                 ));
             }
             Occupancy::Idle => {}
@@ -711,7 +711,14 @@ mod tests {
         let state = AppState::new();
         let guard = state.try_begin_execution().expect("execution");
         assert!(state.is_close_blocked());
-        assert!(state.try_begin_scan(2).is_err());
+        assert!(
+            state
+                .try_begin_scan(2)
+                .err()
+                .expect("scan blocked")
+                .to_string()
+                .contains("Dateioperation")
+        );
         drop(guard);
         state.try_begin_scan(2).expect("scan after execution");
     }
@@ -720,7 +727,14 @@ mod tests {
     fn execution_during_scan_is_rejected() {
         let state = AppState::new();
         let _scan = state.try_begin_scan(1).expect("scan");
-        assert!(state.try_begin_execution().is_err());
+        assert!(
+            state
+                .try_begin_execution()
+                .err()
+                .expect("execution blocked")
+                .to_string()
+                .contains("Dateioperation")
+        );
     }
 
     #[test]

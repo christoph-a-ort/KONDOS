@@ -377,18 +377,19 @@ fn optional_node_times_and_size(metadata: Option<&Metadata>, config: &ScanConfig
         };
     };
 
+    // Size and modified time are always captured for identity/safety (P2-L.4b.2).
+    // include_size / include_modified_at remain on ScanConfig for wire/export
+    // compatibility but no longer gate capture. Created stays optional.
+    // Never invent values when the OS cannot provide them.
+    let _ = (config.include_size, config.include_modified_at);
     OptionalMeta {
-        size_bytes: config.include_size.then_some(meta.len()),
+        size_bytes: Some(meta.len()),
         created_at_ms: if config.include_created_at {
             created_at_ms(meta)
         } else {
             None
         },
-        modified_at_ms: if config.include_modified_at {
-            meta.modified().ok().and_then(system_time_to_ms)
-        } else {
-            None
-        },
+        modified_at_ms: meta.modified().ok().and_then(system_time_to_ms),
     }
 }
 

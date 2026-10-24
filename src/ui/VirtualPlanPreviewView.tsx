@@ -35,6 +35,7 @@ import { VirtualPlanDryRunPanel } from "./VirtualPlanDryRunPanel";
 import { VirtualPlanJournalPanel } from "./VirtualPlanJournalPanel";
 import { VirtualPlanPreflightPanel } from "./VirtualPlanPreflightPanel";
 import { VirtualPlanExecutionPanel } from "./VirtualPlanExecutionPanel";
+import { VirtualPlanReservationAdminPanel } from "./VirtualPlanReservationAdminPanel";
 
 export type PlanCompareMode = "ist" | "soll" | "split";
 type PlanningMainView = "editor" | "compare" | "review";
@@ -389,6 +390,8 @@ export function VirtualPlanPreviewView({
           </button>
         </div>
       </header>
+
+      <VirtualPlanReservationAdminPanel scanRoot={preview.binding.normalizedRootPath} />
 
       {mainView === "compare" ? (
         <>

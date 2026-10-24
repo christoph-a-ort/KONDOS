@@ -15,8 +15,9 @@ export interface ColumnWidths {
 }
 
 export const DEFAULT_COLUMN_VISIBILITY: ColumnVisibility = {
-  size: true,
-  modified: true,
+  // Size/modified are always scanned for safety details; list columns stay opt-in.
+  size: false,
+  modified: false,
   created: false,
 };
 

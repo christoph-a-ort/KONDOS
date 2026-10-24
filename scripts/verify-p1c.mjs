@@ -30,7 +30,7 @@ const DEFAULT_DEPTH = 10;
 const MIN_DEPTH = 1;
 const COLUMN_MIN_WIDTH = { name: 180, size: 88, modified: 140, created: 140 };
 const DEFAULT_COLUMN_WIDTHS = { name: 280, size: 100, modified: 156, created: 156 };
-const DEFAULT_COLUMN_VISIBILITY = { size: true, modified: true, created: false };
+const DEFAULT_COLUMN_VISIBILITY = { size: false, modified: false, created: false };
 
 function clampDepth(value) {
   if (Number.isNaN(value)) return DEFAULT_DEPTH;
@@ -100,9 +100,9 @@ function sanitizeWorkbenchPrefs(raw) {
     maxDepth: clampDepth(typeof value.maxDepth === "number" ? value.maxDepth : defaults.maxDepth),
     excludeHidden: typeof value.excludeHidden === "boolean" ? value.excludeHidden : defaults.excludeHidden,
     extensionInput,
-    includeSize: typeof value.includeSize === "boolean" ? value.includeSize : defaults.includeSize,
+    includeSize: true,
     includeCreatedAt: typeof value.includeCreatedAt === "boolean" ? value.includeCreatedAt : defaults.includeCreatedAt,
-    includeModifiedAt: typeof value.includeModifiedAt === "boolean" ? value.includeModifiedAt : defaults.includeModifiedAt,
+    includeModifiedAt: true,
     columnVisibility: {
       size: typeof visibility.size === "boolean" ? visibility.size : defaults.columnVisibility.size,
       modified: typeof visibility.modified === "boolean" ? visibility.modified : defaults.columnVisibility.modified,
@@ -523,7 +523,8 @@ const loaded = loadWorkbenchPrefs(storage);
 assert(loaded.rootPath === "C:/Hausverwaltung", "prefs: root");
 assert(loaded.maxDepth === 4 && loaded.excludeHidden === false, "prefs: depth/hidden");
 assert(loaded.extensionInput.includes(".pdf"), "prefs: scan extensions");
-assert(loaded.includeSize === false && loaded.includeCreatedAt === true, "prefs: metadata");
+assert(loaded.includeSize === true && loaded.includeModifiedAt === true, "prefs: identity metadata forced on");
+assert(loaded.includeCreatedAt === true, "prefs: created kept");
 assert(loaded.columnVisibility.size === false && loaded.columnWidths.name === 320, "prefs: columns/widths");
 assert(loaded.sort.column === "modified", "prefs: sort");
 const persisted = JSON.parse(storage.getItem(WORKBENCH_PREFS_KEY));

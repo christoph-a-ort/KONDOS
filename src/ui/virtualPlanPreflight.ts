@@ -105,13 +105,18 @@ export function evaluatePreflight(options: {
     }
     return { status: "blocked", reason: "Der Zielordner existiert nicht.", canConfirm: false, halt: true };
   }
-  if (options.expectedSizeBytes === undefined && options.expectedModifiedAtMs === undefined) {
-    return { status: "unverifiable", reason: "Dateimerkmale aus der Planung fehlen. Der Zustand ist nicht sicher verifizierbar.", canConfirm: false, halt: true };
+  if (!hasCompleteFileFingerprint(options.expectedSizeBytes, options.expectedModifiedAtMs)) {
+    return {
+      status: "unverifiable",
+      reason: incompleteFileFingerprintReason(options.expectedSizeBytes, options.expectedModifiedAtMs),
+      canConfirm: false,
+      halt: true,
+    };
   }
-  if (options.expectedSizeBytes !== undefined && facts.source.sizeBytes !== options.expectedSizeBytes) {
+  if (facts.source.sizeBytes !== options.expectedSizeBytes) {
     return { status: "blocked", reason: "Die Quelldatei hat sich seit der Planung verändert. Ablauf angehalten.", canConfirm: false, halt: true };
   }
-  if (options.expectedModifiedAtMs !== undefined && facts.source.modifiedAtMs !== null && facts.source.modifiedAtMs !== options.expectedModifiedAtMs) {
+  if (facts.source.modifiedAtMs !== null && facts.source.modifiedAtMs !== options.expectedModifiedAtMs) {
     return { status: "blocked", reason: "Die Quelldatei hat sich seit der Planung verändert. Ablauf angehalten.", canConfirm: false, halt: true };
   }
   return { status: "ready", reason: "Read-only-Prüfung erfolgreich. Noch keine Dateioperation.", canConfirm: true, halt: false };
@@ -149,10 +154,43 @@ export function previewSimulatedUndo(session: PreflightSession, operationId: str
   return { allowed: false, reason: "Echtes Rückgängigmachen ist in P2-L.4a nicht verfügbar. Später nur nach erneuter Prüfung und ausdrücklicher Einzelbestätigung." };
 }
 
+export function isFileFingerprintValue(value: number | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+export function hasCompleteFileFingerprint(expectedSizeBytes?: number, expectedModifiedAtMs?: number): boolean {
+  return isFileFingerprintValue(expectedSizeBytes) && isFileFingerprintValue(expectedModifiedAtMs);
+}
+
+export function incompleteFileFingerprintReason(expectedSizeBytes?: number, expectedModifiedAtMs?: number): string {
+  const sizeOk = isFileFingerprintValue(expectedSizeBytes);
+  const modifiedOk = isFileFingerprintValue(expectedModifiedAtMs);
+  if (!sizeOk && !modifiedOk) {
+    return "Dateigröße und Änderungszeit aus der Planung fehlen. Der Zustand ist nicht sicher verifizierbar.";
+  }
+  if (!sizeOk) return "Die Dateigröße aus der Planung fehlt. Der Zustand ist nicht sicher verifizierbar.";
+  return "Die Änderungszeit aus der Planung fehlt. Der Zustand ist nicht sicher verifizierbar.";
+}
+
 export function expectedMetadata(plan: VirtualPlan, operation: VirtualDryRunOperation): { expectedSizeBytes?: number; expectedModifiedAtMs?: number } {
   const item = plan.items.find((entry) => entry.observed.nodeId === operation.objectId || entry.id === operation.objectId);
   if (item === undefined) return {};
   return { expectedSizeBytes: item.observed.metadata.sizeBytes, expectedModifiedAtMs: item.observed.metadata.modifiedAtMs };
+}
+
+/** Fail closed before reservation when planned moves lack size/mtime from the scan snapshot. */
+export function missingRealMoveFingerprintReason(
+  plan: VirtualPlan,
+  operations: ReadonlyArray<VirtualDryRunOperation>,
+): string | null {
+  for (const operation of operations) {
+    if (operation.kind !== "moveFile") continue;
+    const meta = expectedMetadata(plan, operation);
+    if (!hasCompleteFileFingerprint(meta.expectedSizeBytes, meta.expectedModifiedAtMs)) {
+      return incompleteFileFingerprintReason(meta.expectedSizeBytes, meta.expectedModifiedAtMs);
+    }
+  }
+  return null;
 }
 
 export function simulatedFolderTargets(operations: ReadonlyArray<VirtualDryRunOperation>, session: PreflightSession): string[] {

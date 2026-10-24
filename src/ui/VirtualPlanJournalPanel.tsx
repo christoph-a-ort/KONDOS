@@ -8,19 +8,20 @@ import {
   releaseBoundExecution, startBoundExecution, type BoundExecutionView,
 } from "./virtualPlanJournalApi";
 import {
-  bindingAllowsProgress, bindingAllowsRelease, bindingBlocksNewRun,
+  bindingAllowsProgress, bindingBlocksNewRun,
   createVirtualPlanJournal, journalForBoundWrite, parsePersistedJournal,
   shouldAutoResumeSimulation, simulateJournal, simulateJournalRecovery,
   type BoundExecutionStatus, type VirtualPlanJournal,
 } from "./virtualPlanJournal";
+import {
+  buildConfirmReleaseJournal, buildPrepareReleaseJournal, canConfirmReservationRelease,
+  canPrepareReservationRelease, reservationBindingLabel,
+} from "./virtualPlanReservationAdmin";
 
 function bindingLabel(status: BoundExecutionStatus): string {
-  if (status === "reserved") return "Aktive Reservierung";
-  if (status === "releasePrepared") return "Freigabe vorbereitet";
-  if (status === "released") return "Abgeschlossen und freigegeben";
-  if (status === "inconsistent") return "Unklarer Zustand – gesperrt";
-  if (status === "blocked") return "Beschädigte Daten – gesperrt";
-  return "Kein gespeichertes Journal";
+  return reservationBindingLabel(status) === "Keine aktive Reservierung"
+    ? "Kein gespeichertes Journal"
+    : reservationBindingLabel(status);
 }
 
 export function VirtualPlanJournalPanel({ plan, scanResult, binding, current }: { plan: VirtualPlan | null; scanResult: ScanResult; binding: SnapshotBinding; current: boolean }) {
@@ -106,13 +107,13 @@ export function VirtualPlanJournalPanel({ plan, scanResult, binding, current }: 
     await startOrProgress(simulateJournalRecovery(journal));
   };
   const prepareRelease = async () => {
-    if (journal === null || view === null || view.journalRevision === null || !bindingAllowsProgress(view.status) || locked || busy) return;
-    const payload = journalForBoundWrite(journal, view.journalRevision, "releasePrepared");
+    if (!canPrepareReservationRelease({ view, journal, busy }) || locked || journal === null || view === null || view.journalRevision === null) return;
+    const payload = buildPrepareReleaseJournal(journal, view.journalRevision);
     await persist((expected, journalJson) => prepareBoundRelease(scanRoot, payload.ownerRunId, payload.journalId, expected, journalJson), payload, view.journalRevision);
   };
   const release = async () => {
-    if (journal === null || view === null || view.journalRevision === null || !bindingAllowsRelease(view.status) || locked || busy) return;
-    const payload = journalForBoundWrite(journal, view.journalRevision, "released");
+    if (!canConfirmReservationRelease({ view, journal, busy }) || locked || journal === null || view === null || view.journalRevision === null) return;
+    const payload = buildConfirmReleaseJournal(journal, view.journalRevision);
     await persist((expected, journalJson) => releaseBoundExecution(scanRoot, payload.ownerRunId, payload.journalId, expected, journalJson), payload, view.journalRevision);
   };
   return <details className="plan-journal">
@@ -130,8 +131,8 @@ export function VirtualPlanJournalPanel({ plan, scanResult, binding, current }: 
         <button type="button" disabled={busy || locked || journal.status !== "prepared" || (view !== null && view.status !== "unbound" && view.status !== "released" && !bindingAllowsProgress(view.status))} onClick={() => { void runSim(0); }}>Fehler simulieren</button>
         <button type="button" disabled={busy || locked || journal.status !== "prepared" || (view !== null && view.status !== "unbound" && view.status !== "released" && !bindingAllowsProgress(view.status))} onClick={() => { void runSim(undefined, true); }}>Abbruch simulieren</button>
         <button type="button" disabled={busy || locked || view === null || !bindingAllowsProgress(view.status) || !["simulatedComplete", "interrupted", "failed", "recoveryRequired"].includes(journal.status)} onClick={() => { void recover(); }}>Wiederherstellung simulieren</button>
-        <button type="button" disabled={busy || locked || view === null || !bindingAllowsProgress(view.status)} onClick={() => { void prepareRelease(); }}>Freigabe vorbereiten</button>
-        <button type="button" disabled={busy || locked || view === null || !bindingAllowsRelease(view.status)} onClick={() => { void release(); }}>Reservierung freigeben</button>
+        <button type="button" disabled={locked || !canPrepareReservationRelease({ view, journal, busy })} onClick={() => { void prepareRelease(); }}>Freigabe vorbereiten</button>
+        <button type="button" disabled={locked || !canConfirmReservationRelease({ view, journal, busy })} onClick={() => { void release(); }}>Reservierung freigeben</button>
       </div>
       <p className="muted">Abgeschlossen: {Object.values(journal.operationStatus).filter((status) => status === "simulatedComplete").length} · Offen: {Object.values(journal.operationStatus).filter((status) => status === "pending").length}</p>
       {journal.reason !== null ? <p className="muted">Grund: {journal.reason}</p> : null}

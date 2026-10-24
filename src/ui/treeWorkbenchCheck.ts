@@ -34,6 +34,9 @@ import { runVirtualPlanPreviewCheck } from "./virtualPlanPreviewCheck";
 import { runVirtualPlanSuggestionsCheck } from "./virtualPlanSuggestionsCheck";
 import { runVirtualPlanProposalUsefulnessCheck } from "./virtualPlanProposalUsefulnessCheck";
 import { runVirtualPlanEditorCheck } from "./virtualPlanEditorCheck";
+import { runVirtualPlanDryRunCheck } from "./virtualPlanDryRunCheck";
+import { runScanIdentityMetadataCheck } from "./scanIdentityMetadataCheck";
+import { runVirtualPlanReservationAdminCheck } from "./virtualPlanReservationAdminCheck";
 import { runP1cCheck } from "./p1cCheck";
 import { runP1dCheck } from "./p1dCheck";
 import { runP1e1Check } from "./contentSearchCheck";
@@ -119,8 +122,9 @@ function visibleIds(root: FsNode, expanded: string[], sort: TreeSort = DEFAULT_T
 }
 
 export async function runTreeWorkbenchCheck(): Promise<void> {
-  const visibility = { ...DEFAULT_COLUMN_VISIBILITY };
-  assert(visibleColumns(visibility).join(",") === "name,size,modified", "default columns");
+  assert(visibleColumns(DEFAULT_COLUMN_VISIBILITY).join(",") === "name", "G: default list shows name only");
+  const visibility = { size: true, modified: true, created: false };
+  assert(visibleColumns(visibility).join(",") === "name,size,modified", "opt-in size/modified columns");
   visibility.created = true;
   visibility.size = false;
   assert(visibleColumns(visibility).join(",") === "name,modified,created", "toggle columns");
@@ -140,9 +144,9 @@ export async function runTreeWorkbenchCheck(): Promise<void> {
   );
   assert(resizeTargetForBoundary(["name", "size", "modified", "created"], 3) === null, "created last has no resize");
 
-  const defaultVisible = visibleColumns(DEFAULT_COLUMN_VISIBILITY);
+  const layoutVisible = visibleColumns({ size: true, modified: true, created: false });
   const stored = { ...DEFAULT_COLUMN_WIDTHS };
-  const filledLayout = effectiveColumnWidths(defaultVisible, stored, 800, true);
+  const filledLayout = effectiveColumnWidths(layoutVisible, stored, 800, true);
   assert(filledLayout.name === 544, "A: leftover name fills viewport remainder");
   assert(filledLayout.size === 100 && filledLayout.modified === 156, "A: metadata keeps stored widths");
   assert(resizeStartWidth("name", filledLayout) === 544, "B: name resize starts from effective width");
@@ -151,13 +155,13 @@ export async function runTreeWorkbenchCheck(): Promise<void> {
   const nameDrag = beginColumnResize("name", stored, filledLayout);
   assert(nameDrag.nameAutoFill === false, "C: name drag disables leftover fill");
   const afterNameLeft = applyColumnResizeDelta(nameDrag.widths, "name", filledLayout.name, -40);
-  const visibleAfterName = effectiveColumnWidths(defaultVisible, afterNameLeft, 800, false);
+  const visibleAfterName = effectiveColumnWidths(layoutVisible, afterNameLeft, 800, false);
   assert(visibleAfterName.name === 504, "C: name drag is immediately visible");
   assert(visibleAfterName.size === 100 && visibleAfterName.modified === 156, "C: name drag leaves metadata");
 
   const sizeBegin = beginColumnResize("size", stored, filledLayout);
   const afterSize = applyColumnResizeDelta(sizeBegin.widths, "size", filledLayout.size, 20);
-  const visibleAfterSize = effectiveColumnWidths(defaultVisible, afterSize, 800, false);
+  const visibleAfterSize = effectiveColumnWidths(layoutVisible, afterSize, 800, false);
   assert(visibleAfterSize.size === 120, "D: size drag changes size");
   assert(visibleAfterSize.name === 544, "D: size drag does not change name");
 
@@ -165,7 +169,7 @@ export async function runTreeWorkbenchCheck(): Promise<void> {
   sequential = applyColumnResizeDelta(sequential, "name", 504, -40);
   sequential = applyColumnResizeDelta(sequential, "name", 464, 20);
   sequential = applyColumnResizeDelta(sequential, "name", 484, 40);
-  const visibleSequential = effectiveColumnWidths(defaultVisible, sequential, 800, false);
+  const visibleSequential = effectiveColumnWidths(layoutVisible, sequential, 800, false);
   assert(visibleSequential.name === 524, "E: consecutive name drags stay consistent");
 
   const nameOnlyModified = visibleColumns({ size: false, modified: true, created: false });
@@ -359,6 +363,9 @@ export async function runTreeWorkbenchCheck(): Promise<void> {
   runVirtualPlanSuggestionsCheck();
   runVirtualPlanProposalUsefulnessCheck();
   runVirtualPlanEditorCheck();
+  runVirtualPlanDryRunCheck();
+  runScanIdentityMetadataCheck();
+  runVirtualPlanReservationAdminCheck();
 }
 
 function runTreeSearchCheck(nested: DirectoryNode): void {

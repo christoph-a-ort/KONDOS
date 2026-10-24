@@ -1,6 +1,7 @@
 /** P2-L.2 – Pure, non-executable dry-run model. No filesystem access. */
-import type { ScanResult } from "../model";
-import type { SnapshotBinding, VirtualPlan } from "./virtualPlan";
+import type { FsNode, ScanResult } from "../model";
+import { isDirectory } from "../model";
+import { normalizeVirtualPlanPath, type SnapshotBinding, type VirtualPlan } from "./virtualPlan";
 import { validateVirtualPlan } from "./virtualPlanEditor";
 
 export type DryRunOperationKind = "createVirtualFolder" | "moveFile" | "renameFile";
@@ -20,6 +21,41 @@ const join = (left: string, right: string) => left === "." ? right : `${left}/${
 const parent = (path: string) => path.includes("/") ? path.slice(0, path.lastIndexOf("/")) || "." : ".";
 const base = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
+function relativeFromRoot(rootPath: string, nodePath: string): string | null {
+  const root = normalizeVirtualPlanPath(rootPath);
+  const path = normalizeVirtualPlanPath(nodePath);
+  if (path === root) return ".";
+  const prefix = `${root}/`;
+  return path.startsWith(prefix) && path.length > prefix.length ? path.slice(prefix.length) : null;
+}
+
+function indexSnapshotPaths(root: FsNode): Map<string, FsNode[]> | null {
+  const index = new Map<string, FsNode[]>();
+  let unclear = false;
+  const walk = (node: FsNode) => {
+    const relative = relativeFromRoot(root.path, node.path);
+    if (relative === null) {
+      unclear = true;
+      return;
+    }
+    const entries = index.get(relative) ?? [];
+    entries.push(node);
+    index.set(relative, entries);
+    if (isDirectory(node)) node.children.forEach(walk);
+  };
+  walk(root);
+  return unclear ? null : index;
+}
+
+function existingDirectoryInSnapshot(index: Map<string, FsNode[]>, relativePath: string): "missing" | "existingDirectory" | "blocked" {
+  const entries = index.get(normalizeVirtualPlanPath(relativePath));
+  if (entries === undefined || entries.length === 0) return "missing";
+  if (entries.length !== 1) return "blocked";
+  const node = entries[0]!;
+  if (!isDirectory(node) || node.listing !== "read") return "blocked";
+  return "existingDirectory";
+}
+
 export function buildVirtualPlanDryRun(options: { plan: VirtualPlan; scanResult: ScanResult; binding: SnapshotBinding; current: boolean }): VirtualDryRunReport {
   const { plan, scanResult, binding } = options;
   const warnings: string[] = ["Dry-Run ist keine Freigabe für eine reale Ausführung."];
@@ -32,15 +68,33 @@ export function buildVirtualPlanDryRun(options: { plan: VirtualPlan; scanResult:
   blockers.push(...validation.errors);
   if (blockers.length > 0) return { status: "blocked", operations: [], folderCount: 0, fileOperationCount: 0, unchangedFileCount: 0, blockedOperationCount: 0, openRequirements: [...new Set([...openRequirements, ...blockers])], warnings };
 
+  const snapshotIndex = indexSnapshotPaths(scanResult.root);
+  if (snapshotIndex === null) {
+    return { status: "blocked", operations: [], folderCount: 0, fileOperationCount: 0, unchangedFileCount: 0, blockedOperationCount: 1, openRequirements: [...openRequirements, "Der Scan-Snapshot ist nicht eindeutig interpretierbar."], warnings };
+  }
+
   const operations: VirtualDryRunOperation[] = [];
   const targets = new Set<string>();
+  const identityBlockers: string[] = [];
   for (const folder of plan.virtualFolders ?? []) {
     const path = join(folder.parentVirtualPath, folder.name);
     if (invalidName(folder.name) || path.includes("..") || path.startsWith("/")) {
       blockers.push(`Ungültiger virtueller Zielordner: ${path}`);
       continue;
     }
+    const existing = existingDirectoryInSnapshot(snapshotIndex, path);
+    if (existing === "blocked") {
+      identityBlockers.push(`Der Zielpfad „${path}“ ist im aktuellen Scan kein eindeutig erkanntes Verzeichnis.`);
+      continue;
+    }
+    if (existing === "existingDirectory") {
+      warnings.push(`Vorhandenes Scan-Verzeichnis „${path}“ wird nicht erneut als Ordneranlage geplant.`);
+      continue;
+    }
     operations.push({ id: `dry-folder-${folder.id}`, kind: "createVirtualFolder", objectId: folder.id, sourcePath: folder.parentVirtualPath, targetPath: path, expectedSource: "Zielordner ist nur virtuell geplant.", preconditions: ["Zielpfad bleibt innerhalb der Scanwurzel.", "Ziel darf später nicht existieren oder kollidieren."], expectedTarget: "Virtueller Zielordner", collisionStatus: "notDecidableFromSnapshot", checkStatus: "mustCheckAtExecution", rationale: "Benötigter virtueller Zielordner.", recovery: "Bei späterer Ausführung nur entfernen, wenn leer und durch das Journal erstellt." });
+  }
+  if (identityBlockers.length > 0) {
+    return { status: "blocked", operations: [], folderCount: 0, fileOperationCount: 0, unchangedFileCount: 0, blockedOperationCount: identityBlockers.length, openRequirements: [...new Set([...openRequirements, ...identityBlockers])], warnings };
   }
   for (const item of plan.items.filter((entry) => entry.observed.kind === "file")) {
     const source = item.observed.relativePath;

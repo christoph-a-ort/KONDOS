@@ -18,7 +18,8 @@ assert(api.includes("execute_create_folder") && api.includes("approve_test_scan_
 assert(panel.includes("Echte Ordneranlage jetzt ausführen") && panel.includes("REAL_FOLDER_CHANGE_NOTICE"), "confirmation UI");
 assert(model.includes("Jetzt erfolgt eine echte Dateisystemänderung"), "real-change notice text");
 assert(panel.includes("Testpfad ausdrücklich freigeben") && panel.includes("Ein Name mit „Test“ reicht nicht"), "exact test-root approval");
-assert(!panel.includes("Dateien verschieben") || panel.includes("nicht verschoben"), "file operations remain forbidden");
+assert(panel.includes("Echte Ordneranlage jetzt ausführen"), "folder execute button remains");
+assert(!panel.includes("Diese Datei jetzt umbenennen"), "rename remains forbidden");
 assert(rust.includes("create_single_folder") && rust.includes("FILE_CREATE"), "handle-relative create");
 assert(rust.includes("try_begin_execution") && rust.includes("acquire_at"), "occupancy and scan-root coordination during mkdir");
 assert(rust.includes("after-mkdir") && rust.includes("Keine automatische Wiederholung"), "crash window and no retry");

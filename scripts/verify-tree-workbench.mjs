@@ -11,8 +11,8 @@ function isFile(node) {
 const DEFAULT_TREE_SORT = { column: "name", direction: "asc" };
 
 const DEFAULT_COLUMN_VISIBILITY = {
-  size: true,
-  modified: true,
+  size: false,
+  modified: false,
   created: false,
 };
 
@@ -239,8 +239,9 @@ function visibleIds(root, expanded, sort = DEFAULT_TREE_SORT) {
     .join(",");
 }
 
-const visibility = { ...DEFAULT_COLUMN_VISIBILITY };
-assert(visibleColumns(visibility).join(",") === "name,size,modified", "default columns");
+assert(visibleColumns(DEFAULT_COLUMN_VISIBILITY).join(",") === "name", "G: default list shows name only");
+const visibility = { size: true, modified: true, created: false };
+assert(visibleColumns(visibility).join(",") === "name,size,modified", "opt-in size/modified columns");
 visibility.created = true;
 visibility.size = false;
 assert(visibleColumns(visibility).join(",") === "name,modified,created", "toggle columns");
@@ -255,9 +256,9 @@ assert(resizeTargetForBoundary(["name", "size", "created"], 2) === null, "hidden
 assert(resizeTargetForBoundary(["name", "size", "modified", "created"], 2) === "modified", "four columns: modified");
 assert(resizeTargetForBoundary(["name", "size", "modified", "created"], 3) === null, "created last has no resize");
 
-const defaultVisible = visibleColumns(DEFAULT_COLUMN_VISIBILITY);
+const layoutVisible = visibleColumns({ size: true, modified: true, created: false });
 const stored = { ...DEFAULT_COLUMN_WIDTHS };
-const filledLayout = effectiveColumnWidths(defaultVisible, stored, 800, true);
+const filledLayout = effectiveColumnWidths(layoutVisible, stored, 800, true);
 assert(filledLayout.name === 544, "A: leftover name fills viewport remainder");
 assert(filledLayout.size === 100 && filledLayout.modified === 156, "A: metadata keeps stored widths");
 assert(resizeStartWidth("name", filledLayout) === 544, "B: name resize starts from effective width");
@@ -266,13 +267,13 @@ assert(resizeStartWidth("name", filledLayout) !== stored.name, "B: name start is
 const nameDrag = beginColumnResize("name", stored, filledLayout);
 assert(nameDrag.nameAutoFill === false, "C: name drag disables leftover fill");
 const afterNameLeft = applyColumnResizeDelta(nameDrag.widths, "name", filledLayout.name, -40);
-const visibleAfterName = effectiveColumnWidths(defaultVisible, afterNameLeft, 800, false);
+const visibleAfterName = effectiveColumnWidths(layoutVisible, afterNameLeft, 800, false);
 assert(visibleAfterName.name === 504, "C: name drag is immediately visible");
 assert(visibleAfterName.size === 100 && visibleAfterName.modified === 156, "C: name drag leaves metadata");
 
 const sizeBegin = beginColumnResize("size", stored, filledLayout);
 const afterSize = applyColumnResizeDelta(sizeBegin.widths, "size", filledLayout.size, 20);
-const visibleAfterSize = effectiveColumnWidths(defaultVisible, afterSize, 800, false);
+const visibleAfterSize = effectiveColumnWidths(layoutVisible, afterSize, 800, false);
 assert(visibleAfterSize.size === 120, "D: size drag changes size");
 assert(visibleAfterSize.name === 544, "D: size drag does not change name");
 
@@ -280,7 +281,7 @@ let sequential = applyColumnResizeDelta(nameDrag.widths, "name", filledLayout.na
 sequential = applyColumnResizeDelta(sequential, "name", 504, -40);
 sequential = applyColumnResizeDelta(sequential, "name", 464, 20);
 sequential = applyColumnResizeDelta(sequential, "name", 484, 40);
-const visibleSequential = effectiveColumnWidths(defaultVisible, sequential, 800, false);
+const visibleSequential = effectiveColumnWidths(layoutVisible, sequential, 800, false);
 assert(visibleSequential.name === 524, "E: consecutive name drags stay consistent");
 
 const nameOnlyModified = visibleColumns({ size: false, modified: true, created: false });

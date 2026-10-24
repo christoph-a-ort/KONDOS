@@ -1,4 +1,9 @@
-import { clampDepth, createDefaultScanConfig, type ScanConfig } from "../model";
+import {
+  clampDepth,
+  createDefaultScanConfig,
+  withRequiredScanIdentityMetadata,
+  type ScanConfig,
+} from "../model";
 import { formatExtensionInput, parseExtensionInput } from "../filter";
 import {
   COLUMN_MIN_WIDTH,
@@ -53,7 +58,7 @@ export function defaultWorkbenchPrefs(): WorkbenchPrefs {
 }
 
 export function prefsToScanConfig(prefs: WorkbenchPrefs): ScanConfig {
-  return {
+  return withRequiredScanIdentityMetadata({
     rootPath: prefs.rootPath,
     maxDepth: prefs.maxDepth,
     excludeHidden: prefs.excludeHidden,
@@ -61,7 +66,7 @@ export function prefsToScanConfig(prefs: WorkbenchPrefs): ScanConfig {
     includeSize: prefs.includeSize,
     includeCreatedAt: prefs.includeCreatedAt,
     includeModifiedAt: prefs.includeModifiedAt,
-  };
+  });
 }
 
 export function workbenchPrefsFromState(input: {
@@ -77,9 +82,9 @@ export function workbenchPrefsFromState(input: {
     maxDepth: input.config.maxDepth,
     excludeHidden: input.config.excludeHidden,
     extensionInput: input.extensionInput,
-    includeSize: input.config.includeSize,
+    includeSize: true,
     includeCreatedAt: input.config.includeCreatedAt,
-    includeModifiedAt: input.config.includeModifiedAt,
+    includeModifiedAt: true,
     columnVisibility: input.columnVisibility,
     columnWidths: input.columnWidths,
     sort: input.sort,
@@ -111,11 +116,11 @@ export function sanitizeWorkbenchPrefs(raw: unknown): WorkbenchPrefs {
     maxDepth: clampDepth(typeof value.maxDepth === "number" ? value.maxDepth : defaults.maxDepth),
     excludeHidden: typeof value.excludeHidden === "boolean" ? value.excludeHidden : defaults.excludeHidden,
     extensionInput,
-    includeSize: typeof value.includeSize === "boolean" ? value.includeSize : defaults.includeSize,
+    // Legacy false values must not disable capture; always persist required identity metadata on.
+    includeSize: true,
     includeCreatedAt:
       typeof value.includeCreatedAt === "boolean" ? value.includeCreatedAt : defaults.includeCreatedAt,
-    includeModifiedAt:
-      typeof value.includeModifiedAt === "boolean" ? value.includeModifiedAt : defaults.includeModifiedAt,
+    includeModifiedAt: true,
     columnVisibility: {
       size: typeof visibility.size === "boolean" ? visibility.size : defaults.columnVisibility.size,
       modified:

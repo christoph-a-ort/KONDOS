@@ -40,7 +40,9 @@ assert(analysisCheck.includes("allein.txt"), "B2: analysis check name");
 assert(modelCheck.includes("allein.txt"), "B2: model check name");
 
 // B.3 size display — scanner untouched for this fix
-assert(walkerRs.includes("include_size.then_some(meta.len())"), "B3: scanner gate unchanged");
+assert(walkerRs.includes("size_bytes: Some(meta.len())"), "B3: size always captured");
+assert(walkerRs.includes("modified_at_ms: meta.modified()"), "B3: modified always captured when OS provides it");
+assert(!walkerRs.includes("include_size.then_some(meta.len())"), "B3: size no longer gated by include_size");
 assert(modelRs.includes("files_with_known_size"), "B3: model files_with_known_size");
 assert(modelRs.includes("direct_files_with_known_size"), "B3: model folder known count");
 assert(pdfRs.includes("nicht erfasst"), "B3: PDF unknown sizes wording");

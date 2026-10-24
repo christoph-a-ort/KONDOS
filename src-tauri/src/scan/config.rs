@@ -19,6 +19,10 @@ impl ScanConfig {
         }
 
         self.extensions = normalize_extensions(&self.extensions);
+        // Size and modified are always required for identity/safety capture.
+        // Legacy clients may still send false; do not honor that for scanning.
+        self.include_size = true;
+        self.include_modified_at = true;
         Ok(self)
     }
 }
@@ -63,6 +67,18 @@ mod tests {
         config.max_depth = 1;
         let validated = config.validated().expect("valid");
         assert_eq!(validated.extensions, vec![".pdf", ".png"]);
+    }
+
+    #[test]
+    fn validated_forces_identity_metadata_flags_on() {
+        let mut config = sample();
+        config.include_size = false;
+        config.include_modified_at = false;
+        config.include_created_at = false;
+        let validated = config.validated().expect("valid");
+        assert!(validated.include_size);
+        assert!(validated.include_modified_at);
+        assert!(!validated.include_created_at);
     }
 
     #[test]

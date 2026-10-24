@@ -89,20 +89,9 @@ export function ConfigPanel({
 
       <fieldset className="meta">
         <legend>Metadaten</legend>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={config.includeSize}
-            disabled={inputsLocked}
-            onChange={(event) => {
-              onConfigChange((current) => ({
-                ...current,
-                includeSize: event.target.checked,
-              }));
-            }}
-          />
-          <span>Dateigröße</span>
-        </label>
+        <p className="muted">
+          Dateigröße und Änderungsdatum werden bei jedem Scan erfasst und in den Details angezeigt.
+        </p>
         <label className="check">
           <input
             type="checkbox"
@@ -116,20 +105,6 @@ export function ConfigPanel({
             }}
           />
           <span>Erstellungsdatum</span>
-        </label>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={config.includeModifiedAt}
-            disabled={inputsLocked}
-            onChange={(event) => {
-              onConfigChange((current) => ({
-                ...current,
-                includeModifiedAt: event.target.checked,
-              }));
-            }}
-          />
-          <span>Änderungsdatum</span>
         </label>
       </fieldset>
 

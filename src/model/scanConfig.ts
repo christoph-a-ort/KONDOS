@@ -11,8 +11,18 @@ export function createDefaultScanConfig(): ScanConfig {
     maxDepth: DEFAULT_DEPTH,
     excludeHidden: true,
     extensions: [],
+    // Always on for capture/safety; UI no longer toggles these.
     includeSize: true,
     includeCreatedAt: false,
+    includeModifiedAt: true,
+  };
+}
+
+/** Legacy prefs may store false; capture must not be disabled. */
+export function withRequiredScanIdentityMetadata(config: ScanConfig): ScanConfig {
+  return {
+    ...config,
+    includeSize: true,
     includeModifiedAt: true,
   };
 }
