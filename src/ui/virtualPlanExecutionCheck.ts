@@ -138,6 +138,12 @@ export function runVirtualPlanExecutionCheck(): void {
   assert(canSubmitRealFolderCreate({ approvedTestRoot: true, explicitConfirm: true, halt: false, operation: current }), "ready to submit");
   const halted = executionMustHalt(journal({ operationStatus: { op1: "started", op2: "pending" } }));
   assert(halted.halt && (halted.reason ?? "").includes("Keine automatische Wiederholung"), "crash window does not retry");
+  const completedHalt = executionMustHalt(journal({
+    status: "completed",
+    operationStatus: { op1: "executed", op2: "executed" },
+  }));
+  assert(completedHalt.halt && (completedHalt.reason ?? "").includes("abgeschlossen"), "FV2-01: completed journal blocks further real ops");
+  assert(!journalBoundToApprovedPlan(journal({ status: "completed", operationStatus: { op1: "executed", op2: "executed" } }), approvedPlan()), "FV2-01: completed journal is not an executable binding");
 
   const mixed = [folderOp("op-folder"), moveOp("op-file"), renameOp("op-rename")];
   const mixedJournal = journal({

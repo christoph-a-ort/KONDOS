@@ -9,7 +9,7 @@ import {
 } from "./virtualPlanJournalApi";
 import {
   bindingAllowsProgress, bindingBlocksNewRun,
-  createVirtualPlanJournal, journalForBoundWrite, parsePersistedJournal,
+  createVirtualPlanJournal, journalForBoundWrite, journalStatusLabel, parsePersistedJournal,
   shouldAutoResumeSimulation, simulateJournal, simulateJournalRecovery,
   type BoundExecutionStatus, type VirtualPlanJournal,
 } from "./virtualPlanJournal";
@@ -125,7 +125,7 @@ export function VirtualPlanJournalPanel({ plan, scanResult, binding, current }: 
     {!available ? <p className="muted">Nur für einen aktuellen virtuell bestätigten Plan verfügbar.</p> : null}
     {locked ? <p className="plan-journal-note">Keine neue Simulation, keine Fortschreibung und keine Freigabe, solange der Zustand unklar oder beschädigt ist.</p> : null}
     {journal !== null ? <div className="plan-journal-body">
-      <p><strong>Status: {journal.status}</strong> · Plan {journal.planId} · Planrevision {journal.planRevision} · Journalrevision {journal.revision} · {journal.operations.length} Operationen</p>
+      <p><strong>Status: {journalStatusLabel(journal.status)}</strong> · Plan {journal.planId} · Planrevision {journal.planRevision} · Journalrevision {journal.revision} · {journal.operations.length} Operationen</p>
       <div className="actions">
         <button type="button" disabled={busy || locked || journal.status !== "prepared" || (view !== null && view.status !== "unbound" && view.status !== "released" && !bindingAllowsProgress(view.status))} onClick={() => { void runSim(); }}>Simulationslauf starten</button>
         <button type="button" disabled={busy || locked || journal.status !== "prepared" || (view !== null && view.status !== "unbound" && view.status !== "released" && !bindingAllowsProgress(view.status))} onClick={() => { void runSim(0); }}>Fehler simulieren</button>
@@ -134,7 +134,7 @@ export function VirtualPlanJournalPanel({ plan, scanResult, binding, current }: 
         <button type="button" disabled={locked || !canPrepareReservationRelease({ view, journal, busy })} onClick={() => { void prepareRelease(); }}>Freigabe vorbereiten</button>
         <button type="button" disabled={locked || !canConfirmReservationRelease({ view, journal, busy })} onClick={() => { void release(); }}>Reservierung freigeben</button>
       </div>
-      <p className="muted">Abgeschlossen: {Object.values(journal.operationStatus).filter((status) => status === "simulatedComplete").length} · Offen: {Object.values(journal.operationStatus).filter((status) => status === "pending").length}</p>
+      <p className="muted">Simulation abgeschlossen: {Object.values(journal.operationStatus).filter((status) => status === "simulatedComplete").length} · Offen: {Object.values(journal.operationStatus).filter((status) => status === "pending").length}</p>
       {journal.reason !== null ? <p className="muted">Grund: {journal.reason}</p> : null}
       <details><summary>Ereignishistorie ({journal.events.length})</summary>{journal.events.map((entry) => <p className="muted" key={entry.sequence}>[{entry.sequence}] {entry.message}</p>)}</details>
     </div> : null}

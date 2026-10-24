@@ -41,7 +41,7 @@ export interface ReservationAdminSummary {
 export function reservationBindingLabel(status: BoundExecutionStatus): string {
   if (status === "reserved") return "Aktive Reservierung";
   if (status === "releasePrepared") return "Freigabe vorbereitet";
-  if (status === "released") return "Abgeschlossen und freigegeben";
+  if (status === "released") return "Freigegeben";
   if (status === "inconsistent") return "Unklarer Zustand – gesperrt";
   if (status === "blocked") return "Beschädigte Daten – gesperrt";
   return "Keine aktive Reservierung";

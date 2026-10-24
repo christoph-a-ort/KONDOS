@@ -4,7 +4,7 @@ import { toUserError } from "../scan";
 import {
   inspectBoundExecution, prepareBoundRelease, releaseBoundExecution, type BoundExecutionView,
 } from "./virtualPlanJournalApi";
-import { parsePersistedJournal, type VirtualPlanJournal } from "./virtualPlanJournal";
+import { journalStatusLabel, parsePersistedJournal, type VirtualPlanJournal } from "./virtualPlanJournal";
 import {
   RESERVATION_ADMIN_TITLE, RESERVATION_NO_AUTO_CONTINUE, RESERVATION_RELEASE_NOTICE,
   buildConfirmReleaseJournal, buildPrepareReleaseJournal, canConfirmReservationRelease,
@@ -101,7 +101,7 @@ export function VirtualPlanReservationAdminPanel({ scanRoot }: { scanRoot: strin
       <p><strong>Kopplung: {reservationBindingLabel(summary.bindingStatus)}</strong></p>
       <p className="plan-dry-run-path" title={summary.scanRoot}>Scanwurzel laut Journal: {summary.scanRoot}</p>
       <p>Journal-ID: {summary.journalId}</p>
-      <p>Journalstatus: {summary.journalStatus}</p>
+      <p>Journalstatus: {journalStatusLabel(summary.journalStatus)}</p>
       <p>Reservierungsstatus (Binding): {summary.journalBindingStatus}</p>
       <p>
         Erfolgreich ausgeführt: {summary.counts.executed}

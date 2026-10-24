@@ -3,9 +3,13 @@ import { makeSnapshotBinding } from "./virtualPlan";
 import type { VirtualDryRunReport } from "./virtualPlanDryRun";
 import {
   bindingAllowsProgress, bindingAllowsRelease, bindingBlocksNewRun,
-  createVirtualPlanJournal, journalForBoundWrite, parsePersistedJournal,
-  shouldAutoResumeSimulation, simulateJournal, type VirtualPlanJournal,
+  canCompleteJournal, completeExecutedJournal, createVirtualPlanJournal,
+  historicalCompletionMarkAllowed, inferCompletedFromLegacyHints,
+  journalForBoundWrite, journalIsTerminal, journalStatusLabel, journalTransitionAllowed,
+  parsePersistedJournal, plannedOperationsReallyExecuted, shouldAutoResumeSimulation,
+  simulateJournal, type JournalOperationStatus, type VirtualPlanJournal,
 } from "./virtualPlanJournal";
+import { reservationBindingLabel } from "./virtualPlanReservationAdmin";
 
 function assert(value: boolean, label: string): void {
   if (!value) throw new Error(label);
@@ -89,4 +93,95 @@ export function runVirtualPlanJournalCheck(): void {
   const released = journalForBoundWrite(preparedRelease, 3, "released");
   assert(released.bindingStatus === "released" && released.revision === 4, "successful release increments once");
   assert(released.planRevision === 2, "release does not raise the virtual plan revision");
+
+  const folder = report.operations[0];
+  const extra = {
+    ...folder,
+    id: "op2",
+    sourcePath: "c.txt",
+    targetPath: "d.txt",
+  };
+  const ops = (first: JournalOperationStatus, second: JournalOperationStatus): Record<string, JournalOperationStatus> => ({
+    [folder.id]: first,
+    op2: second,
+  });
+  const executingReady: VirtualPlanJournal = {
+    ...persisted,
+    status: "executing",
+    operations: [folder, extra],
+    operationStatus: ops("executed", "executed"),
+    bindingStatus: "reserved",
+  };
+  assert(plannedOperationsReallyExecuted(executingReady), "FV2-01: every planned operation is executed");
+  assert(canCompleteJournal(executingReady), "FV2-01: executing journal with proven ops can complete");
+  const completedReserved = completeExecutedJournal(executingReady);
+  assert(completedReserved.status === "completed", "FV2-01: executing → completed");
+  assert(completedReserved.bindingStatus === "reserved", "FV2-01: completion keeps reserved binding");
+  assert(journalStatusLabel(completedReserved.status) === "Abgeschlossen", "FV2-01: completed label");
+  assert(journalIsTerminal("completed"), "FV2-01: completed is terminal");
+  assert(!journalTransitionAllowed("completed", "executing"), "FV2-01: completed cannot reopen to executing");
+  assert(!journalTransitionAllowed("completed", "prepared"), "FV2-01: completed cannot return to prepared");
+  assert(!journalTransitionAllowed("prepared", "completed"), "FV2-01: prepared cannot jump to completed");
+  assert(!journalTransitionAllowed("executionHalted", "completed"), "FV2-01: halted cannot complete");
+  assert(journalTransitionAllowed("executing", "completed"), "FV2-01: map allows executing → completed");
+
+  const pendingLeft = { ...executingReady, operationStatus: ops("executed", "pending") };
+  assert(!plannedOperationsReallyExecuted(pendingLeft), "FV2-01: pending operation is not complete");
+  assert(!canCompleteJournal(pendingLeft), "FV2-01: leftover pending blocks completion");
+  let pendingThrew = false;
+  try { completeExecutedJournal(pendingLeft); } catch { pendingThrew = true; }
+  assert(pendingThrew, "FV2-01: complete throws while an operation is pending");
+
+  const started = { ...executingReady, operationStatus: ops("executed", "started") };
+  const unverified = { ...executingReady, operationStatus: ops("executed", "unverified") };
+  assert(!canCompleteJournal(started) && !canCompleteJournal(unverified), "FV2-01: started/unverified block completion");
+
+  const failed = { ...executingReady, operationStatus: ops("executed", "failed") };
+  assert(!canCompleteJournal(failed), "FV2-01: failed operation blocks completion");
+
+  const countOnly = {
+    ...executingReady,
+    operationStatus: ops("simulatedComplete", "simulatedComplete"),
+  };
+  assert(Object.values(countOnly.operationStatus).filter((status) => status === "pending").length === 0, "FV2-01: zero pending is not proof");
+  assert(!plannedOperationsReallyExecuted(countOnly), "FV2-01: simulatedComplete is not real success");
+  assert(!canCompleteJournal(countOnly), "FV2-01: counters do not complete the journal");
+
+  const legacy = {
+    ...executingReady,
+    status: "executing" as const,
+    bindingStatus: "released" as const,
+    operationStatus: ops("simulatedComplete", "simulatedComplete"),
+  };
+  assert(Object.values(legacy.operationStatus).filter((status) => status === "pending").length === 0, "FV2-01: legacy fixture has pending=0");
+  const parsedLegacy = parsePersistedJournal(JSON.stringify(legacy));
+  assert(parsedLegacy !== null && parsedLegacy.status === "executing", "FV2-01: old journal stays readable as executing");
+  assert(parsedLegacy?.bindingStatus === "released", "FV2-01: old released binding is kept");
+  assert(inferCompletedFromLegacyHints(legacy) === false, "FV2-01: executing+released+pending=0 is not completed");
+  assert(journalStatusLabel(legacy.status) !== "Abgeschlossen", "FV2-01: legacy executing is not shown as Abgeschlossen");
+  assert(reservationBindingLabel(legacy.bindingStatus) === "Freigegeben", "FV2-01a: legacy released binding is Freigegeben");
+  assert(!reservationBindingLabel(legacy.bindingStatus).includes("Abgeschlossen"), "FV2-01a: reservation release never yields Abgeschlossen");
+  assert(!historicalCompletionMarkAllowed(legacy), "FV2-01: no historical mark without explicit completed status");
+
+  const legacyAllExecuted = { ...executingReady, status: "executing" as const, bindingStatus: "released" as const };
+  const parsedProvenLegacy = parsePersistedJournal(JSON.stringify(legacyAllExecuted));
+  assert(parsedProvenLegacy !== null && parsedProvenLegacy.status === "executing", "FV2-01: proven old journal is not migrated");
+  assert(plannedOperationsReallyExecuted(legacyAllExecuted), "FV2-01: historical proof can exist without rewriting status");
+  assert(!inferCompletedFromLegacyHints(legacyAllExecuted), "FV2-01: proof plus released binding still does not invent completed");
+  assert(!historicalCompletionMarkAllowed(legacyAllExecuted), "FV2-01: no automatic historical completion mark");
+
+  const completedReleased = journalForBoundWrite(completedReserved, completedReserved.revision, "released");
+  assert(completedReleased.status === "completed", "FV2-01: release write does not drop completed");
+  assert(completedReleased.bindingStatus === "released", "FV2-01: completed can sit on a released binding");
+  assert(journalStatusLabel(completedReleased.status) === "Abgeschlossen", "FV2-01a: completed stays Abgeschlossen after release");
+  assert(reservationBindingLabel(completedReleased.bindingStatus) === "Freigegeben", "FV2-01a: released stays Freigegeben after completion");
+  assert(historicalCompletionMarkAllowed(completedReleased), "FV2-01: explicit completed+released is a valid mark");
+  assert(historicalCompletionMarkAllowed(completedReserved), "FV2-01: explicit completed+reserved is a valid mark");
+
+  const unknownRaw = JSON.stringify({ ...persisted, status: "mystery-v0" });
+  const parsedUnknown = parsePersistedJournal(unknownRaw);
+  assert(parsedUnknown !== null && String(parsedUnknown.status) === "mystery-v0", "FV2-01: unknown status remains readable");
+  assert(journalStatusLabel(String(parsedUnknown!.status)) !== "Abgeschlossen", "FV2-01: unknown status is not Abgeschlossen");
+  assert(!journalTransitionAllowed(String(parsedUnknown!.status), "completed"), "FV2-01: unknown status cannot transition to completed");
+  assert(!canCompleteJournal(parsedUnknown as VirtualPlanJournal), "FV2-01: unknown status cannot complete");
 }

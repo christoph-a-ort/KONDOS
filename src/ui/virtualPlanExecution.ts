@@ -118,6 +118,9 @@ export function operationWasReallyMoved(status: JournalOperationStatus | undefin
 
 export function executionMustHalt(journal: VirtualPlanJournal | null): { halt: boolean; reason: string | null } {
   if (journal === null) return { halt: false, reason: null };
+  if (journal.status === "completed") {
+    return { halt: true, reason: "Das Journal ist abgeschlossen. Keine weiteren Datei- oder Ordneroperationen." };
+  }
   if (journal.status === "executionHalted" || journal.status === "blocked" || journal.status === "recoveryRequired") {
     return { halt: true, reason: journal.reason ?? "Der Ablauf ist angehalten." };
   }

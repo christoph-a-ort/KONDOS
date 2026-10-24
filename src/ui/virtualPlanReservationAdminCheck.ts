@@ -6,9 +6,9 @@ import {
   RESERVATION_ADMIN_TITLE,
   buildConfirmReleaseJournal, buildPrepareReleaseJournal, canConfirmReservationRelease,
   canPrepareReservationRelease, countJournalOperations, releasePreservesOperationStatus,
-  reservationLoadNotice, summarizeBoundReservation,
+  reservationBindingLabel, reservationLoadNotice, summarizeBoundReservation,
 } from "./virtualPlanReservationAdmin";
-import { shouldAutoResumeSimulation } from "./virtualPlanJournal";
+import { journalStatusLabel, shouldAutoResumeSimulation } from "./virtualPlanJournal";
 
 function assert(value: boolean, label: string): void {
   if (!value) throw new Error(label);
@@ -144,6 +144,29 @@ export function runVirtualPlanReservationAdminCheck(): void {
   // K: dedicated admin title and complete operation counts
   assert(RESERVATION_ADMIN_TITLE === "Aktive Ausführungssperre verwalten", "K: dedicated admin title constant");
   assert(countJournalOperations(journal).total === 4, "K: counts cover all operations");
+
+  const completedOps = {
+    "op-folder": "executed" as const,
+    "op-a": "executed" as const,
+    "op-b": "executed" as const,
+    "op-c": "executed" as const,
+  };
+  const completedReserved = sampleJournal({ status: "completed", operationStatus: completedOps, bindingStatus: "reserved" });
+  const completedReleased = sampleJournal({ status: "completed", operationStatus: completedOps, bindingStatus: "released" });
+  assert(summarizeBoundReservation(viewFrom(completedReserved, "reserved"), "c:/dotty-test")?.journalStatus === "completed", "FV2-01: completed stays visible with reserved binding");
+  assert(summarizeBoundReservation(viewFrom(completedReleased, "released"), "c:/dotty-test")?.journalStatus === "completed", "FV2-01: completed stays visible with released binding");
+  assert(completedReleased.status === "completed" && completedReleased.bindingStatus === "released", "FV2-01: journal completed and binding released stay independent");
+  assert(journalStatusLabel(completedReserved.status) === "Abgeschlossen", "FV2-01a: completed is labeled Abgeschlossen");
+  assert(reservationBindingLabel("released") === "Freigegeben", "FV2-01a: released is labeled Freigegeben");
+  assert(!reservationBindingLabel("released").includes("Abgeschlossen"), "FV2-01a: released label does not use Abgeschlossen");
+  const legacyReleased = sampleJournal({ status: "executing", bindingStatus: "released" });
+  assert(journalStatusLabel(legacyReleased.status) !== "Abgeschlossen", "FV2-01a: legacy executing is not Abgeschlossen");
+  assert(reservationBindingLabel(legacyReleased.bindingStatus) === "Freigegeben", "FV2-01a: legacy released binding stays Freigegeben");
+  assert(
+    journalStatusLabel(completedReleased.status) === "Abgeschlossen"
+      && reservationBindingLabel(completedReleased.bindingStatus) === "Freigegeben",
+    "FV2-01a: completed and released labels stay independent",
+  );
 }
 
 export function assertReservationAdminSourceGuards(sources: {
@@ -174,9 +197,12 @@ export function assertReservationAdminSourceGuards(sources: {
   assert(effectSlice.includes("inspectBoundExecution(scanRoot)"), "J: load only inspects");
   assert(!effectSlice.includes("prepareBoundRelease(") && !effectSlice.includes("releaseBoundExecution("), "J: load effect does not call release APIs");
   assert(journalPanel.includes("buildPrepareReleaseJournal") && journalPanel.includes("buildConfirmReleaseJournal"), "K: journal panel reuses shared release builders");
+  assert(journalPanel.includes("Simulation abgeschlossen:"), "FV2-01a: simulatedComplete counter is labeled as simulation");
+  assert(!journalPanel.includes("Abgeschlossen:"), "FV2-01a: journal panel no longer uses bare Abgeschlossen counter");
   assert(panel.includes("{RESERVATION_ADMIN_TITLE}"), "K: panel renders admin title");
   assert(panel.includes("{RESERVATION_RELEASE_NOTICE}"), "K: release notice present");
   assert(panel.includes("{RESERVATION_NO_AUTO_CONTINUE}"), "K: no-auto-continue notice present");
+  assert(panel.includes("journalStatusLabel(summary.journalStatus)"), "K: reservation admin shows labeled journal status");
   assert(panel.includes("Keine Datei- oder Ordneroperationen"), "K: no file ops in admin panel");
   assert(executionPanel.includes("Echte Ausführung (nur Testverzeichnis)"), "K: execution panel title unchanged");
 }

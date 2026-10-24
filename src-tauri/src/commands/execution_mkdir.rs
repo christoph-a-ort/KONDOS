@@ -11,7 +11,9 @@ use crate::scan::must_not_follow;
 use crate::state::AppState;
 
 use super::execution_binding::{inspect_scan_root_at, progress_bound_run_locked, BoundExecutionView};
-use super::execution_journal::{journal, journal_store, load_at};
+use super::execution_journal::{
+    journal, journal_status_blocks_real_ops, journal_store, load_at, success_journal_status,
+};
 use super::execution_preflight::{path_has_parent_dir, within_scan_root};
 use super::execution_test_root::require_approved_test_root;
 use super::scan_root_coordination::acquire_at;
@@ -234,7 +236,10 @@ fn with_progress(
 
 fn halt_reason_from_ops(object: &Map<String, Value>, operation_id: &str) -> Option<String> {
     let status = object.get("status").and_then(Value::as_str).unwrap_or("");
-    if matches!(status, "executionHalted" | "blocked" | "recoveryRequired" | "failed" | "interrupted") {
+    if journal_status_blocks_real_ops(status) {
+        if status == "completed" {
+            return Some("Das Journal ist abgeschlossen. Keine weiteren Datei- oder Ordneroperationen.".to_string());
+        }
         return Some(
             object
                 .get("reason")
@@ -754,7 +759,7 @@ fn execute_create_folder_locked(
                 expected_revision + 1,
                 operation_id,
                 "executed",
-                "executing",
+                success_journal_status(&parse_object(&intent)?, operation_id),
                 "verified",
                 &target,
                 scan_root,
@@ -923,6 +928,10 @@ mod tests {
         assert!(result.created);
         assert!(root.join("neu").is_dir());
         assert!(!fs::symlink_metadata(root.join("neu")).unwrap().file_type().is_symlink());
+        let stored = load_at(&journal(&journal_store(&root), "j1").unwrap(), "j1").unwrap().unwrap();
+        assert!(stored.contains("\"status\":\"completed\""), "{stored}");
+        assert!(stored.contains("\"op-folder\":\"executed\""));
+        assert!(stored.contains("\"bindingStatus\":\"reserved\""));
         let _ = fs::remove_dir_all(root);
     }
 

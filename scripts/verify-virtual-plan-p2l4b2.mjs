@@ -39,6 +39,7 @@ assert(panel.includes("Diese Datei jetzt verschieben") && panel.includes("moveBl
 assert(panel.includes("Ich bestätige ausdrücklich genau diese eine Dateiverschiebung."), "dedicated move checkbox");
 assert(panel.includes("Vollständiger Quellpfad") && panel.includes("Vollständiger Zielpfad"), "full source and target paths");
 assert(panel.includes("Echte Ordneranlage jetzt ausführen"), "existing folder create UI remains");
+assert(panel.includes("journalStatusLabel"), "FV2-01 execution panel shows journal status label");
 assert(!panel.includes("Diese Datei jetzt umbenennen"), "rename UI remains absent");
 assert(panel.includes("simulatedFolderTargets: []") || panel.includes("simulatedFolderTargets:[]"), "real inspect does not treat virtual parents as existing");
 assert(occupancy.includes("echte Dateioperation") && !occupancy.includes("echte Ordneranlage"), "occupancy copy is generic");

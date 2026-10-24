@@ -7,7 +7,7 @@ import {
   inspectBoundExecution, startBoundExecution, type BoundExecutionView,
 } from "./virtualPlanJournalApi";
 import {
-  bindingBlocksNewRun, createVirtualPlanJournal, journalForBoundWrite, parsePersistedJournal,
+  bindingBlocksNewRun, createVirtualPlanJournal, journalForBoundWrite, journalStatusLabel, parsePersistedJournal,
   type BoundExecutionStatus, type VirtualPlanJournal,
 } from "./virtualPlanJournal";
 import { inspectPlannedOperation } from "./virtualPlanPreflightApi";
@@ -258,6 +258,7 @@ export function VirtualPlanExecutionPanel({ plan, scanResult, binding, current }
     <summary>Echte Ausführung (nur Testverzeichnis)</summary>
     <p className="muted">Nur die ausdrücklich freigegebene Testwurzel. Neue Ordner und einzelne Dateiverschiebungen nach aktueller Prüfung und Einzelbestätigung. Umbenennen und Löschen bleiben unzulässig.</p>
     <p><strong>Kopplung: {view === null ? "unbekannt" : bindingLabel(view.status)}</strong></p>
+    {journal !== null ? <p><strong>Journalstatus: {journalStatusLabel(journal.status)}</strong></p> : null}
     <p className="plan-dry-run-path" title={displayRoot}>Ausgewählter Testpfad: {displayRoot}</p>
     <p className="muted">{approval?.message ?? "Testpfad-Freigabe wird geprüft."}</p>
     <label className="plan-execution-confirm">

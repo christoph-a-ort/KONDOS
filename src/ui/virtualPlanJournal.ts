@@ -2,7 +2,7 @@
 import type { SnapshotBinding, VirtualPlan } from "./virtualPlan";
 import type { VirtualDryRunOperation, VirtualDryRunReport } from "./virtualPlanDryRun";
 
-export type JournalStatus = "prepared" | "checking" | "simulating" | "simulatedComplete" | "interrupted" | "failed" | "recoveryRequired" | "recovering" | "simulatedRecovered" | "blocked" | "executing" | "executionHalted";
+export type JournalStatus = "prepared" | "checking" | "simulating" | "simulatedComplete" | "interrupted" | "failed" | "recoveryRequired" | "recovering" | "simulatedRecovered" | "blocked" | "executing" | "executionHalted" | "completed";
 export type JournalOperationStatus = "pending" | "checked" | "started" | "simulatedComplete" | "failed" | "rollbackStarted" | "simulatedRolledBack" | "executed" | "unverified";
 export type JournalBindingStatus = "reserved" | "releasePrepared" | "released";
 export type BoundExecutionStatus = "unbound" | "reserved" | "releasePrepared" | "released" | "inconsistent" | "blocked";
@@ -20,7 +20,14 @@ export interface VirtualPlanJournal {
   };
 }
 
-const terminal = new Set<JournalStatus>(["simulatedComplete", "simulatedRecovered", "blocked", "executionHalted"]);
+export const JOURNAL_COMPLETED_LABEL = "Abgeschlossen";
+
+const knownJournalStatus = new Set<JournalStatus>([
+  "prepared", "checking", "simulating", "simulatedComplete", "interrupted", "failed",
+  "recoveryRequired", "recovering", "simulatedRecovered", "blocked", "executing",
+  "executionHalted", "completed",
+]);
+const terminal = new Set<JournalStatus>(["simulatedComplete", "simulatedRecovered", "blocked", "executionHalted", "completed"]);
 const allowed: Readonly<Record<JournalStatus, ReadonlySet<JournalStatus>>> = {
   prepared: new Set(["checking", "blocked", "executing"]),
   checking: new Set(["simulating", "failed", "interrupted", "blocked"]),
@@ -32,15 +39,20 @@ const allowed: Readonly<Record<JournalStatus, ReadonlySet<JournalStatus>>> = {
   recovering: new Set(["simulatedRecovered", "failed", "recoveryRequired"]),
   simulatedRecovered: new Set(["executing"]),
   blocked: new Set(),
-  executing: new Set(["executing", "executionHalted", "blocked", "recoveryRequired"]),
+  executing: new Set(["executing", "executionHalted", "blocked", "recoveryRequired", "completed"]),
   executionHalted: new Set(["blocked"]),
+  completed: new Set(),
 };
 
 function event(journal: VirtualPlanJournal, message: string, operationId?: string): VirtualPlanJournal {
   return { ...journal, revision: journal.revision + 1, events: [...journal.events, { sequence: journal.events.length + 1, atMs: Date.now(), message, operationId }] };
 }
+function allowedTargets(status: JournalStatus): ReadonlySet<JournalStatus> | undefined {
+  return allowed[status];
+}
 function transition(journal: VirtualPlanJournal, status: JournalStatus, message: string): VirtualPlanJournal {
-  if (!allowed[journal.status].has(status)) throw new Error(`Unzulässiger Journalübergang: ${journal.status} → ${status}.`);
+  const targets = allowedTargets(journal.status);
+  if (targets === undefined || !targets.has(status)) throw new Error(`Unzulässiger Journalübergang: ${journal.status} → ${status}.`);
   return { ...event(journal, message), status };
 }
 export function createVirtualPlanJournal(plan: VirtualPlan, binding: SnapshotBinding, report: VirtualDryRunReport): VirtualPlanJournal {
@@ -104,3 +116,64 @@ export function simulateJournalRecovery(journal: VirtualPlanJournal): VirtualPla
   return transition(next, "simulatedRecovered", "Simulation der Wiederherstellung abgeschlossen.");
 }
 export function journalIsTerminal(status: JournalStatus): boolean { return terminal.has(status); }
+
+export function isKnownJournalStatus(status: string): status is JournalStatus {
+  return knownJournalStatus.has(status as JournalStatus);
+}
+
+export function journalStatusLabel(status: string): string {
+  return status === "completed" ? JOURNAL_COMPLETED_LABEL : status;
+}
+
+export function journalTransitionAllowed(from: string, to: JournalStatus): boolean {
+  if (!isKnownJournalStatus(from)) return false;
+  const targets = allowedTargets(from);
+  return targets !== undefined && targets.has(to);
+}
+
+function journalBindingConsistent(journal: VirtualPlanJournal): boolean {
+  return journal.bindingStatus === "reserved"
+    || journal.bindingStatus === "releasePrepared"
+    || journal.bindingStatus === "released";
+}
+
+/** Proof is per planned operation, never a pending-count or bindingStatus shortcut. */
+export function plannedOperationsReallyExecuted(journal: VirtualPlanJournal): boolean {
+  if (journal.operations.length === 0) return false;
+  const plannedIds = journal.operations.map((operation) => operation.id);
+  if (new Set(plannedIds).size !== plannedIds.length) return false;
+  const statusIds = Object.keys(journal.operationStatus);
+  if (statusIds.length !== plannedIds.length) return false;
+  if (!statusIds.every((id) => plannedIds.includes(id))) return false;
+  return journal.operations.every((operation) => journal.operationStatus[operation.id] === "executed");
+}
+
+export function inferCompletedFromLegacyHints(journal: VirtualPlanJournal): boolean {
+  const pending = Object.values(journal.operationStatus).filter((status) => status === "pending").length;
+  if (journal.status === "executing" && journal.bindingStatus === "released" && pending === 0) {
+    return false;
+  }
+  return journal.status === "completed";
+}
+
+export function historicalCompletionMarkAllowed(journal: VirtualPlanJournal): boolean {
+  return journal.status === "completed"
+    && plannedOperationsReallyExecuted(journal)
+    && journalBindingConsistent(journal);
+}
+
+export function canCompleteJournal(journal: VirtualPlanJournal): boolean {
+  if (journal.status !== "executing") return false;
+  if (!isKnownJournalStatus(journal.status)) return false;
+  if (!journalBindingConsistent(journal)) return false;
+  if (journal.journalId.length === 0 || journal.scanRoot.length === 0) return false;
+  if (journal.binding.normalizedRootPath !== journal.scanRoot) return false;
+  return plannedOperationsReallyExecuted(journal);
+}
+
+export function completeExecutedJournal(journal: VirtualPlanJournal): VirtualPlanJournal {
+  if (!canCompleteJournal(journal)) {
+    throw new Error("Journalabschluss ist in diesem Zustand nicht zulässig.");
+  }
+  return transition(journal, "completed", "Alle vorgesehenen realen Operationen wurden erfolgreich ausgeführt.");
+}
