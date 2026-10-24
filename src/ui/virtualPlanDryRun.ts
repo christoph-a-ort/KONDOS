@@ -4,6 +4,7 @@ import { isDirectory } from "../model";
 import { normalizeVirtualPlanPath, type SnapshotBinding, type VirtualPlan } from "./virtualPlan";
 import { validateVirtualPlan } from "./virtualPlanEditor";
 import { isAllowedRelativePlanPath, isAllowedWindowsComponent } from "./windowsPathRules";
+import { existingWindowsNameIssue } from "./windowsInventoryNames";
 import {
   evaluateNewTargetPathLength, newComponentsRelativeToExisting, windowsTargetPath,
 } from "./windowsPathLengths";
@@ -104,12 +105,20 @@ export function buildVirtualPlanDryRun(options: { plan: VirtualPlan; scanResult:
     const source = item.observed.relativePath;
     const target = join(item.virtualTargetPath, item.virtualRename ?? base(source));
     if (target === source) continue;
-    if (target.includes("..") || target.startsWith("/") || invalidName(base(target)) || !isAllowedRelativePlanPath(target)) { blockers.push(`Ungültiger Dateizielpfad: ${target}`); continue; }
+    const sourceIssue = existingWindowsNameIssue(source);
+    if (sourceIssue !== null) blockers.push(`Problematischer bestehender Quellname: ${source}`);
+    if (target.includes("..") || target.startsWith("/") || invalidName(base(target)) || !isAllowedRelativePlanPath(target)) {
+      blockers.push(`Ungültiger Dateizielpfad: ${target}`);
+      if (sourceIssue === null) continue;
+    }
     const key = target.toLowerCase();
-    if (targets.has(key)) { blockers.push(`Doppelter Dateizielpfad: ${target}`); continue; }
+    if (targets.has(key)) {
+      blockers.push(`Doppelter Dateizielpfad: ${target}`);
+      if (sourceIssue === null) continue;
+    }
     targets.add(key);
     const kind: DryRunOperationKind = parent(source) === parent(target) ? "renameFile" : "moveFile";
-    operations.push({ id: `dry-file-${item.id}`, kind, objectId: item.observed.nodeId, sourcePath: source, targetPath: target, expectedSource: `Scan-lokale Identität; Größe ${item.observed.metadata.sizeBytes ?? "unbekannt"}.`, preconditions: ["Quelle muss später unverändert und kein Reparse-Point sein.", "Ziel darf später nicht existieren.", "Gleiches Laufwerk, Berechtigung und Zielordner später prüfen."], expectedTarget: "Nicht vorhandene Datei am virtuellen Zielpfad", collisionStatus: "notDecidableFromSnapshot", checkStatus: "mustCheckAtExecution", rationale: kind === "moveFile" ? "Virtuelle Zuordnung in einen anderen Zielordner." : "Virtuelle Umbenennung im selben Zielordner.", recovery: "Spätere Umkehrung ausschließlich aus dem Ausführungsjournal." });
+    operations.push({ id: `dry-file-${item.id}`, kind, objectId: item.observed.nodeId, sourcePath: source, targetPath: target, expectedSource: `Scan-lokale Identität; Größe ${item.observed.metadata.sizeBytes ?? "unbekannt"}.`, preconditions: ["Quelle muss später unverändert und kein Reparse-Point sein.", "Ziel darf später nicht existieren.", "Gleiches Laufwerk, Berechtigung und Zielordner später prüfen."], expectedTarget: "Nicht vorhandene Datei am virtuellen Zielpfad", collisionStatus: "notDecidableFromSnapshot", checkStatus: sourceIssue !== null ? "blocked" : "mustCheckAtExecution", rationale: sourceIssue !== null ? "Bestehender Quellname ist unter Windows nicht für echte Dateioperationen zulässig." : kind === "moveFile" ? "Virtuelle Zuordnung in einen anderen Zielordner." : "Virtuelle Umbenennung im selben Zielordner.", recovery: "Spätere Umkehrung ausschließlich aus dem Ausführungsjournal." });
   }
   const sorted = operations.sort((a, b) => (a.kind === "createVirtualFolder" ? 0 : 1) - (b.kind === "createVirtualFolder" ? 0 : 1) || a.targetPath.localeCompare(b.targetPath));
   const scanRoot = scanResult.root.path;

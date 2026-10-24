@@ -1024,6 +1024,25 @@ button:disabled {
   padding: 0 5px;
 }
 
+.existing-name-badge {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #5a2a2a;
+  background: #f3e8e8;
+  border: 1px solid #c9a0a0;
+  border-radius: 4px;
+  padding: 0 5px;
+}
+
+.plan-editor-file-source,
+.plan-editor-projection-source {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .tree-filter-chip {
   display: inline-flex;
   align-items: center;

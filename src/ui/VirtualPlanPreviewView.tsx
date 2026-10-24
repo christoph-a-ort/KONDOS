@@ -166,6 +166,11 @@ function VirtualTreePane(props: {
                   {row.directory ? "Ord" : "Dat"}
                 </span>
                 <span className="plan-tree-name">{row.node.name}</span>
+                {row.hasProblematicExistingWindowsName ? (
+                  <span className="existing-name-badge" title="Problematischer Windows-Name – echte Dateioperationen nicht zulässig">
+                    nicht ausführbar
+                  </span>
+                ) : null}
                 {props.showBadges ? (
                   <span
                     className={`plan-badge plan-badge-${projection?.suggestionKind ?? "unchanged"}`}

@@ -16,6 +16,7 @@ import {
 } from "./virtualPlan";
 import type { VirtualReorgProposal, VirtualPreviewEntry } from "./virtualPlanSuggestions";
 import { isAllowedWindowsComponent, isReservedDeviceStem } from "./windowsPathRules";
+import { existingWindowsNameIssue, type ExistingWindowsNameIssue } from "./windowsInventoryNames";
 
 export const VIRTUAL_PLAN_EDITOR_BUILDER_VERSION = 1 as const;
 
@@ -28,6 +29,8 @@ export interface VirtualPlanProjectionRow {
   virtualTargetPath: string;
   virtualPath: string;
   status: VirtualPlanItem["status"];
+  /** FV2-02c derived mark. Absent on unaffected or older projection callers. */
+  existingWindowsNameIssue?: ExistingWindowsNameIssue;
 }
 
 export interface VirtualPlanValidation {
@@ -455,25 +458,29 @@ export function prepareVirtualPlanForSave(
 
 export function projectVirtualPlan(plan: VirtualPlan): VirtualPlanProjectionRow[] {
   return plan.items
-    .map((item) => ({
-      itemId: item.id,
-      nodeId: item.observed.nodeId,
-      displayName:
-        item.observed.relativePath === "."
-          ? "."
-          : item.observed.relativePath.slice(item.observed.relativePath.lastIndexOf("/") + 1),
-      kind: item.observed.kind,
-      sourceRelativePath: item.observed.relativePath,
-      virtualTargetPath: item.virtualTargetPath,
-      virtualPath: joinVirtualPath(
-        item.virtualTargetPath,
-        item.virtualRename ??
-          (item.observed.relativePath === "."
+    .map((item) => {
+      const issue = existingWindowsNameIssue(item.observed.relativePath);
+      return {
+        itemId: item.id,
+        nodeId: item.observed.nodeId,
+        displayName:
+          item.observed.relativePath === "."
             ? "."
-            : item.observed.relativePath.slice(item.observed.relativePath.lastIndexOf("/") + 1)),
-      ),
-      status: item.status,
-    }))
+            : item.observed.relativePath.slice(item.observed.relativePath.lastIndexOf("/") + 1),
+        kind: item.observed.kind,
+        sourceRelativePath: item.observed.relativePath,
+        virtualTargetPath: item.virtualTargetPath,
+        virtualPath: joinVirtualPath(
+          item.virtualTargetPath,
+          item.virtualRename ??
+            (item.observed.relativePath === "."
+              ? "."
+              : item.observed.relativePath.slice(item.observed.relativePath.lastIndexOf("/") + 1)),
+        ),
+        status: item.status,
+        ...(issue !== null ? { existingWindowsNameIssue: issue } : {}),
+      };
+    })
     .sort((left, right) => left.virtualPath.localeCompare(right.virtualPath));
 }
 

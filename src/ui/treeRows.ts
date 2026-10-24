@@ -1,5 +1,6 @@
 import { isDirectory, type DirectoryNode, type FsNode } from "../model";
 import { DEFAULT_TREE_SORT, sortedChildren, type TreeSort } from "./treeSort";
+import { existingWindowsNameIssueForNode } from "./windowsInventoryNames";
 
 export const ROW_HEIGHT = 28;
 export const OVERSCAN = 12;
@@ -11,6 +12,8 @@ export interface VisibleTreeRow {
   depth: number;
   directory: boolean;
   expandable: boolean;
+  /** FV2-02c derived mark. Absent when the existing name is unremarkable. */
+  hasProblematicExistingWindowsName?: true;
 }
 
 export interface TreeWindow {
@@ -97,6 +100,9 @@ export function deriveVisibleRows(
       depth,
       directory,
       expandable: directory && canExpandDirectory(node),
+      ...(existingWindowsNameIssueForNode(node) !== null
+        ? { hasProblematicExistingWindowsName: true as const }
+        : {}),
     });
 
     if (directory && expandedIds.has(node.id) && node.children.length > 0) {

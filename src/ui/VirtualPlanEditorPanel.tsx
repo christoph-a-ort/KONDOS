@@ -15,6 +15,11 @@ import {
   undoLastVirtualPlanEdit,
   type VirtualPlanEditResult,
 } from "./virtualPlanEditor";
+import {
+  EXISTING_WINDOWS_NAME_MARK,
+  EXISTING_WINDOWS_NAME_TITLE,
+  existingWindowsNameIssue,
+} from "./windowsInventoryNames";
 
 export interface VirtualPlanEditorPanelProps {
   plan: VirtualPlan | null;
@@ -199,7 +204,14 @@ export function VirtualPlanEditorPanel({
           </div>
           {editableFiles.map((item) => (
             <div className="plan-editor-file" key={item.id}>
-              <span title={item.observed.relativePath}>{item.observed.relativePath}</span>
+              <span className="plan-editor-file-source" title={item.observed.relativePath}>
+                <span>{item.observed.relativePath}</span>
+                {existingWindowsNameIssue(item.observed.relativePath) !== null ? (
+                  <span className="existing-name-badge" title={EXISTING_WINDOWS_NAME_TITLE}>
+                    {EXISTING_WINDOWS_NAME_MARK}
+                  </span>
+                ) : null}
+              </span>
               <select
                 disabled={isApproved}
                 value={
@@ -292,7 +304,14 @@ export function VirtualPlanEditorPanel({
         <div className="plan-editor-projection-list">
           {rows.map((row) => (
             <div key={row.itemId} className="plan-editor-projection-row">
-              <span>{row.sourceRelativePath}</span>
+              <span className="plan-editor-projection-source" title={row.sourceRelativePath}>
+                <span>{row.sourceRelativePath}</span>
+                {row.existingWindowsNameIssue !== undefined ? (
+                  <span className="existing-name-badge" title={EXISTING_WINDOWS_NAME_TITLE}>
+                    {EXISTING_WINDOWS_NAME_MARK}
+                  </span>
+                ) : null}
+              </span>
               <span aria-hidden="true">→</span>
               <span>{row.virtualPath}</span>
               <span className="muted">{row.status === "excluded" ? "unverändert" : row.status}</span>

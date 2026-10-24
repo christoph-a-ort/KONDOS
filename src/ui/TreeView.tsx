@@ -57,6 +57,10 @@ import {
   type VisibleTreeRow,
 } from "./treeRows";
 import {
+  EXISTING_WINDOWS_NAME_MARK,
+  EXISTING_WINDOWS_NAME_TITLE,
+} from "./windowsInventoryNames";
+import {
   ancestorDirectoryIds,
   clipboardPath,
   collectMatchIds,
@@ -1410,6 +1414,11 @@ function VirtualTreeRow({
               <span className={directory ? "name directory" : "name file"} title={node.name}>
                 {node.name}
               </span>
+              {row.hasProblematicExistingWindowsName ? (
+                <span className="existing-name-badge" title={EXISTING_WINDOWS_NAME_TITLE}>
+                  {EXISTING_WINDOWS_NAME_MARK}
+                </span>
+              ) : null}
               {hint === "depthLimited" ? (
                 <span
                   className="listing-badge"

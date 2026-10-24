@@ -35,7 +35,7 @@ export function VirtualPlanDryRunPanel({ plan, scanResult, binding, current }: {
               <strong>[{index + 1}] {operationLabel(operation.kind)}</strong>
               <span className="plan-dry-run-path" title={operation.sourcePath}>Von: {operation.sourcePath}</span>
               <span className="plan-dry-run-path" title={operation.targetPath}>Nach: {operation.targetPath}</span>
-              <span className="muted">Vor Ausführung erneut prüfen</span>
+              {operation.checkStatus === "blocked" ? <span className="existing-name-badge" title="Problematischer Windows-Name – echte Dateioperationen nicht zulässig">nicht ausführbar</span> : <span className="muted">Vor Ausführung erneut prüfen</span>}
             </div>)}
         </div>
       </details>
