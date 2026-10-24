@@ -105,6 +105,9 @@ export function runVirtualPlanEditorCheck(): void {
 
   const invalidRename = renameVirtualPlanFolder(renamed.plan, folder.id, "CON");
   assert(!invalidRename.ok, "reserved windows name rejected");
+  assert(!renameVirtualPlanFolder(renamed.plan, folder.id, "CON.txt").ok, "reserved windows name with extension rejected");
+  assert(!renameVirtualPlanFolder(renamed.plan, folder.id, "COM0").ok, "COM0 reserved windows name rejected");
+  assert(!renameVirtualPlanFolder(renamed.plan, folder.id, "COM¹").ok, "superscript device name rejected");
   assert(renamed.plan.decisions.length === 1, "failed rename creates no undo step");
 
   const note = renamed.plan.items.find((item) =>

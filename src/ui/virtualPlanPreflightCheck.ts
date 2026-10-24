@@ -50,6 +50,10 @@ export function runVirtualPlanPreflightCheck(): void {
   assert(evaluatePreflight({ operation: move, facts: facts({ target: observation() }), expectedSizeBytes: 5, simulatedFolderTargets: [] }).reason.includes("belegt"), "existing target");
   assert(evaluatePreflight({ operation: move, facts: facts({ source: observation({ sizeBytes: 9 }) }), ...complete }).halt, "changed source stops");
   assert(evaluatePreflight({ operation: move, facts: facts({ source: observation({ withinRoot: false }) }), expectedSizeBytes: 5, simulatedFolderTargets: [] }).reason.includes("außerhalb"), "path outside root");
+  assert(evaluatePreflight({ operation: { ...move, sourcePath: "CON.txt" }, facts: facts(), ...complete }).status === "blocked", "reserved source name blocks preflight");
+  assert(evaluatePreflight({ operation: { ...move, targetPath: "NUL.pdf" }, facts: facts(), ...complete }).status === "blocked", "reserved target name blocks preflight");
+  assert(evaluatePreflight({ operation: { ...move, targetPath: "Datei.txt:Stream" }, facts: facts(), ...complete }).status === "blocked", "ADS target syntax blocks preflight");
+  assert(evaluatePreflight({ operation: { ...move, targetPath: "COM¹.docx" }, facts: facts(), ...complete }).status === "blocked", "superscript device target blocks preflight");
   assert(evaluatePreflight({ operation: move, facts: facts({ source: observation({ isReparse: true }) }), expectedSizeBytes: 5, simulatedFolderTargets: [] }).reason.includes("Reparse"), "reparse/junction");
   assert(evaluatePreflight({ operation: move, facts: facts(), simulatedFolderTargets: [] }).status === "unverifiable", "missing planning metadata is unverifiable");
   const missingSize = evaluatePreflight({ operation: move, facts: facts(), expectedModifiedAtMs: 100, simulatedFolderTargets: [] });

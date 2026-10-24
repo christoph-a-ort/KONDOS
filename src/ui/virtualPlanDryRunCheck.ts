@@ -166,4 +166,9 @@ export function runVirtualPlanDryRunCheck(): void {
   const incompletePlan = approvedPlan(incomplete, incompleteBinding, [folder("Probeordner")], { "rechnung_a.txt": "Probeordner" });
   const incompleteRun = buildVirtualPlanDryRun({ plan: incompletePlan, scanResult: incomplete, binding: incompleteBinding, current: true });
   assert(incompleteRun.status === "blocked" && incompleteRun.operations.length === 0, "incomplete directory listing is not approved");
+
+  const reservedTarget = approvedPlan(fresh, freshBinding, [folder("CON.txt")], { "rechnung_a.txt": "CON.txt" });
+  const reservedRun = buildVirtualPlanDryRun({ plan: reservedTarget, scanResult: fresh, binding: freshBinding, current: true });
+  assert(reservedRun.status === "blocked", "new reserved target folder blocks dry-run execution");
+  assert(reservedRun.openRequirements.some((entry) => entry.includes("reserviert") || entry.includes("ungültig") || entry.includes("CON.txt")), "reserved target is reported as invalid");
 }

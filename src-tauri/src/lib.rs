@@ -4,6 +4,7 @@ mod error;
 mod export;
 mod filter;
 mod model;
+mod paths;
 mod report;
 mod scan;
 mod state;

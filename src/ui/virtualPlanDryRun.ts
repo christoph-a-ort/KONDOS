@@ -3,6 +3,7 @@ import type { FsNode, ScanResult } from "../model";
 import { isDirectory } from "../model";
 import { normalizeVirtualPlanPath, type SnapshotBinding, type VirtualPlan } from "./virtualPlan";
 import { validateVirtualPlan } from "./virtualPlanEditor";
+import { isAllowedRelativePlanPath, isAllowedWindowsComponent } from "./windowsPathRules";
 
 export type DryRunOperationKind = "createVirtualFolder" | "moveFile" | "renameFile";
 export type DryRunStatus = "allowed" | "restricted" | "blocked";
@@ -16,7 +17,7 @@ export interface VirtualDryRunReport {
   status: DryRunStatus; operations: VirtualDryRunOperation[]; folderCount: number; fileOperationCount: number;
   unchangedFileCount: number; blockedOperationCount: number; openRequirements: string[]; warnings: string[];
 }
-const invalidName = (name: string) => !name || name === "." || name === ".." || /[\\/:*?"<>|]/.test(name) || /[. ]$/.test(name) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name);
+const invalidName = (name: string) => !isAllowedWindowsComponent(name);
 const join = (left: string, right: string) => left === "." ? right : `${left}/${right}`;
 const parent = (path: string) => path.includes("/") ? path.slice(0, path.lastIndexOf("/")) || "." : ".";
 const base = (path: string) => path.slice(path.lastIndexOf("/") + 1);
@@ -78,7 +79,7 @@ export function buildVirtualPlanDryRun(options: { plan: VirtualPlan; scanResult:
   const identityBlockers: string[] = [];
   for (const folder of plan.virtualFolders ?? []) {
     const path = join(folder.parentVirtualPath, folder.name);
-    if (invalidName(folder.name) || path.includes("..") || path.startsWith("/")) {
+    if (invalidName(folder.name) || !isAllowedRelativePlanPath(path) || path.includes("..") || path.startsWith("/")) {
       blockers.push(`Ungültiger virtueller Zielordner: ${path}`);
       continue;
     }
@@ -100,7 +101,7 @@ export function buildVirtualPlanDryRun(options: { plan: VirtualPlan; scanResult:
     const source = item.observed.relativePath;
     const target = join(item.virtualTargetPath, item.virtualRename ?? base(source));
     if (target === source) continue;
-    if (target.includes("..") || target.startsWith("/") || invalidName(base(target))) { blockers.push(`Ungültiger Dateizielpfad: ${target}`); continue; }
+    if (target.includes("..") || target.startsWith("/") || invalidName(base(target)) || !isAllowedRelativePlanPath(target)) { blockers.push(`Ungültiger Dateizielpfad: ${target}`); continue; }
     const key = target.toLowerCase();
     if (targets.has(key)) { blockers.push(`Doppelter Dateizielpfad: ${target}`); continue; }
     targets.add(key);

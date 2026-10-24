@@ -7,6 +7,7 @@ use serde_json::{json, Map, Value};
 use tauri::{AppHandle, Manager, State};
 
 use crate::error::AppError;
+use crate::paths::windows_rules::{execution_path_looks_unsafe, is_allowed_windows_component};
 use crate::scan::must_not_follow;
 use crate::state::AppState;
 
@@ -108,24 +109,15 @@ fn join_abs(scan_root: &str, relative: &str) -> String {
 }
 
 fn invalid_name(name: &str) -> bool {
-    if name.is_empty() || name == "." || name == ".." {
-        return true;
-    }
-    if name.contains(['\\', '/', ':', '*', '?', '"', '<', '>', '|', '\0']) {
-        return true;
-    }
-    if name.ends_with('.') || name.ends_with(' ') {
-        return true;
-    }
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "con" | "prn" | "aux" | "nul"
-            | "com1" | "com2" | "com3" | "com4" | "com5" | "com6" | "com7" | "com8" | "com9"
-            | "lpt1" | "lpt2" | "lpt3" | "lpt4" | "lpt5" | "lpt6" | "lpt7" | "lpt8" | "lpt9"
-    )
+    !is_allowed_windows_component(name)
 }
 
 fn relative_components(scan_root: &str, path: &str) -> Result<Vec<String>, AppError> {
+    if execution_path_looks_unsafe(scan_root) || execution_path_looks_unsafe(path) {
+        return Err(AppError::invalid_config(
+            "Quelle oder Ziel liegt außerhalb der Scanwurzel oder enthält einen unzulässigen Pfad.",
+        ));
+    }
     if path_has_parent_dir(scan_root) || path_has_parent_dir(path) {
         return Err(AppError::invalid_config(
             "Quelle oder Ziel liegt außerhalb der Scanwurzel oder enthält einen unzulässigen Pfad.",
@@ -1286,6 +1278,19 @@ mod tests {
             app, scan, "owner-a", "j1", expected, "op-file", kind, source, target, size, modified, confirm,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn reserved_and_device_names_are_rejected() {
+        assert!(invalid_name("CON.txt"));
+        assert!(invalid_name("COM0"));
+        assert!(invalid_name("LPT²"));
+        assert!(invalid_name("Datei.txt:$DATA"));
+        assert!(!invalid_name("COM10.txt"));
+        assert!(!invalid_name("Datei.con"));
+        assert!(relative_components("C:/scan", "C:/scan/CON.txt").is_err());
+        assert!(relative_components("C:/scan", "C:/scan/ok.txt").is_ok());
+        assert!(relative_components("C:/scan", r"\\?\NUL").is_err());
     }
 
     #[test]

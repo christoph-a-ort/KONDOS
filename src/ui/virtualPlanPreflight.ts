@@ -3,6 +3,7 @@ import type { VirtualPlan } from "./virtualPlan";
 import { normalizeVirtualPlanPath } from "./virtualPlan";
 import type { DryRunOperationKind, VirtualDryRunOperation } from "./virtualPlanDryRun";
 import type { BoundExecutionStatus } from "./virtualPlanJournal";
+import { executionPathLooksUnsafe } from "./windowsPathRules";
 
 export type PreflightStatus = "ready" | "readySimulated" | "blocked" | "unverifiable";
 export type PreflightOutcome = "pending" | "simulatedConfirmed" | "blocked" | "aborted" | "undoPreviewed";
@@ -204,7 +205,7 @@ function parentPath(path: string): string {
 }
 
 function pathLooksUnsafe(path: string): boolean {
-  return path.split(/[\\/]/).includes("..") || path.includes("\0");
+  return executionPathLooksUnsafe(path) || path.split(/[\\/]/).includes("..") || path.includes("\0");
 }
 
 export function operationKindLabel(kind: DryRunOperationKind): string {

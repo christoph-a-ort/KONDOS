@@ -15,6 +15,7 @@ import {
   type VirtualPlanItem,
 } from "./virtualPlan";
 import type { VirtualReorgProposal, VirtualPreviewEntry } from "./virtualPlanSuggestions";
+import { isAllowedWindowsComponent, isReservedDeviceStem } from "./windowsPathRules";
 
 export const VIRTUAL_PLAN_EDITOR_BUILDER_VERSION = 1 as const;
 
@@ -122,15 +123,11 @@ function withDecision(plan: VirtualPlan, decision: DecisionRecord): VirtualPlan 
 
 function validWindowsName(name: string): string | null {
   const trimmed = name.trim();
+  if (isAllowedWindowsComponent(trimmed)) return null;
   if (trimmed.length === 0) return "Der virtuelle Ordnername darf nicht leer sein.";
   if (trimmed === "." || trimmed === "..") return "Der virtuelle Ordnername ist ungültig.";
-  if (/[\\/:*?"<>|]/.test(trimmed) || /[. ]$/.test(trimmed)) {
-    return "Der virtuelle Ordnername enthält ungültige Windows-Zeichen oder endet mit Punkt/Leerzeichen.";
-  }
-  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(trimmed)) {
-    return "Der virtuelle Ordnername ist unter Windows reserviert.";
-  }
-  return null;
+  if (isReservedDeviceStem(trimmed)) return "Der virtuelle Ordnername ist unter Windows reserviert.";
+  return "Der virtuelle Ordnername enthält ungültige Windows-Zeichen oder endet mit Punkt/Leerzeichen.";
 }
 
 function bindingMatches(left: SnapshotBinding, right: SnapshotBinding): boolean {

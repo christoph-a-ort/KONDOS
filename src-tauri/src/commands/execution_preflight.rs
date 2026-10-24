@@ -7,6 +7,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
+use crate::paths::windows_rules::execution_path_looks_unsafe;
 use crate::scan::must_not_follow;
 
 use super::execution_binding::inspect_scan_root_at;
@@ -73,7 +74,7 @@ fn modified_ms(metadata: &fs::Metadata) -> Option<u64> {
 }
 
 fn observe(scan_root: &str, path: &str) -> PathObservation {
-    let within_root = within_scan_root(scan_root, path);
+    let within_root = within_scan_root(scan_root, path) && !execution_path_looks_unsafe(path);
     match fs::symlink_metadata(path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => PathObservation {
             exists: false,
