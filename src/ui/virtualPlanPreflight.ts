@@ -4,6 +4,9 @@ import { normalizeVirtualPlanPath } from "./virtualPlan";
 import type { DryRunOperationKind, VirtualDryRunOperation } from "./virtualPlanDryRun";
 import type { BoundExecutionStatus } from "./virtualPlanJournal";
 import { executionPathLooksUnsafe } from "./windowsPathRules";
+import {
+  evaluateNewTargetPathLength, lastTargetComponent, relativeTargetComponents, windowsTargetPath,
+} from "./windowsPathLengths";
 
 export type PreflightStatus = "ready" | "readySimulated" | "blocked" | "unverifiable";
 export type PreflightOutcome = "pending" | "simulatedConfirmed" | "blocked" | "aborted" | "undoPreviewed";
@@ -15,6 +18,7 @@ export interface PlannedOperationFacts {
   kind: string; bindingStatus: BoundExecutionStatus; bindingMessage: string;
   source: PathObservation; target: PathObservation;
   targetParentExists: boolean; targetParentIsDir: boolean; targetParentIsReparse: boolean;
+  maximumComponentLength: number | null;
   reminder: string;
 }
 export interface PreflightDecision {
@@ -64,6 +68,7 @@ export function createPreflightSession(operations: ReadonlyArray<VirtualDryRunOp
 export function evaluatePreflight(options: {
   operation: VirtualDryRunOperation;
   facts: PlannedOperationFacts;
+  scanRoot?: string;
   expectedSizeBytes?: number;
   expectedModifiedAtMs?: number;
   simulatedFolderTargets: ReadonlyArray<string>;
@@ -89,12 +94,17 @@ export function evaluatePreflight(options: {
     if (!facts.targetParentExists) {
       const simulatedParent = options.simulatedFolderTargets.some((path) => normalizeVirtualPlanPath(path) === parentPath(operation.targetPath));
       if (simulatedParent) {
-        return { status: "readySimulated", reason: "Elternordner existiert real noch nicht; nur simuliert vorgemerkt. Keine echte Anlage.", canConfirm: true, halt: false };
+        return withTargetLengthGate(options, {
+          status: "readySimulated",
+          reason: "Elternordner existiert real noch nicht; nur simuliert vorgemerkt. Keine echte Anlage.",
+          canConfirm: true,
+          halt: false,
+        });
       }
       return { status: "blocked", reason: "Der Elternordner des Ziels existiert nicht.", canConfirm: false, halt: true };
     }
     if (!facts.targetParentIsDir) return { status: "blocked", reason: "Der Elternpfad ist kein Ordner.", canConfirm: false, halt: true };
-    return { status: "ready", reason: "Read-only-Prüfung erfolgreich. Noch keine Dateioperation.", canConfirm: true, halt: false };
+    return withTargetLengthGate(options, { status: "ready", reason: "Read-only-Prüfung erfolgreich. Noch keine Dateioperation.", canConfirm: true, halt: false });
   }
   if (!facts.source.exists) return { status: "blocked", reason: "Die erwartete Quelldatei fehlt.", canConfirm: false, halt: true };
   if (facts.source.isDir || !facts.source.isFile) return { status: "blocked", reason: "Die Quelle ist keine reguläre Datei. Ordner dürfen nicht verschoben oder umbenannt werden.", canConfirm: false, halt: true };
@@ -102,7 +112,12 @@ export function evaluatePreflight(options: {
   if (!facts.targetParentExists) {
     const simulatedParent = options.simulatedFolderTargets.some((path) => normalizeVirtualPlanPath(path) === parentPath(operation.targetPath));
     if (simulatedParent) {
-      return { status: "readySimulated", reason: "Zielordner existiert real noch nicht; nur simuliert vorgemerkt. Keine echte Verschiebung.", canConfirm: true, halt: false };
+      return withTargetLengthGate(options, {
+        status: "readySimulated",
+        reason: "Zielordner existiert real noch nicht; nur simuliert vorgemerkt. Keine echte Verschiebung.",
+        canConfirm: true,
+        halt: false,
+      });
     }
     return { status: "blocked", reason: "Der Zielordner existiert nicht.", canConfirm: false, halt: true };
   }
@@ -120,7 +135,7 @@ export function evaluatePreflight(options: {
   if (facts.source.modifiedAtMs !== null && facts.source.modifiedAtMs !== options.expectedModifiedAtMs) {
     return { status: "blocked", reason: "Die Quelldatei hat sich seit der Planung verändert. Ablauf angehalten.", canConfirm: false, halt: true };
   }
-  return { status: "ready", reason: "Read-only-Prüfung erfolgreich. Noch keine Dateioperation.", canConfirm: true, halt: false };
+  return withTargetLengthGate(options, { status: "ready", reason: "Read-only-Prüfung erfolgreich. Noch keine Dateioperation.", canConfirm: true, halt: false });
 }
 
 export function applyPreflightDecision(session: PreflightSession, operationId: string, decision: PreflightDecision): PreflightSession {
@@ -196,6 +211,36 @@ export function missingRealMoveFingerprintReason(
 
 export function simulatedFolderTargets(operations: ReadonlyArray<VirtualDryRunOperation>, session: PreflightSession): string[] {
   return operations.filter((operation) => operation.kind === "createVirtualFolder" && session.outcomes[operation.id] === "simulatedConfirmed").map((operation) => operation.targetPath);
+}
+
+function withTargetLengthGate(
+  options: {
+    operation: VirtualDryRunOperation;
+    facts: PlannedOperationFacts;
+    scanRoot?: string;
+  },
+  decision: PreflightDecision,
+): PreflightDecision {
+  if (decision.status !== "ready" && decision.status !== "readySimulated") return decision;
+  const scanRoot = options.scanRoot?.trim() ?? "";
+  if (scanRoot.length === 0) {
+    return { status: "blocked", reason: "Die Scanwurzel für die Zielpfadlänge ist nicht sicher bestimmbar.", canConfirm: false, halt: true };
+  }
+  const last = lastTargetComponent(options.operation.targetPath);
+  const newComponents = options.facts.targetParentExists
+    ? (last === null ? null : [last])
+    : relativeTargetComponents(options.operation.targetPath);
+  if (newComponents === null || newComponents.length === 0) {
+    return { status: "blocked", reason: "Neue Zielkomponenten sind nicht sicher bestimmbar.", canConfirm: false, halt: true };
+  }
+  const verdict = evaluateNewTargetPathLength(windowsTargetPath(scanRoot, options.operation.targetPath), newComponents, {
+    filesystemComponentLimit: options.facts.maximumComponentLength,
+    requireKnownVolumeLimit: decision.status === "ready",
+  });
+  if (!verdict.ok) {
+    return { status: "blocked", reason: verdict.reason ?? "Der Zielpfad überschreitet die zulässige Windows-Pfadlänge.", canConfirm: false, halt: true };
+  }
+  return decision;
 }
 
 function parentPath(path: string): string {

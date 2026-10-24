@@ -7,6 +7,7 @@ use serde_json::{json, Map, Value};
 use tauri::{AppHandle, Manager, State};
 
 use crate::error::AppError;
+use crate::paths::windows_lengths::{maximum_component_length_for_path, target_length_blocks_real_operation};
 use crate::paths::windows_rules::{execution_path_looks_unsafe, is_allowed_windows_component};
 use crate::scan::must_not_follow;
 use crate::state::AppState;
@@ -110,6 +111,15 @@ fn join_abs(scan_root: &str, relative: &str) -> String {
 
 fn invalid_name(name: &str) -> bool {
     !is_allowed_windows_component(name)
+}
+
+fn last_relative_component(relative: &str) -> Option<String> {
+    relative
+        .replace('\\', "/")
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .last()
+        .map(str::to_string)
 }
 
 fn relative_components(scan_root: &str, path: &str) -> Result<Vec<String>, AppError> {
@@ -971,6 +981,21 @@ fn execute_move_file_locked(
     if let Err(block) = precheck_paths(scan_root, &source, &target) {
         return Ok(blocked_result(&source, &target, block.message(), empty_view()));
     }
+    let Some(new_name) = last_relative_component(target_rel) else {
+        return Ok(blocked_result(
+            &source,
+            &target,
+            "Neue Zielkomponenten sind nicht sicher bestimmbar.",
+            empty_view(),
+        ));
+    };
+    if let Some(reason) = target_length_blocks_real_operation(
+        &target,
+        &[new_name.as_str()],
+        maximum_component_length_for_path(scan_root),
+    ) {
+        return Ok(blocked_result(&source, &target, reason, empty_view()));
+    }
 
     let intent_json = std::cell::RefCell::new(existing.clone());
     let intent_written = std::cell::Cell::new(false);
@@ -1282,6 +1307,13 @@ mod tests {
 
     #[test]
     fn reserved_and_device_names_are_rejected() {
+        assert_eq!(last_relative_component("Projekte/2026/file.txt").as_deref(), Some("file.txt"));
+        assert!(target_length_blocks_real_operation(
+            &format!("C:/{}", "A".repeat(257)),
+            &[&"A".repeat(257)],
+            Some(255)
+        )
+        .is_some());
         assert!(invalid_name("CON.txt"));
         assert!(invalid_name("COM0"));
         assert!(invalid_name("LPT²"));

@@ -167,7 +167,7 @@ export function VirtualPlanExecutionPanel({ plan, scanResult, binding, current }
       const sourcePath = isRealFolderCreateKind(next.kind) ? scanRoot : confirmedSourcePath(scanRoot, next);
       const facts = await inspectPlannedOperation(scanRoot, next.kind, sourcePath, confirmedTargetPath(scanRoot, next));
       const meta = isRealFileMoveKind(next.kind) ? expectedMetadata(plan, next) : {};
-      setDecision(evaluatePreflight({ operation: next, facts, simulatedFolderTargets: [], ...meta }));
+      setDecision(evaluatePreflight({ operation: next, facts, scanRoot, simulatedFolderTargets: [], ...meta }));
     } catch (cause) {
       setDecision(null);
       setNotice(toUserError(cause));

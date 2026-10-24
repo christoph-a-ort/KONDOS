@@ -140,6 +140,7 @@ export function runScanIdentityMetadataCheck(): void {
     targetParentExists: true,
     targetParentIsDir: true,
     targetParentIsReparse: false,
+    maximumComponentLength: 255,
     reminder: "erneut",
   };
   const blocked = evaluatePreflight({

@@ -91,7 +91,7 @@ export function VirtualPlanPreflightPanel({ plan, scanResult, binding, current }
         absoluteScanPath(scanRoot, operation.targetPath),
       );
       const nextDecision = evaluatePreflight({
-        operation, facts, simulatedFolderTargets: simulatedFolderTargets(operations, active),
+        operation, facts, scanRoot, simulatedFolderTargets: simulatedFolderTargets(operations, active),
         ...expectedMetadata(plan, operation),
       });
       const halted = applyPreflightDecision(active, operation.id, nextDecision);

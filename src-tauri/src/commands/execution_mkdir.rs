@@ -7,6 +7,7 @@ use serde_json::{json, Map, Value};
 use tauri::{AppHandle, Manager, State};
 
 use crate::error::AppError;
+use crate::paths::windows_lengths::{maximum_component_length_for_path, target_length_blocks_real_operation};
 use crate::paths::windows_rules::{execution_path_looks_unsafe, is_allowed_windows_component};
 use crate::scan::must_not_follow;
 use crate::state::AppState;
@@ -108,6 +109,15 @@ fn join_abs(scan_root: &str, relative: &str) -> String {
 
 fn invalid_folder_name(name: &str) -> bool {
     !is_allowed_windows_component(name)
+}
+
+fn last_relative_component(relative: &str) -> Option<String> {
+    relative
+        .replace('\\', "/")
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .last()
+        .map(str::to_string)
 }
 
 fn relative_components(scan_root: &str, target: &str) -> Result<Vec<String>, AppError> {
@@ -655,6 +665,20 @@ fn execute_create_folder_locked(
     if let Err(block) = precheck_target(scan_root, &target, &components) {
         return Ok(blocked_result(&target, block.message(), empty_view()));
     }
+    let Some(new_name) = last_relative_component(relative) else {
+        return Ok(blocked_result(
+            &target,
+            "Neue Zielkomponenten sind nicht sicher bestimmbar.",
+            empty_view(),
+        ));
+    };
+    if let Some(reason) = target_length_blocks_real_operation(
+        &target,
+        &[new_name.as_str()],
+        maximum_component_length_for_path(scan_root),
+    ) {
+        return Ok(blocked_result(&target, reason, empty_view()));
+    }
 
     let intent = with_progress(
         &existing,
@@ -912,6 +936,16 @@ mod tests {
 
     #[test]
     fn reserved_and_device_target_names_are_rejected() {
+        assert_eq!(
+            last_relative_component("Projekte/2026/Rechnungen").as_deref(),
+            Some("Rechnungen")
+        );
+        assert!(target_length_blocks_real_operation(
+            &format!("C:/{}", "A".repeat(257)),
+            &[&"A".repeat(257)],
+            Some(255)
+        )
+        .is_some());
         assert!(invalid_folder_name("CON.txt"));
         assert!(invalid_folder_name("COM0"));
         assert!(invalid_folder_name("COM¹"));

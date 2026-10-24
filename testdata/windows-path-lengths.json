@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "limits": {
+    "maxAbsoluteUtf16": 259,
+    "nulIncludedMax": 260,
+    "conservativeComponentUtf16": 255
+  },
+  "recipes": [
+    {
+      "id": "A-total-258",
+      "root": "C:\\",
+      "sizes": [127, 127],
+      "totalAllowed": true,
+      "componentAllowed": true
+    },
+    {
+      "id": "B-total-259",
+      "root": "C:\\",
+      "sizes": [127, 128],
+      "totalAllowed": true,
+      "componentAllowed": true
+    },
+    {
+      "id": "C-total-260",
+      "root": "C:\\",
+      "sizes": [127, 129],
+      "totalAllowed": false,
+      "componentAllowed": true
+    },
+    {
+      "id": "D-total-261",
+      "root": "C:\\",
+      "sizes": [128, 129],
+      "totalAllowed": false,
+      "componentAllowed": true
+    },
+    {
+      "id": "H-long-root-short-rel",
+      "root": "C:\\AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "sizes": [8],
+      "totalAllowed": true,
+      "componentAllowed": true
+    },
+    {
+      "id": "I-short-root-long-rel",
+      "root": "C:\\",
+      "sizes": [120, 120],
+      "totalAllowed": true,
+      "componentAllowed": true
+    },
+    {
+      "id": "J-component-255",
+      "root": "C:\\",
+      "sizes": [255],
+      "totalAllowed": true,
+      "componentAllowed": true
+    },
+    {
+      "id": "K-component-256",
+      "root": "C:\\",
+      "sizes": [256],
+      "totalAllowed": true,
+      "componentAllowed": false
+    },
+    {
+      "id": "L-total-ok-component-bad",
+      "root": "C:\\",
+      "sizes": [256],
+      "totalAllowed": true,
+      "componentAllowed": false
+    },
+    {
+      "id": "M-total-bad-components-ok",
+      "root": "C:\\",
+      "sizes": [128, 128],
+      "totalAllowed": false,
+      "componentAllowed": true
+    },
+    {
+      "id": "O-new-target-too-long",
+      "root": "C:\\Dotty-Test",
+      "sizes": [120, 126],
+      "totalAllowed": false,
+      "componentAllowed": true
+    }
+  ],
+  "literals": [
+    {
+      "id": "E-bmp",
+      "absolute": "C:\\Ordner\\Änderung.pdf",
+      "expectedUtf16": 22,
+      "totalAllowed": true
+    },
+    {
+      "id": "F-emoji",
+      "absolute": "C:\\Ordner\\📁.txt",
+      "expectedUtf16": 16,
+      "totalAllowed": true
+    },
+    {
+      "id": "G-emoji-vs-visible",
+      "absolute": "C:\\📁",
+      "expectedUtf16": 5,
+      "totalAllowed": true
+    },
+    {
+      "id": "Q-reserved-still-invalid",
+      "absolute": "C:\\Ordner\\CON.txt",
+      "expectedUtf16": 17,
+      "totalAllowed": true
+    },
+    {
+      "id": "S-short-ok",
+      "absolute": "C:\\Ordner\\Datei.txt",
+      "expectedUtf16": 19,
+      "totalAllowed": true
+    },
+    {
+      "id": "N-long-existing-source",
+      "absolute": "C:\\Existing\\AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\\file.txt",
+      "expectedUtf16": 221,
+      "totalAllowed": true
+    },
+    {
+      "id": "R-unc-length-ok-not-execute-grant",
+      "absolute": "\\\\server\\share\\Ordner\\Datei.txt",
+      "expectedUtf16": 31,
+      "totalAllowed": true,
+      "grantsRealExecution": false
+    }
+  ],
+  "unknownLimit": [
+    {
+      "id": "P-unknown-volume-limit",
+      "absolute": "C:\\Ordner\\Datei.txt",
+      "newComponents": ["Datei.txt"],
+      "expectedOk": false
+    }
+  ]
+}

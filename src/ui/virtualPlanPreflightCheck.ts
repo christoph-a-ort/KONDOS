@@ -23,6 +23,7 @@ function facts(overrides: Partial<PlannedOperationFacts> = {}): PlannedOperation
     source: observation(),
     target: observation({ exists: false, isFile: false, sizeBytes: null, modifiedAtMs: null }),
     targetParentExists: true, targetParentIsDir: true, targetParentIsReparse: false,
+    maximumComponentLength: 255,
     reminder: "erneut", ...overrides,
   };
 }
@@ -44,7 +45,7 @@ export function runVirtualPlanPreflightCheck(): void {
   assert(preflightStatusLabel("blocked") === "Blockiert", "blocked label");
   assert(preflightStatusLabel("unverifiable") === "Nicht sicher verifizierbar", "unverifiable label");
   const move = fileOp("op1");
-  const complete = { expectedSizeBytes: 5, expectedModifiedAtMs: 100, simulatedFolderTargets: [] as string[] };
+  const complete = { scanRoot: "C:\\Fixture", expectedSizeBytes: 5, expectedModifiedAtMs: 100, simulatedFolderTargets: [] as string[] };
   assert(evaluatePreflight({ operation: move, facts: facts(), ...complete }).status === "ready" && evaluatePreflight({ operation: move, facts: facts(), ...complete }).canConfirm, "valid file operation");
   assert(evaluatePreflight({ operation: move, facts: facts({ source: observation({ exists: false }) }), expectedSizeBytes: 5, simulatedFolderTargets: [] }).reason.includes("fehlt"), "missing source");
   assert(evaluatePreflight({ operation: move, facts: facts({ target: observation() }), expectedSizeBytes: 5, simulatedFolderTargets: [] }).reason.includes("belegt"), "existing target");

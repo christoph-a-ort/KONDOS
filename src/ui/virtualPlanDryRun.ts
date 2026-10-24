@@ -4,6 +4,9 @@ import { isDirectory } from "../model";
 import { normalizeVirtualPlanPath, type SnapshotBinding, type VirtualPlan } from "./virtualPlan";
 import { validateVirtualPlan } from "./virtualPlanEditor";
 import { isAllowedRelativePlanPath, isAllowedWindowsComponent } from "./windowsPathRules";
+import {
+  evaluateNewTargetPathLength, newComponentsRelativeToExisting, windowsTargetPath,
+} from "./windowsPathLengths";
 
 export type DryRunOperationKind = "createVirtualFolder" | "moveFile" | "renameFile";
 export type DryRunStatus = "allowed" | "restricted" | "blocked";
@@ -109,6 +112,29 @@ export function buildVirtualPlanDryRun(options: { plan: VirtualPlan; scanResult:
     operations.push({ id: `dry-file-${item.id}`, kind, objectId: item.observed.nodeId, sourcePath: source, targetPath: target, expectedSource: `Scan-lokale Identität; Größe ${item.observed.metadata.sizeBytes ?? "unbekannt"}.`, preconditions: ["Quelle muss später unverändert und kein Reparse-Point sein.", "Ziel darf später nicht existieren.", "Gleiches Laufwerk, Berechtigung und Zielordner später prüfen."], expectedTarget: "Nicht vorhandene Datei am virtuellen Zielpfad", collisionStatus: "notDecidableFromSnapshot", checkStatus: "mustCheckAtExecution", rationale: kind === "moveFile" ? "Virtuelle Zuordnung in einen anderen Zielordner." : "Virtuelle Umbenennung im selben Zielordner.", recovery: "Spätere Umkehrung ausschließlich aus dem Ausführungsjournal." });
   }
   const sorted = operations.sort((a, b) => (a.kind === "createVirtualFolder" ? 0 : 1) - (b.kind === "createVirtualFolder" ? 0 : 1) || a.targetPath.localeCompare(b.targetPath));
+  const scanRoot = scanResult.root.path;
+  if (scanRoot.trim().length === 0) {
+    blockers.push("Die Scanwurzel für die Zielpfadlänge ist nicht sicher bestimmbar.");
+  } else {
+    for (const operation of sorted) {
+      const created = newComponentsRelativeToExisting(operation.targetPath, (relativePath) => {
+        const existing = existingDirectoryInSnapshot(snapshotIndex, relativePath);
+        if (existing === "blocked") return null;
+        return existing === "existingDirectory";
+      });
+      if (created === null) {
+        blockers.push(`Neue Zielkomponenten für „${operation.targetPath}“ sind nicht sicher bestimmbar.`);
+        continue;
+      }
+      const verdict = evaluateNewTargetPathLength(windowsTargetPath(scanRoot, operation.targetPath), created, {
+        filesystemComponentLimit: null,
+        requireKnownVolumeLimit: false,
+      });
+      if (!verdict.ok) {
+        blockers.push(verdict.reason ?? `Der Zielpfad „${operation.targetPath}“ überschreitet die zulässige Windows-Pfadlänge.`);
+      }
+    }
+  }
   if (blockers.length > 0) return { status: "blocked", operations: sorted, folderCount: sorted.filter((entry) => entry.kind === "createVirtualFolder").length, fileOperationCount: sorted.filter((entry) => entry.kind !== "createVirtualFolder").length, unchangedFileCount: plan.items.filter((entry) => entry.observed.kind === "file").length - sorted.filter((entry) => entry.kind !== "createVirtualFolder").length, blockedOperationCount: blockers.length, openRequirements: [...new Set([...openRequirements, ...blockers])], warnings };
   warnings.push("OneDrive-, UNC-, Netzlaufwerk-, Reparse-Point-, Existenz- und Berechtigungsprüfung ist erst unmittelbar vor einer späteren Ausführung möglich.");
   return { status: "restricted", operations: sorted, folderCount: sorted.filter((entry) => entry.kind === "createVirtualFolder").length, fileOperationCount: sorted.filter((entry) => entry.kind !== "createVirtualFolder").length, unchangedFileCount: plan.items.filter((entry) => entry.observed.kind === "file").length - sorted.filter((entry) => entry.kind !== "createVirtualFolder").length, blockedOperationCount: 0, openRequirements, warnings };

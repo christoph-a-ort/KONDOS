@@ -7,6 +7,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
+use crate::paths::windows_lengths::maximum_component_length_for_path;
 use crate::paths::windows_rules::execution_path_looks_unsafe;
 use crate::scan::must_not_follow;
 
@@ -36,6 +37,7 @@ pub struct PlannedOperationFacts {
     pub target_parent_exists: bool,
     pub target_parent_is_dir: bool,
     pub target_parent_is_reparse: bool,
+    pub maximum_component_length: Option<u32>,
     pub reminder: String,
 }
 
@@ -143,6 +145,7 @@ pub(crate) fn collect_planned_operation_facts(
         target_parent_exists,
         target_parent_is_dir,
         target_parent_is_reparse,
+        maximum_component_length: maximum_component_length_for_path(scan_root),
         reminder: "Ein erfolgreiches Prüfungsergebnis ist keine Ausführungsfreigabe. Unmittelbar vor einer späteren echten Operation muss erneut geprüft werden.".to_string(),
     })
 }
@@ -205,6 +208,8 @@ mod tests {
         assert!(!facts.target.exists);
         assert!(facts.target_parent_exists && facts.target_parent_is_dir);
         assert_eq!(facts.source.size_bytes, Some(5));
+        assert!(facts.maximum_component_length.is_some(), "volume limit must be measured, not assumed");
+        assert_ne!(facts.maximum_component_length, Some(0));
         assert!(!target.exists());
         assert_eq!(fs::read(&source).unwrap(), before);
         let _ = fs::remove_dir_all(root);

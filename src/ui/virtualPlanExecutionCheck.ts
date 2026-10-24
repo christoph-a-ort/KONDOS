@@ -181,10 +181,11 @@ export function runVirtualPlanExecutionCheck(): void {
       exists: false, isFile: false, isDir: false, isReparse: false, readable: true, withinRoot: true,
       sizeBytes: null, modifiedAtMs: null,
     },
-    targetParentExists: true, targetParentIsDir: true, targetParentIsReparse: false, reminder: "erneut",
+    targetParentExists: true, targetParentIsDir: true, targetParentIsReparse: false,
+    maximumComponentLength: 255, reminder: "erneut",
   };
   const preflightReady = evaluatePreflight({
-    operation: moveOp("op-file"), facts, expectedSizeBytes: 12, expectedModifiedAtMs: 100, simulatedFolderTargets: [],
+    operation: moveOp("op-file"), facts, scanRoot: "C:\\Dotty-Test", expectedSizeBytes: 12, expectedModifiedAtMs: 100, simulatedFolderTargets: [],
   });
   assert(preflightReady.status === "ready" && preflightReady.canConfirm, "preflight with full fingerprint is ready");
   assert(hasCompleteFileFingerprint(12, 100), "full fingerprint is complete");
@@ -204,13 +205,13 @@ export function runVirtualPlanExecutionCheck(): void {
   assert(!readyMoveSubmit({ expectedSizeBytes: undefined }), "missing size fingerprint blocks move");
   assert(!readyMoveSubmit({ expectedModifiedAtMs: undefined }), "missing mtime fingerprint blocks move");
   const onlySize = evaluatePreflight({
-    operation: moveOp("op-file"), facts, expectedSizeBytes: 12, simulatedFolderTargets: [],
+    operation: moveOp("op-file"), facts, scanRoot: "C:\\Dotty-Test", expectedSizeBytes: 12, simulatedFolderTargets: [],
   });
   assert(onlySize.status === "unverifiable" && onlySize.reason.includes("Änderungszeit"), "preflight without mtime is not ready");
   assert(!readyMoveSubmit({ expectedModifiedAtMs: undefined, decisionStatus: onlySize.status }), "missing mtime cannot submit");
   assert((disableReason({ expectedModifiedAtMs: undefined, decision: onlySize }) ?? "").includes("Änderungszeit"), "UI names missing mtime");
   const onlyMtime = evaluatePreflight({
-    operation: moveOp("op-file"), facts, expectedModifiedAtMs: 100, simulatedFolderTargets: [],
+    operation: moveOp("op-file"), facts, scanRoot: "C:\\Dotty-Test", expectedModifiedAtMs: 100, simulatedFolderTargets: [],
   });
   assert(onlyMtime.status === "unverifiable" && onlyMtime.reason.includes("Dateigröße"), "preflight without size is not ready");
   assert(!readyMoveSubmit({ expectedSizeBytes: undefined, decisionStatus: onlyMtime.status }), "missing size cannot submit");
@@ -264,6 +265,7 @@ export function runVirtualPlanExecutionCheck(): void {
   const changedSource = evaluatePreflight({
     operation: moveOp("op-file"),
     facts: { ...facts, source: { ...facts.source, sizeBytes: 99 } },
+    scanRoot: "C:\\Dotty-Test",
     expectedSizeBytes: 12,
     expectedModifiedAtMs: 100,
     simulatedFolderTargets: [],
@@ -278,6 +280,7 @@ export function runVirtualPlanExecutionCheck(): void {
       ...facts,
       target: { ...facts.target, exists: true, isFile: true },
     },
+    scanRoot: "C:\\Dotty-Test",
     expectedSizeBytes: 12,
     expectedModifiedAtMs: 100,
     simulatedFolderTargets: [],
@@ -300,6 +303,7 @@ export function runVirtualPlanExecutionCheck(): void {
   const outside = evaluatePreflight({
     operation: moveOp("op-file"),
     facts: { ...facts, source: { ...facts.source, withinRoot: false } },
+    scanRoot: "C:\\Dotty-Test",
     expectedSizeBytes: 12,
     expectedModifiedAtMs: 100,
     simulatedFolderTargets: [],
