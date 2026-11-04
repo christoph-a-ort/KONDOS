@@ -24,6 +24,8 @@ function facts(overrides: Partial<PlannedOperationFacts> = {}): PlannedOperation
     target: observation({ exists: false, isFile: false, sizeBytes: null, modifiedAtMs: null }),
     targetParentExists: true, targetParentIsDir: true, targetParentIsReparse: false,
     maximumComponentLength: 255,
+    storageKind: "local",
+    storageMessage: null,
     reminder: "erneut", ...overrides,
   };
 }
@@ -62,6 +64,16 @@ export function runVirtualPlanPreflightCheck(): void {
   const missingMtime = evaluatePreflight({ operation: move, facts: facts(), expectedSizeBytes: 5, simulatedFolderTargets: [] });
   assert(missingMtime.status === "unverifiable" && !missingMtime.canConfirm && missingMtime.reason.includes("Änderungszeit"), "missing mtime is not ready");
   assert(evaluatePreflight({ operation: move, facts: facts({ bindingStatus: "inconsistent", bindingMessage: "unklar" }), expectedSizeBytes: 5, simulatedFolderTargets: [] }).halt, "inconsistent binding stops");
+  const remote = evaluatePreflight({ operation: move, facts: facts({ storageKind: "remote" }), ...complete });
+  assert(remote.status === "blocked" && remote.reason.includes("Netzwerkspeicherort") && !remote.canConfirm, "remote storage blocks preflight");
+  const unsupported = evaluatePreflight({ operation: move, facts: facts({ storageKind: "unsupported" }), ...complete });
+  assert(unsupported.status === "blocked" && unsupported.reason.includes("nicht unterstützt") && !unsupported.canConfirm, "unsupported storage blocks preflight");
+  const unverifiable = evaluatePreflight({ operation: move, facts: facts({ storageKind: "unverifiable" }), ...complete });
+  assert(unverifiable.status === "unverifiable" && !unverifiable.canConfirm, "unverifiable storage is not ready");
+  const unknownKind = evaluatePreflight({ operation: move, facts: facts({ storageKind: "LOCAL" }), ...complete });
+  assert(unknownKind.status === "unverifiable" && !unknownKind.canConfirm, "unknown storage kind is never local");
+  const emptyKind = evaluatePreflight({ operation: move, facts: facts({ storageKind: "" }), ...complete });
+  assert(emptyKind.status === "unverifiable" && emptyKind.reason.includes("nicht zuverlässig"), "empty storage kind is unverifiable");
 
   const operations = [fileOp("op1"), fileOp("op2")];
   let session = createPreflightSession(operations);

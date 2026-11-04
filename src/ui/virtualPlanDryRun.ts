@@ -10,7 +10,7 @@ import {
 } from "./windowsPathLengths";
 
 export type DryRunOperationKind = "createVirtualFolder" | "moveFile" | "renameFile";
-export type DryRunStatus = "allowed" | "restricted" | "blocked";
+export type DryRunStatus = "allowed" | "restricted" | "blocked" | "unverifiable";
 export type DryRunCheck = "snapshotVerified" | "notDecidableFromSnapshot" | "mustCheckAtExecution" | "blocked";
 export interface VirtualDryRunOperation {
   id: string; kind: DryRunOperationKind; objectId: string; sourcePath: string; targetPath: string;
@@ -20,6 +20,14 @@ export interface VirtualDryRunOperation {
 export interface VirtualDryRunReport {
   status: DryRunStatus; operations: VirtualDryRunOperation[]; folderCount: number; fileOperationCount: number;
   unchangedFileCount: number; blockedOperationCount: number; openRequirements: string[]; warnings: string[];
+  storageClassification?: "local" | "remote" | "unsupported" | "unverifiable";
+}
+
+export function dryRunStatusLabel(status: DryRunStatus): string {
+  if (status === "blocked") return "Blockiert";
+  if (status === "unverifiable") return "Nicht sicher verifizierbar";
+  if (status === "allowed") return "Zulässig";
+  return "Eingeschränkt – nur statisch geprüft";
 }
 const invalidName = (name: string) => !isAllowedWindowsComponent(name);
 const join = (left: string, right: string) => left === "." ? right : `${left}/${right}`;
@@ -145,6 +153,6 @@ export function buildVirtualPlanDryRun(options: { plan: VirtualPlan; scanResult:
     }
   }
   if (blockers.length > 0) return { status: "blocked", operations: sorted, folderCount: sorted.filter((entry) => entry.kind === "createVirtualFolder").length, fileOperationCount: sorted.filter((entry) => entry.kind !== "createVirtualFolder").length, unchangedFileCount: plan.items.filter((entry) => entry.observed.kind === "file").length - sorted.filter((entry) => entry.kind !== "createVirtualFolder").length, blockedOperationCount: blockers.length, openRequirements: [...new Set([...openRequirements, ...blockers])], warnings };
-  warnings.push("OneDrive-, UNC-, Netzlaufwerk-, Reparse-Point-, Existenz- und Berechtigungsprüfung ist erst unmittelbar vor einer späteren Ausführung möglich.");
+  warnings.push("Speicherort, Reparse-Point, Existenz und Berechtigungen werden vor einer echten Ausführung erneut geprüft.");
   return { status: "restricted", operations: sorted, folderCount: sorted.filter((entry) => entry.kind === "createVirtualFolder").length, fileOperationCount: sorted.filter((entry) => entry.kind !== "createVirtualFolder").length, unchangedFileCount: plan.items.filter((entry) => entry.observed.kind === "file").length - sorted.filter((entry) => entry.kind !== "createVirtualFolder").length, blockedOperationCount: 0, openRequirements, warnings };
 }

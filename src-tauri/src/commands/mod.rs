@@ -9,6 +9,7 @@ pub mod virtual_plan;
 pub mod execution_journal;
 pub mod execution_binding;
 pub mod execution_preflight;
+pub mod execution_storage;
 pub mod execution_test_root;
 pub mod execution_mkdir;
 pub mod execution_move;
@@ -29,6 +30,7 @@ pub use execution_binding::{
     release_bound_execution, start_bound_execution,
 };
 pub use execution_preflight::inspect_planned_operation;
+pub use execution_storage::{inspect_storage_kind, inspect_storage_kinds};
 pub use execution_test_root::{approve_test_scan_root, inspect_test_scan_root};
 pub use execution_mkdir::execute_create_folder;
 pub use execution_move::execute_move_file;

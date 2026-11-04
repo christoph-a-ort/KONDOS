@@ -3,6 +3,8 @@ import type { ScanResult } from "../model";
 import { toUserError } from "../scan";
 import type { SnapshotBinding, VirtualPlan } from "./virtualPlan";
 import { buildVirtualPlanDryRun } from "./virtualPlanDryRun";
+import { classifyDryRunReportStorage } from "./windowsStorageApi";
+import { storageAllowsJournal, storageKindReason } from "./windowsStorage";
 import {
   inspectBoundExecution, prepareBoundRelease, progressBoundExecution,
   releaseBoundExecution, startBoundExecution, type BoundExecutionView,
@@ -91,9 +93,18 @@ export function VirtualPlanJournalPanel({ plan, scanResult, binding, current }: 
     const payload = journalForBoundWrite(next, view.journalRevision, "reserved");
     await persist((expected, journalJson) => progressBoundExecution(scanRoot, payload.ownerRunId, payload.journalId, expected, journalJson), payload, view.journalRevision);
   };
-  const prepare = () => {
+  const prepare = async () => {
     if (plan === null || locked || (view !== null && bindingBlocksNewRun(view.status))) return;
-    const report = buildVirtualPlanDryRun({ plan, scanResult, binding, current });
+    const report = await classifyDryRunReportStorage(
+      scanResult.root.path,
+      scanResult,
+      buildVirtualPlanDryRun({ plan, scanResult, binding, current }),
+    );
+    if (!storageAllowsJournal(report)) {
+      setJournal(null);
+      setNotice(storageKindReason(report.storageClassification ?? "unverifiable") ?? "Das Journal konnte nicht vorbereitet werden.");
+      return;
+    }
     try { setJournal(createVirtualPlanJournal(plan, binding, report)); setNotice("Journal lokal vorbereitet. Start erst nach Rust-Sicherheitsprüfung."); }
     catch { setJournal(null); setNotice("Das Journal konnte nicht vorbereitet werden."); }
   };
@@ -121,7 +132,7 @@ export function VirtualPlanJournalPanel({ plan, scanResult, binding, current }: 
     <p className="muted">Nur Simulation – keine Änderung an Dateien oder Ordnern.</p>
     {view !== null ? <p><strong>Kopplung: {bindingLabel(view.status)}</strong></p> : null}
     {notice !== null ? <p className="plan-journal-note">{notice}</p> : null}
-    <button type="button" disabled={!available || busy || locked || (view !== null && bindingBlocksNewRun(view.status))} onClick={prepare}>Simulation vorbereiten</button>
+    <button type="button" disabled={!available || busy || locked || (view !== null && bindingBlocksNewRun(view.status))} onClick={() => { void prepare(); }}>Simulation vorbereiten</button>
     {!available ? <p className="muted">Nur für einen aktuellen virtuell bestätigten Plan verfügbar.</p> : null}
     {locked ? <p className="plan-journal-note">Keine neue Simulation, keine Fortschreibung und keine Freigabe, solange der Zustand unklar oder beschädigt ist.</p> : null}
     {journal !== null ? <div className="plan-journal-body">

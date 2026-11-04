@@ -182,7 +182,7 @@ export function runVirtualPlanExecutionCheck(): void {
       sizeBytes: null, modifiedAtMs: null,
     },
     targetParentExists: true, targetParentIsDir: true, targetParentIsReparse: false,
-    maximumComponentLength: 255, reminder: "erneut",
+    maximumComponentLength: 255, storageKind: "local", storageMessage: null, reminder: "erneut",
   };
   const preflightReady = evaluatePreflight({
     operation: moveOp("op-file"), facts, scanRoot: "C:\\Dotty-Test", expectedSizeBytes: 12, expectedModifiedAtMs: 100, simulatedFolderTargets: [],

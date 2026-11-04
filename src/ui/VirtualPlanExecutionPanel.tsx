@@ -3,6 +3,8 @@ import type { ScanResult } from "../model";
 import { toUserError } from "../scan";
 import type { SnapshotBinding, VirtualPlan } from "./virtualPlan";
 import { buildVirtualPlanDryRun } from "./virtualPlanDryRun";
+import { classifyDryRunReportStorage } from "./windowsStorageApi";
+import { storageAllowsJournal, storageKindReason } from "./windowsStorage";
 import {
   inspectBoundExecution, startBoundExecution, type BoundExecutionView,
 } from "./virtualPlanJournalApi";
@@ -117,9 +119,13 @@ export function VirtualPlanExecutionPanel({ plan, scanResult, binding, current }
     if (plan === null || !canPrepare || locked || busy) return;
     if (view !== null && bindingBlocksNewRun(view.status) && journal === null) return;
     if (journal !== null && view !== null && view.status === "reserved") return;
-    const dryRun = buildVirtualPlanDryRun({ plan, scanResult, binding, current });
-    if (dryRun.status !== "restricted") {
-      setNotice("Reservierung nicht möglich: Dry-Run ist nicht freigabefähig.");
+    const dryRun = await classifyDryRunReportStorage(
+      scanResult.root.path,
+      scanResult,
+      buildVirtualPlanDryRun({ plan, scanResult, binding, current }),
+    );
+    if (!storageAllowsJournal(dryRun)) {
+      setNotice(storageKindReason(dryRun.storageClassification ?? "unverifiable") ?? "Reservierung nicht möglich: Dry-Run ist nicht freigabefähig.");
       return;
     }
     const gap = missingRealMoveFingerprintReason(plan, dryRun.operations);

@@ -3343,7 +3343,7 @@ button:disabled {
 }
 .plan-dry-run > summary, .plan-dry-run-report summary { cursor: pointer; color: #344352; font-weight: 600; }
 .plan-dry-run-report { margin-top: 6px; padding: 6px; border: 1px solid #d5dbe3; border-radius: 4px; background: #fff; }
-.plan-dry-run-report.is-blocked { background: #f8f6f4; }
+.plan-dry-run-report.is-blocked, .plan-dry-run-report.is-unverifiable { background: #f8f6f4; }
 .plan-dry-run-operations {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 32rem), 1fr));

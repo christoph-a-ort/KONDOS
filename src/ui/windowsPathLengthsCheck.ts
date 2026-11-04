@@ -115,6 +115,8 @@ function facts(overrides: Partial<PlannedOperationFacts> = {}): PlannedOperation
     targetParentIsDir: true,
     targetParentIsReparse: false,
     maximumComponentLength: 255,
+    storageKind: "local",
+    storageMessage: null,
     reminder: "erneut",
     ...overrides,
   };

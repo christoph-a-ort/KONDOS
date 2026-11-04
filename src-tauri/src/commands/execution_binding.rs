@@ -222,6 +222,7 @@ pub(crate) fn start_bound_run_at(
 ) -> Result<(), AppError> {
     let _guard = acquire_at(app_data, scan_root)?;
     let binding = parse_journal_binding(journal_json, journal_id)?;
+    super::execution_storage::require_local_storage_for_journal_payload(scan_root, journal_json)?;
     if binding.scan_root != scan_root
         || binding.owner_run_id != owner
         || binding.status != "reserved"
@@ -306,6 +307,7 @@ pub(crate) fn progress_bound_run_locked(
     {
         return Err(AppError::invalid_config("Journal- und Reservierungsidentität stimmen nicht überein."));
     }
+    super::execution_storage::require_local_storage_for_journal_payload(scan_root, journal_json)?;
     save_at(
         &journal(&journal_store(app_data), journal_id)?,
         journal_id,
@@ -339,6 +341,7 @@ pub(crate) fn prepare_release_at(
     {
         return Err(AppError::invalid_config("Freigabevorbereitung ist unzulässig."));
     }
+    super::execution_storage::require_local_storage_for_journal_payload(scan_root, journal_json)?;
     save_at(
         &journal(&journal_store(app_data), journal_id)?,
         journal_id,
@@ -380,6 +383,7 @@ pub(crate) fn release_bound_run_at(
     if view.journal_revision != Some(expected_revision) {
         return Err(AppError::invalid_config("Ungültige Journalrevision."));
     }
+    super::execution_storage::require_local_storage_for_journal_payload(scan_root, released_journal_json)?;
     release_reservation_at(app_data, scan_root, owner, journal_id)?;
     if injected_fault("after-reservation-delete") {
         return Err(AppError::invalid_config("Simulierter Abbruch nach Reservierungslöschung."));
@@ -611,7 +615,7 @@ mod tests {
     use super::*;
     use std::fs;
     use std::io::Read;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::process::{Child, Command, Output, Stdio};
     use std::thread;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -666,16 +670,80 @@ mod tests {
         path
     }
 
+    fn scan_root(app: &Path) -> String {
+        app.to_string_lossy().replace('\\', "/")
+    }
+
     fn journal_json(id: &str, rev: u64, root: &str, owner: &str, status: &str) -> String {
         format!(
             r#"{{"schemaVersion":1,"journalId":"{id}","revision":{rev},"operations":[],"scanRoot":"{root}","ownerRunId":"{owner}","bindingStatus":"{status}"}}"#
         )
     }
 
+    fn journal_ops(
+        id: &str,
+        rev: u64,
+        root: &str,
+        owner: &str,
+        status: &str,
+        operations: serde_json::Value,
+        operation_status: serde_json::Value,
+    ) -> String {
+        serde_json::json!({
+            "schemaVersion": 1,
+            "journalId": id,
+            "revision": rev,
+            "operations": operations,
+            "scanRoot": root,
+            "ownerRunId": owner,
+            "bindingStatus": status,
+            "status": "prepared",
+            "operationStatus": operation_status,
+            "events": [],
+            "reason": null,
+        })
+        .to_string()
+    }
+
+    fn move_op(source: &str, target: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": "op-file",
+            "kind": "moveFile",
+            "objectId": "n1",
+            "sourcePath": source,
+            "targetPath": target,
+            "expectedSource": "s",
+            "preconditions": [],
+            "expectedTarget": "t",
+            "collisionStatus": "mustCheckAtExecution",
+            "checkStatus": "mustCheckAtExecution",
+            "rationale": "r",
+            "recovery": "later",
+        })
+    }
+
+    fn folder_op(target: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": "op-folder",
+            "kind": "createVirtualFolder",
+            "objectId": "vf1",
+            "sourcePath": ".",
+            "targetPath": target,
+            "expectedSource": "s",
+            "preconditions": [],
+            "expectedTarget": "t",
+            "collisionStatus": "mustCheckAtExecution",
+            "checkStatus": "mustCheckAtExecution",
+            "rationale": "r",
+            "recovery": "later",
+        })
+    }
+
     #[test]
     fn start_progress_and_release_succeed() {
         let app = dir();
-        let root = "C:/bind";
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
         start_bound_run_at(&app, root, "owner-a", "j1", 0, &journal_json("j1", 1, root, "owner-a", "reserved")).unwrap();
         let view = inspect_binding_at(&app, root, "j1").unwrap();
         assert_eq!(view.status, BindingStatus::Reserved);
@@ -690,7 +758,8 @@ mod tests {
     #[test]
     fn wrong_owner_journal_and_revision_are_rejected() {
         let app = dir();
-        let root = "C:/bind";
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
         start_bound_run_at(&app, root, "owner-a", "j1", 0, &journal_json("j1", 1, root, "owner-a", "reserved")).unwrap();
         assert!(progress_bound_run_at(&app, root, "owner-b", "j1", 1, &journal_json("j1", 2, root, "owner-b", "reserved")).is_err());
         assert!(progress_bound_run_at(&app, root, "owner-a", "j2", 1, &journal_json("j2", 2, root, "owner-a", "reserved")).is_err());
@@ -703,7 +772,8 @@ mod tests {
     #[test]
     fn foreign_or_corrupt_reservation_blocks() {
         let app = dir();
-        let root = "C:/bind";
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
         start_bound_run_at(&app, root, "owner-a", "j1", 0, &journal_json("j1", 1, root, "owner-a", "reserved")).unwrap();
         assert!(start_bound_run_at(&app, root, "owner-b", "j2", 0, &journal_json("j2", 1, root, "owner-b", "reserved")).is_err());
         fs::write(super::super::simulation_lock::reservation_file(&app, root).unwrap(), "{bad").unwrap();
@@ -716,7 +786,8 @@ mod tests {
     #[test]
     fn corrupt_journal_does_not_release_reservation() {
         let app = dir();
-        let root = "C:/bind";
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
         start_bound_run_at(&app, root, "owner-a", "j1", 0, &journal_json("j1", 1, root, "owner-a", "reserved")).unwrap();
         let journal_path = journal(&journal_store(&app), "j1").unwrap();
         fs::write(&journal_path, "{bad").unwrap();
@@ -728,7 +799,8 @@ mod tests {
     #[test]
     fn crash_between_writes_stays_fail_closed() {
         let app = dir();
-        let root = "C:/bind";
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
         set_bind_fault(Some("after-reserve"));
         assert!(start_bound_run_at(&app, root, "owner-a", "j1", 0, &journal_json("j1", 1, root, "owner-a", "reserved")).is_err());
         set_bind_fault(None);
@@ -752,7 +824,8 @@ mod tests {
     #[test]
     fn restart_sees_reserved_state_without_auto_resume() {
         let app = dir();
-        let root = "C:/bind";
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
         start_bound_run_at(&app, root, "owner-a", "j1", 0, &journal_json("j1", 1, root, "owner-a", "reserved")).unwrap();
         let view = inspect_binding_at(&app, root, "j1").unwrap();
         assert_eq!(view.status, BindingStatus::Reserved);
@@ -800,7 +873,7 @@ mod tests {
                     ])
                     .env("DOTTY_BIND_HELPER", "1")
                     .env("DOTTY_BIND_DIR", &app)
-                    .env("DOTTY_BIND_ROOT", "C:/same")
+                    .env("DOTTY_BIND_ROOT", scan_root(&app))
                     .env("DOTTY_BIND_OWNER", owner)
                     .stdout(Stdio::piped())
                     .spawn()
@@ -817,14 +890,15 @@ mod tests {
             .collect();
         assert_eq!(results.iter().filter(|(_, line)| line.contains(":OK")).count(), 1);
         assert_eq!(results.iter().filter(|(_, line)| line.contains(":DENIED")).count(), 1);
-        assert_eq!(inspect_binding_at(&app, "C:/same", "journal").unwrap().status, BindingStatus::Reserved);
+        assert_eq!(inspect_binding_at(&app, &scan_root(&app), "journal").unwrap().status, BindingStatus::Reserved);
         let _ = fs::remove_dir_all(app);
     }
 
     #[test]
     fn inspect_scan_root_loads_reserved_journal_after_restart() {
         let app = dir();
-        let root = "C:/ui-root";
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
         start_bound_run_at(&app, root, "owner-a", "j1", 0, &journal_json("j1", 1, root, "owner-a", "reserved")).unwrap();
         let view = inspect_scan_root_at(&app, root).unwrap();
         assert_eq!(view.status, "reserved");
@@ -837,7 +911,8 @@ mod tests {
     #[test]
     fn inspect_scan_root_progress_conflict_and_release() {
         let app = dir();
-        let root = "C:/ui-root";
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
         start_bound_run_at(&app, root, "owner-a", "j1", 0, &journal_json("j1", 1, root, "owner-a", "reserved")).unwrap();
         progress_bound_run_at(&app, root, "owner-a", "j1", 1, &journal_json("j1", 2, root, "owner-a", "reserved")).unwrap();
         assert!(progress_bound_run_at(&app, root, "owner-a", "j1", 1, &journal_json("j1", 2, root, "owner-a", "reserved")).is_err());
@@ -854,7 +929,8 @@ mod tests {
     #[test]
     fn inspect_scan_root_blocks_foreign_corrupt_and_inconsistent() {
         let app = dir();
-        let root = "C:/ui-root";
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
         start_bound_run_at(&app, root, "owner-a", "j1", 0, &journal_json("j1", 1, root, "owner-a", "reserved")).unwrap();
         assert!(start_bound_run_at(&app, root, "owner-b", "j2", 0, &journal_json("j2", 1, root, "owner-b", "reserved")).is_err());
         let reserved = inspect_scan_root_at(&app, root).unwrap();
@@ -875,5 +951,393 @@ mod tests {
         assert!(blocked.journal_json.is_none());
         let _ = fs::remove_dir_all(app);
         let _ = fs::remove_dir_all(crash);
+    }
+
+    #[test]
+    fn remote_storage_cannot_create_bound_journal() {
+        let app = dir();
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
+        let _force = crate::paths::windows_storage::ForcedStorageKind::new(
+            crate::paths::windows_storage::StorageKind::Remote,
+        );
+        let result = start_bound_run_at(
+            &app,
+            &root,
+            "owner-a",
+            "j1",
+            0,
+            &journal_json("j1", 1, &root, "owner-a", "reserved"),
+        );
+        drop(_force);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("Netzwerk"));
+        assert!(journal(&journal_store(&app), "j1").unwrap().exists() == false);
+        let _ = fs::remove_dir_all(app);
+    }
+
+    #[test]
+    fn local_scan_root_and_local_operation_can_create_journal() {
+        let app = dir();
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
+        fs::write(app.join("a.txt"), b"hello").unwrap();
+        start_bound_run_at(
+            &app,
+            root,
+            "owner-a",
+            "j1",
+            0,
+            &journal_ops(
+                "j1",
+                1,
+                root,
+                "owner-a",
+                "reserved",
+                serde_json::json!([move_op("a.txt", "b.txt")]),
+                serde_json::json!({"op-file": "pending"}),
+            ),
+        )
+        .unwrap();
+        assert!(journal(&journal_store(&app), "j1").unwrap().exists());
+        let _ = fs::remove_dir_all(app);
+    }
+
+    #[test]
+    fn local_scan_root_with_unc_operation_creates_no_journal() {
+        let app = dir();
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
+        fs::write(app.join("a.txt"), b"hello").unwrap();
+        let result = start_bound_run_at(
+            &app,
+            root,
+            "owner-a",
+            "j1",
+            0,
+            &journal_ops(
+                "j1",
+                1,
+                root,
+                "owner-a",
+                "reserved",
+                serde_json::json!([move_op(r"\\server\share\a.txt", "b.txt")]),
+                serde_json::json!({"op-file": "pending"}),
+            ),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("Netzwerk"));
+        assert!(!journal(&journal_store(&app), "j1").unwrap().exists());
+        let _ = fs::remove_dir_all(app);
+    }
+
+    #[test]
+    fn mixed_local_and_remote_operations_block_whole_journal() {
+        let app = dir();
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
+        fs::write(app.join("a.txt"), b"hello").unwrap();
+        let local = move_op("a.txt", "b.txt");
+        let mut remote = move_op(r"\\server\share\remote.txt", "c.txt");
+        remote["id"] = serde_json::json!("op-remote");
+        let result = start_bound_run_at(
+            &app,
+            root,
+            "owner-a",
+            "j1",
+            0,
+            &journal_ops(
+                "j1",
+                1,
+                root,
+                "owner-a",
+                "reserved",
+                serde_json::json!([local, remote]),
+                serde_json::json!({"op-file": "pending", "op-remote": "pending"}),
+            ),
+        );
+        assert!(result.is_err());
+        assert!(!journal(&journal_store(&app), "j1").unwrap().exists());
+        let _ = fs::remove_dir_all(app);
+    }
+
+    #[test]
+    fn unsupported_operation_path_creates_no_journal() {
+        let app = dir();
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
+        let result = start_bound_run_at(
+            &app,
+            root,
+            "owner-a",
+            "j1",
+            0,
+            &journal_ops(
+                "j1",
+                1,
+                root,
+                "owner-a",
+                "reserved",
+                serde_json::json!([move_op(r"\\.\C:", "b.txt")]),
+                serde_json::json!({"op-file": "pending"}),
+            ),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("nicht unterstützt"));
+        assert!(!journal(&journal_store(&app), "j1").unwrap().exists());
+        let _ = fs::remove_dir_all(app);
+    }
+
+    #[test]
+    fn unverifiable_operation_path_creates_no_journal() {
+        let app = dir();
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
+        let result = start_bound_run_at(
+            &app,
+            root,
+            "owner-a",
+            "j1",
+            0,
+            &journal_ops(
+                "j1",
+                1,
+                root,
+                "owner-a",
+                "reserved",
+                serde_json::json!([move_op(r"..\Windows\a.txt", "b.txt")]),
+                serde_json::json!({"op-file": "pending"}),
+            ),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("nicht zuverlässig"));
+        assert!(!journal(&journal_store(&app), "j1").unwrap().exists());
+        let _ = fs::remove_dir_all(app);
+    }
+
+    #[test]
+    fn missing_or_invalid_path_fields_are_not_local() {
+        let app = dir();
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
+        let mut incomplete = move_op("a.txt", "b.txt");
+        incomplete.as_object_mut().unwrap().remove("sourcePath");
+        let result = start_bound_run_at(
+            &app,
+            root,
+            "owner-a",
+            "j1",
+            0,
+            &journal_ops(
+                "j1",
+                1,
+                root,
+                "owner-a",
+                "reserved",
+                serde_json::json!([incomplete]),
+                serde_json::json!({"op-file": "pending"}),
+            ),
+        );
+        assert!(result.is_err());
+        assert!(!journal(&journal_store(&app), "j1").unwrap().exists());
+        let missing_source = start_bound_run_at(
+            &app,
+            root,
+            "owner-a",
+            "j2",
+            0,
+            &journal_ops(
+                "j2",
+                1,
+                root,
+                "owner-a",
+                "reserved",
+                serde_json::json!([move_op("missing.txt", "b.txt")]),
+                serde_json::json!({"op-file": "pending"}),
+            ),
+        );
+        assert!(missing_source.is_err());
+        assert!(!journal(&journal_store(&app), "j2").unwrap().exists());
+        let _ = fs::remove_dir_all(app);
+    }
+
+    #[test]
+    fn missing_target_folder_with_local_parent_still_allows_journal() {
+        let app = dir();
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
+        start_bound_run_at(
+            &app,
+            root,
+            "owner-a",
+            "j1",
+            0,
+            &journal_ops(
+                "j1",
+                1,
+                root,
+                "owner-a",
+                "reserved",
+                serde_json::json!([folder_op("neu")]),
+                serde_json::json!({"op-folder": "pending"}),
+            ),
+        )
+        .unwrap();
+        assert!(!app.join("neu").exists());
+        assert!(journal(&journal_store(&app), "j1").unwrap().exists());
+        let _ = fs::remove_dir_all(app);
+    }
+
+    #[test]
+    fn progress_rejects_remote_injection_and_keeps_original_journal() {
+        let app = dir();
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
+        fs::write(app.join("a.txt"), b"hello").unwrap();
+        let original = journal_ops(
+            "j1",
+            1,
+            root,
+            "owner-a",
+            "reserved",
+            serde_json::json!([move_op("a.txt", "b.txt")]),
+            serde_json::json!({"op-file": "pending"}),
+        );
+        start_bound_run_at(&app, root, "owner-a", "j1", 0, &original).unwrap();
+        let before = fs::read_to_string(journal(&journal_store(&app), "j1").unwrap()).unwrap();
+        let injected = journal_ops(
+            "j1",
+            2,
+            root,
+            "owner-a",
+            "reserved",
+            serde_json::json!([move_op(r"\\server\share\a.txt", "b.txt")]),
+            serde_json::json!({"op-file": "pending"}),
+        );
+        let result = progress_bound_run_at(&app, root, "owner-a", "j1", 1, &injected);
+        assert!(result.is_err());
+        let after = fs::read_to_string(journal(&journal_store(&app), "j1").unwrap()).unwrap();
+        assert_eq!(before, after);
+        assert!(!after.contains(r"\\server\share"));
+        let _ = fs::remove_dir_all(app);
+    }
+
+    #[test]
+    fn release_paths_cannot_bypass_storage_check() {
+        let app = dir();
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
+        fs::write(app.join("a.txt"), b"hello").unwrap();
+        let original = journal_ops(
+            "j1",
+            1,
+            root,
+            "owner-a",
+            "reserved",
+            serde_json::json!([move_op("a.txt", "b.txt")]),
+            serde_json::json!({"op-file": "pending"}),
+        );
+        start_bound_run_at(&app, root, "owner-a", "j1", 0, &original).unwrap();
+        let before = fs::read_to_string(journal(&journal_store(&app), "j1").unwrap()).unwrap();
+        let prepare_injected = journal_ops(
+            "j1",
+            2,
+            root,
+            "owner-a",
+            "releasePrepared",
+            serde_json::json!([move_op(r"\\server\share\a.txt", "b.txt")]),
+            serde_json::json!({"op-file": "pending"}),
+        );
+        assert!(prepare_release_at(&app, root, "owner-a", "j1", 1, &prepare_injected).is_err());
+        assert_eq!(
+            fs::read_to_string(journal(&journal_store(&app), "j1").unwrap()).unwrap(),
+            before
+        );
+
+        prepare_release_at(
+            &app,
+            root,
+            "owner-a",
+            "j1",
+            1,
+            &journal_ops(
+                "j1",
+                2,
+                root,
+                "owner-a",
+                "releasePrepared",
+                serde_json::json!([move_op("a.txt", "b.txt")]),
+                serde_json::json!({"op-file": "pending"}),
+            ),
+        )
+        .unwrap();
+        let prepared = fs::read_to_string(journal(&journal_store(&app), "j1").unwrap()).unwrap();
+        let release_injected = journal_ops(
+            "j1",
+            3,
+            root,
+            "owner-a",
+            "released",
+            serde_json::json!([move_op(r"\\server\share\a.txt", "b.txt")]),
+            serde_json::json!({"op-file": "pending"}),
+        );
+        assert!(release_bound_run_at(&app, root, "owner-a", "j1", 2, &release_injected).is_err());
+        assert_eq!(
+            fs::read_to_string(journal(&journal_store(&app), "j1").unwrap()).unwrap(),
+            prepared
+        );
+        assert!(
+            inspect_binding_at(&app, root, "j1").unwrap().status == BindingStatus::ReleasePrepared
+        );
+        let _ = fs::remove_dir_all(app);
+    }
+
+    #[test]
+    fn progress_after_executed_move_allows_missing_original_source() {
+        let app = dir();
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
+        fs::create_dir(app.join("dest")).unwrap();
+        fs::write(app.join("a.txt"), b"hello").unwrap();
+        start_bound_run_at(
+            &app,
+            root,
+            "owner-a",
+            "j1",
+            0,
+            &journal_ops(
+                "j1",
+                1,
+                root,
+                "owner-a",
+                "reserved",
+                serde_json::json!([move_op("a.txt", "dest/a.txt")]),
+                serde_json::json!({"op-file": "pending"}),
+            ),
+        )
+        .unwrap();
+        fs::rename(app.join("a.txt"), app.join("dest").join("a.txt")).unwrap();
+        progress_bound_run_at(
+            &app,
+            root,
+            "owner-a",
+            "j1",
+            1,
+            &journal_ops(
+                "j1",
+                2,
+                root,
+                "owner-a",
+                "reserved",
+                serde_json::json!([move_op("a.txt", "dest/a.txt")]),
+                serde_json::json!({"op-file": "executed"}),
+            ),
+        )
+        .unwrap();
+        let stored = fs::read_to_string(journal(&journal_store(&app), "j1").unwrap()).unwrap();
+        assert!(stored.contains("\"executed\""));
+        assert!(!app.join("a.txt").exists());
+        assert!(app.join("dest").join("a.txt").exists());
+        let _ = fs::remove_dir_all(app);
     }
 }

@@ -4,6 +4,7 @@ import { isDirectory } from "../model";
 import { makeSnapshotBinding, type SnapshotBinding, type VirtualPlan, type VirtualPlanFolder, type VirtualPlanItem } from "./virtualPlan";
 import { createVirtualPlanJournal } from "./virtualPlanJournal";
 import { buildVirtualPlanDryRun } from "./virtualPlanDryRun";
+import { withLocalStorageClassification } from "./windowsStorage";
 
 function assert(value: boolean, label: string): void {
   if (!value) throw new Error(label);
@@ -134,7 +135,14 @@ export function runVirtualPlanDryRunCheck(): void {
   assert(existingRun.operations.filter((operation) => operation.kind === "moveFile").length === 1, "file move into existing directory is kept");
   assert(existingRun.operations[0]?.kind === "moveFile" && existingRun.operations[0]?.targetPath.replace(/\\/g, "/").toLowerCase().endsWith("probeordner/rechnung_a.txt"), "single move targets the existing directory path");
   assert(existingRun.folderCount === 0 && existingRun.fileOperationCount === 1, "counts match one move and no folder create");
-  const journal = createVirtualPlanJournal(existingPlan, existingBinding, existingRun);
+  let unclassifiedJournalBlocked = false;
+  try {
+    createVirtualPlanJournal(existingPlan, existingBinding, existingRun);
+  } catch {
+    unclassifiedJournalBlocked = true;
+  }
+  assert(unclassifiedJournalBlocked, "restricted dry-run without local storage classification cannot create a journal");
+  const journal = createVirtualPlanJournal(existingPlan, existingBinding, withLocalStorageClassification(existingRun));
   assert(journal.operations.length === 1 && journal.operations[0]?.kind === "moveFile", "bound journal receives only the file move");
 
   const fresh = withoutProbeordner();

@@ -48,6 +48,7 @@ const report: VirtualDryRunReport = {
   }],
   folderCount: 0, fileOperationCount: 1, unchangedFileCount: 0, blockedOperationCount: 0,
   openRequirements: [], warnings: [],
+  storageClassification: "local",
 };
 
 export function runVirtualPlanJournalCheck(): void {
@@ -60,6 +61,21 @@ export function runVirtualPlanJournalCheck(): void {
   };
   const prepared = createVirtualPlanJournal(plan, binding, report);
   assert(prepared.scanRoot === binding.normalizedRootPath, "prepared journal keeps scan root");
+  let remoteJournalBlocked = false;
+  try {
+    createVirtualPlanJournal(plan, binding, { ...report, storageClassification: "remote" });
+  } catch {
+    remoteJournalBlocked = true;
+  }
+  assert(remoteJournalBlocked, "remote storage classification cannot create a journal");
+  let missingKindBlocked = false;
+  try {
+    const { storageClassification: _ignored, ...withoutKind } = report;
+    createVirtualPlanJournal(plan, binding, withoutKind);
+  } catch {
+    missingKindBlocked = true;
+  }
+  assert(missingKindBlocked, "missing storage classification cannot create a journal");
   assert(prepared.bindingStatus === "reserved", "first persist state is reserved");
   assert(prepared.planRevision === 2 && prepared.revision === 1, "plan revision is independent from journal revision");
 

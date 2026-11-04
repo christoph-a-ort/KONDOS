@@ -7,6 +7,9 @@ import { executionPathLooksUnsafe } from "./windowsPathRules";
 import {
   evaluateNewTargetPathLength, lastTargetComponent, relativeTargetComponents, windowsTargetPath,
 } from "./windowsPathLengths";
+import {
+  parseStorageKind, STORAGE_REMOTE_REASON, STORAGE_UNSUPPORTED_REASON, STORAGE_UNVERIFIABLE_REASON,
+} from "./windowsStorage";
 
 export type PreflightStatus = "ready" | "readySimulated" | "blocked" | "unverifiable";
 export type PreflightOutcome = "pending" | "simulatedConfirmed" | "blocked" | "aborted" | "undoPreviewed";
@@ -19,6 +22,8 @@ export interface PlannedOperationFacts {
   source: PathObservation; target: PathObservation;
   targetParentExists: boolean; targetParentIsDir: boolean; targetParentIsReparse: boolean;
   maximumComponentLength: number | null;
+  storageKind: string;
+  storageMessage: string | null;
   reminder: string;
 }
 export interface PreflightDecision {
@@ -80,6 +85,8 @@ export function evaluatePreflight(options: {
   if (bindingHaltsPreflight(facts.bindingStatus)) {
     return { status: "blocked", reason: facts.bindingMessage, canConfirm: false, halt: true };
   }
+  const storageDecision = storageKindDecision(facts);
+  if (storageDecision !== null) return storageDecision;
   if (!facts.source.readable || !facts.target.readable) {
     return { status: "unverifiable", reason: "Der Dateisystemzustand ist nicht sicher lesbar.", canConfirm: false, halt: true };
   }
@@ -251,6 +258,19 @@ function parentPath(path: string): string {
 
 function pathLooksUnsafe(path: string): boolean {
   return executionPathLooksUnsafe(path) || path.split(/[\\/]/).includes("..") || path.includes("\0");
+}
+
+function storageKindDecision(facts: PlannedOperationFacts): PreflightDecision | null {
+  const kind = parseStorageKind(facts.storageKind);
+  if (kind === "local") return null;
+  const message = facts.storageMessage?.trim() || "";
+  if (kind === "remote") {
+    return { status: "blocked", reason: message || STORAGE_REMOTE_REASON, canConfirm: false, halt: true };
+  }
+  if (kind === "unsupported") {
+    return { status: "blocked", reason: message || STORAGE_UNSUPPORTED_REASON, canConfirm: false, halt: true };
+  }
+  return { status: "unverifiable", reason: message || STORAGE_UNVERIFIABLE_REASON, canConfirm: false, halt: true };
 }
 
 export function operationKindLabel(kind: DryRunOperationKind): string {

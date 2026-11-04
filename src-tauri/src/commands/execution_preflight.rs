@@ -12,6 +12,7 @@ use crate::paths::windows_rules::execution_path_looks_unsafe;
 use crate::scan::must_not_follow;
 
 use super::execution_binding::inspect_scan_root_at;
+use super::execution_storage::{storage_kind_name, worst_existing_storage_kind};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -38,6 +39,8 @@ pub struct PlannedOperationFacts {
     pub target_parent_is_dir: bool,
     pub target_parent_is_reparse: bool,
     pub maximum_component_length: Option<u32>,
+    pub storage_kind: String,
+    pub storage_message: Option<String>,
     pub reminder: String,
 }
 
@@ -136,6 +139,19 @@ pub(crate) fn collect_planned_operation_facts(
     let target = observe(scan_root, target_path);
     let (target_parent_exists, target_parent_is_dir, target_parent_is_reparse) =
         observe_parent(scan_root, target_path);
+    let mut storage_paths = vec![scan_root.to_string()];
+    if source.exists {
+        storage_paths.push(source_path.to_string());
+    }
+    if target.exists {
+        storage_paths.push(target_path.to_string());
+    }
+    if target_parent_exists {
+        if let Some(parent) = Path::new(target_path).parent() {
+            storage_paths.push(parent.to_string_lossy().into_owned());
+        }
+    }
+    let storage = worst_existing_storage_kind(storage_paths.iter().map(String::as_str));
     Ok(PlannedOperationFacts {
         kind: kind.to_string(),
         binding_status: binding.status,
@@ -146,6 +162,8 @@ pub(crate) fn collect_planned_operation_facts(
         target_parent_is_dir,
         target_parent_is_reparse,
         maximum_component_length: maximum_component_length_for_path(scan_root),
+        storage_kind: storage_kind_name(storage).to_string(),
+        storage_message: storage.real_operation_message().map(str::to_string),
         reminder: "Ein erfolgreiches Prüfungsergebnis ist keine Ausführungsfreigabe. Unmittelbar vor einer späteren echten Operation muss erneut geprüft werden.".to_string(),
     })
 }
@@ -208,6 +226,8 @@ mod tests {
         assert!(!facts.target.exists);
         assert!(facts.target_parent_exists && facts.target_parent_is_dir);
         assert_eq!(facts.source.size_bytes, Some(5));
+        assert_eq!(facts.storage_kind, "local");
+        assert!(facts.storage_message.is_none());
         assert!(facts.maximum_component_length.is_some(), "volume limit must be measured, not assumed");
         assert_ne!(facts.maximum_component_length, Some(0));
         assert!(!target.exists());
@@ -339,6 +359,31 @@ mod tests {
         .unwrap();
         assert_eq!(facts.binding_status, "reserved");
         assert!(facts.reminder.contains("keine Ausführungsfreigabe"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn remote_storage_is_reported_and_does_not_mutate() {
+        let root = dir();
+        let source = root.join("a.txt");
+        fs::write(&source, b"hello").unwrap();
+        let before = fs::read(&source).unwrap();
+        let _force = crate::paths::windows_storage::ForcedStorageKind::new(
+            crate::paths::windows_storage::StorageKind::Remote,
+        );
+        let facts = collect_planned_operation_facts(
+            &root,
+            &root.to_string_lossy(),
+            "moveFile",
+            &source.to_string_lossy(),
+            &root.join("b.txt").to_string_lossy(),
+        )
+        .unwrap();
+        drop(_force);
+        assert_eq!(facts.storage_kind, "remote");
+        assert!(facts.storage_message.as_deref().unwrap_or("").contains("Netzwerk"));
+        assert_eq!(fs::read(&source).unwrap(), before);
+        assert!(!root.join("b.txt").exists());
         let _ = fs::remove_dir_all(root);
     }
 }

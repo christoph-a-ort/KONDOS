@@ -1,7 +1,8 @@
 import { useState } from "react";
 import type { ScanResult } from "../model";
 import type { SnapshotBinding, VirtualPlan } from "./virtualPlan";
-import { buildVirtualPlanDryRun, type VirtualDryRunReport } from "./virtualPlanDryRun";
+import { buildVirtualPlanDryRun, dryRunStatusLabel, type VirtualDryRunReport } from "./virtualPlanDryRun";
+import { classifyDryRunReportStorage } from "./windowsStorageApi";
 
 function operationLabel(kind: VirtualDryRunReport["operations"][number]["kind"]): string {
   if (kind === "createVirtualFolder") return "Zielordner anlegen";
@@ -15,10 +16,14 @@ export function VirtualPlanDryRunPanel({ plan, scanResult, binding, current }: {
   return <details className="plan-dry-run">
     <summary>Ausführung simulieren (Dry-Run)</summary>
     <p className="muted">Dies ist ausschließlich eine Simulation. Es werden keine Dateien oder Ordner verändert.</p>
-    <button type="button" disabled={!available} onClick={() => plan !== null && setReport(buildVirtualPlanDryRun({ plan, scanResult, binding, current }))}>Dry-Run prüfen</button>
+    <button type="button" disabled={!available} onClick={() => {
+      if (plan === null) return;
+      const built = buildVirtualPlanDryRun({ plan, scanResult, binding, current });
+      void classifyDryRunReportStorage(scanResult.root.path, scanResult, built).then(setReport);
+    }}>Dry-Run prüfen</button>
     {!available ? <p className="muted">Nur ein aktueller virtuell bestätigter Plan kann simuliert werden.</p> : null}
     {report !== null ? <div className={`plan-dry-run-report is-${report.status}`}>
-      <strong>{report.status === "blocked" ? "Blockiert" : "Eingeschränkt – nur statisch geprüft"}</strong>
+      <strong>{dryRunStatusLabel(report.status)}</strong>
       <p>{report.folderCount} virtuelle Zielordner · {report.fileOperationCount} Dateioperationen · {report.unchangedFileCount} unveränderte Dateien · {report.blockedOperationCount} Blockierungen</p>
       <p className="muted">Vor Ausführung erneut prüfen: Die tatsächlichen Datei- und Ordnerzustände müssen unmittelbar vor einer späteren Ausführung erneut überprüft werden.</p>
       {report.openRequirements.map((item) => <p className="muted" key={item}>{item}</p>)}

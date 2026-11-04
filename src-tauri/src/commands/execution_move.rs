@@ -9,6 +9,7 @@ use tauri::{AppHandle, Manager, State};
 use crate::error::AppError;
 use crate::paths::windows_lengths::{maximum_component_length_for_path, target_length_blocks_real_operation};
 use crate::paths::windows_rules::{execution_path_looks_unsafe, is_allowed_windows_component};
+use crate::paths::windows_storage::{classify_opened_path, StorageKind};
 use crate::scan::must_not_follow;
 use crate::state::AppState;
 
@@ -305,6 +306,9 @@ enum MoveBlock {
     Fingerprint,
     DifferentVolume,
     Unverifiable,
+    NetworkStorage,
+    UnsupportedStorage,
+    StorageUnverifiable,
     MovedUnverified,
     Io,
 }
@@ -322,11 +326,23 @@ impl MoveBlock {
             MoveBlock::Fingerprint => "Die Quelldatei hat sich seit der Planung verändert. Ablauf angehalten.",
             MoveBlock::DifferentVolume => "Quelle und Ziel liegen nicht auf demselben Volume.",
             MoveBlock::Unverifiable => "Der Dateisystemzustand ist nicht sicher verifizierbar.",
+            MoveBlock::NetworkStorage => StorageKind::Remote.real_operation_message().unwrap(),
+            MoveBlock::UnsupportedStorage => StorageKind::Unsupported.real_operation_message().unwrap(),
+            MoveBlock::StorageUnverifiable => StorageKind::Unverifiable.real_operation_message().unwrap(),
             MoveBlock::MovedUnverified => {
                 "Die Verschiebung konnte nach der Änderung nicht sicher bestätigt werden. Keine automatische Wiederholung."
             }
             MoveBlock::Io => "Die Dateiverschiebung ist fehlgeschlagen.",
         }
+    }
+}
+
+fn move_storage_gate(kind: StorageKind) -> Result<(), MoveBlock> {
+    match kind {
+        StorageKind::Local => Ok(()),
+        StorageKind::Remote => Err(MoveBlock::NetworkStorage),
+        StorageKind::Unsupported => Err(MoveBlock::UnsupportedStorage),
+        StorageKind::Unverifiable => Err(MoveBlock::StorageUnverifiable),
     }
 }
 
@@ -379,7 +395,8 @@ fn precheck_paths(scan_root: &str, source: &str, target: &str) -> Result<(), Mov
 
 #[cfg(windows)]
 mod win_move {
-    use super::{metadata_is_reparse, within_scan_root, FileIdentity, MoveBlock};
+    use super::{metadata_is_reparse, move_storage_gate, within_scan_root, FileIdentity, MoveBlock};
+    use crate::paths::windows_storage::classify_storage_from_file_with_origin;
     use std::fs::{self, File, OpenOptions};
     use std::os::windows::ffi::OsStrExt;
     use std::os::windows::fs::OpenOptionsExt;
@@ -567,6 +584,7 @@ mod win_move {
         if !within_scan_root(scan_root, &resolved) {
             return Err(MoveBlock::OutsideRoot);
         }
+        move_storage_gate(classify_storage_from_file_with_origin(file, scan_root))?;
         let info = handle_info(file)?;
         if info.file_attributes & 0x400 != 0 {
             return Err(MoveBlock::Reparse);
@@ -594,6 +612,7 @@ mod win_move {
         if !within_scan_root(scan_root, &resolved) {
             return Err(MoveBlock::OutsideRoot);
         }
+        move_storage_gate(classify_storage_from_file_with_origin(file, scan_root))?;
         let identity = identity_from_handle(file)?;
         let modified = metadata
             .modified()
@@ -995,6 +1014,9 @@ fn execute_move_file_locked(
         maximum_component_length_for_path(scan_root),
     ) {
         return Ok(blocked_result(&source, &target, reason, empty_view()));
+    }
+    if let Err(block) = move_storage_gate(classify_opened_path(scan_root)) {
+        return Ok(blocked_result(&source, &target, block.message(), empty_view()));
     }
 
     let intent_json = std::cell::RefCell::new(existing.clone());
@@ -1645,6 +1667,101 @@ mod tests {
         assert!(root.join("a.txt").is_file());
         let retry = execute(&root, &scan, 3, true, "moveFile", &source, &target, size, modified);
         assert_eq!(retry.outcome, "blocked");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn storage_blocks_move_before_rename(kind: StorageKind, needle: &str) {
+        let (root, scan) = setup();
+        let source = format!("{scan}/a.txt");
+        let target = format!("{scan}/dest/a.txt");
+        let (size, modified) = fingerprint(&root.join("a.txt"));
+        let _force = crate::paths::windows_storage::ForcedStorageKind::new(kind);
+        let result = execute(&root, &scan, 1, true, "moveFile", &source, &target, size, modified);
+        drop(_force);
+        assert_eq!(result.outcome, "blocked", "{}", result.message);
+        assert!(result.message.contains(needle), "{}", result.message);
+        assert!(root.join("a.txt").is_file());
+        assert!(!root.join("dest").join("a.txt").exists());
+        let stored = load_at(&journal(&journal_store(&root), "j1").unwrap(), "j1").unwrap().unwrap();
+        assert!(stored.contains("\"op-file\":\"pending\""), "{stored}");
+        assert!(!stored.contains("\"op-file\":\"started\""));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn remote_storage_blocks_move_before_rename() {
+        storage_blocks_move_before_rename(
+            StorageKind::Remote,
+            "Netzwerkspeicherort – echte Dateioperationen sind nicht zulässig.",
+        );
+    }
+
+    #[test]
+    fn unverifiable_storage_blocks_move_before_rename() {
+        storage_blocks_move_before_rename(
+            StorageKind::Unverifiable,
+            "Der Speicherort konnte nicht zuverlässig überprüft werden.",
+        );
+    }
+
+    #[test]
+    fn unsupported_storage_blocks_move_before_rename() {
+        storage_blocks_move_before_rename(
+            StorageKind::Unsupported,
+            "Dieser Speicherort wird für echte Dateioperationen derzeit nicht unterstützt.",
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn remote_storage_blocks_direct_move_handle_path() {
+        let (root, scan) = setup();
+        let (size, modified) = fingerprint(&root.join("a.txt"));
+        let _force = crate::paths::windows_storage::ForcedStorageKind::new(StorageKind::Remote);
+        let result = win_move::prepare_and_move(
+            &scan,
+            &[String::from("a.txt")],
+            &[String::from("dest"), String::from("a.txt")],
+            size,
+            modified,
+            |_| Ok(()),
+        );
+        drop(_force);
+        assert!(matches!(result, Err(MoveBlock::NetworkStorage)));
+        assert!(root.join("a.txt").is_file());
+        assert!(!root.join("dest").join("a.txt").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn existing_journal_cannot_bypass_move_storage_gate() {
+        let (root, scan) = setup();
+        let source = format!("{scan}/a.txt");
+        let target = format!("{scan}/dest/a.txt");
+        let (size, modified) = fingerprint(&root.join("a.txt"));
+        let stored_before = load_at(&journal(&journal_store(&root), "j1").unwrap(), "j1").unwrap().unwrap();
+        assert!(stored_before.contains("\"status\":\"prepared\""));
+        let _force = crate::paths::windows_storage::ForcedStorageKind::new(StorageKind::Remote);
+        let result = execute_move_file_at(
+            &root,
+            &scan,
+            "owner-a",
+            "j1",
+            1,
+            "op-file",
+            "moveFile",
+            &source,
+            &target,
+            size,
+            modified,
+            true,
+        )
+        .unwrap();
+        drop(_force);
+        assert_eq!(result.outcome, "blocked");
+        assert!(root.join("a.txt").is_file());
+        let stored_after = load_at(&journal(&journal_store(&root), "j1").unwrap(), "j1").unwrap().unwrap();
+        assert!(stored_after.contains("\"op-file\":\"pending\""));
         let _ = fs::remove_dir_all(root);
     }
 }

@@ -10,6 +10,7 @@ import {
 } from "./virtualPlanEditor";
 import { buildVirtualPlanDryRun } from "./virtualPlanDryRun";
 import { createVirtualPlanJournal } from "./virtualPlanJournal";
+import { withLocalStorageClassification } from "./windowsStorage";
 import { collectExpandableDirectoryIds, deriveVisibleRows } from "./treeRows";
 import { isAllowedWindowsComponent } from "./windowsPathRules";
 import {
@@ -115,7 +116,7 @@ function approvedOf(plan: VirtualPlan): VirtualPlan {
 
 function journalCreated(plan: VirtualPlan, binding: ReturnType<typeof makeSnapshotBinding>, report: ReturnType<typeof buildVirtualPlanDryRun>): boolean {
   try {
-    createVirtualPlanJournal(plan, binding, report);
+    createVirtualPlanJournal(plan, binding, report.status === "restricted" ? withLocalStorageClassification(report) : report);
     return true;
   } catch {
     return false;

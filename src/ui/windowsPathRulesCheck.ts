@@ -143,6 +143,8 @@ export function runWindowsPathRulesCheck(fixture: WindowsPathRuleFixture): void 
     targetParentIsDir: true,
     targetParentIsReparse: false,
     maximumComponentLength: 255,
+    storageKind: "local",
+    storageMessage: null,
     reminder: "erneut",
   };
   const blocked = evaluatePreflight({

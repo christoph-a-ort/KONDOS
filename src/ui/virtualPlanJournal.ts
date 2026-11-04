@@ -56,7 +56,9 @@ function transition(journal: VirtualPlanJournal, status: JournalStatus, message:
   return { ...event(journal, message), status };
 }
 export function createVirtualPlanJournal(plan: VirtualPlan, binding: SnapshotBinding, report: VirtualDryRunReport): VirtualPlanJournal {
-  if (report.status !== "restricted") throw new Error("Nur ein gültiger eingeschränkter Dry-Run kann ein Journal vorbereiten.");
+  if (report.status !== "restricted" || report.storageClassification !== "local") {
+    throw new Error("Nur ein gültiger eingeschränkter Dry-Run mit lokalem Speicherort kann ein Journal vorbereiten.");
+  }
   const operations = report.operations.map((operation) => ({ ...operation, preconditions: [...operation.preconditions] }));
   return {
     schemaVersion: 1, journalId: `vj_${plan.planId}_${Date.now()}`, revision: 1, createdAtMs: Date.now(),
