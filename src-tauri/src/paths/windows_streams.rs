@@ -1,5 +1,7 @@
-//! FV2-02e.3b – Pure classification of already extracted Windows stream names.
-//! No filesystem access and no Windows API calls.
+//! FV2-02e.3b/3c – Stream-name classification and handle-based FILE_STREAM_INFO query.
+//!
+//! Name classification does not touch the filesystem. The handle query reads stream metadata
+//! from an already open file and does not open, replace, or close that handle.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamDisposition {
@@ -112,6 +114,28 @@ fn split_stream_name(text: &str) -> Option<(&str, &str)> {
     Some((name, stream_type))
 }
 
+/// `FILE_STREAM_INFO` header before the variable UTF-16 name.
+/// NextEntryOffset u32, StreamNameLength u32, StreamSize i64, StreamAllocationSize i64.
+const FILE_STREAM_HEADER_LEN: usize = 24;
+const STREAM_BUFFER_START: usize = 16 * 1024;
+const STREAM_BUFFER_MAX: usize = 1024 * 1024;
+#[cfg(windows)]
+const FILE_STREAM_INFO_CLASS: i32 = 7;
+#[cfg(windows)]
+const ERROR_MORE_DATA: u32 = 234;
+
+enum StreamQuery {
+    Complete(Vec<u8>),
+    TooSmall,
+    Failed,
+}
+
+struct StreamSpan {
+    name_at: usize,
+    name_len: usize,
+    stream_size: u64,
+}
+
 fn ascii_eq_ignore_case(left: &str, right: &str) -> bool {
     let left = left.as_bytes();
     let right = right.as_bytes();
@@ -123,6 +147,171 @@ fn ascii_eq_ignore_case(left: &str, right: &str) -> bool {
         .all(|(left_byte, right_byte)| {
             left_byte.to_ascii_lowercase() == right_byte.to_ascii_lowercase()
         })
+}
+
+fn read_u32(buffer: &[u8], offset: usize) -> Option<u32> {
+    let end = offset.checked_add(4)?;
+    let bytes: [u8; 4] = buffer.get(offset..end)?.try_into().ok()?;
+    Some(u32::from_le_bytes(bytes))
+}
+
+fn read_u64(buffer: &[u8], offset: usize) -> Option<u64> {
+    let end = offset.checked_add(8)?;
+    let bytes: [u8; 8] = buffer.get(offset..end)?.try_into().ok()?;
+    Some(u64::from_le_bytes(bytes))
+}
+
+/// Walk a `FILE_STREAM_INFO` chain. `NextEntryOffset` is relative to the current entry.
+/// A zero offset ends the chain. Bytes after that entry are unused buffer tail, not more entries.
+/// Entries must move forward, stay inside the buffer, and keep an 8-byte stride so the next
+/// `LARGE_INTEGER` fields stay aligned. Name bytes are sliced with `StreamNameLength` only.
+fn parse_stream_spans(buffer: &[u8]) -> Option<Vec<StreamSpan>> {
+    if buffer.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut offset = 0usize;
+    let mut spans = Vec::new();
+    let mut steps = 0usize;
+    while steps < buffer.len() {
+        steps = steps.saturating_add(1);
+        let next_rel = read_u32(buffer, offset)?;
+        let name_len = usize::try_from(read_u32(buffer, offset.checked_add(4)?)?).ok()?;
+        let stream_size = read_u64(buffer, offset.checked_add(8)?)?;
+        let _allocation_size = read_u64(buffer, offset.checked_add(16)?)?;
+        let name_at = offset.checked_add(FILE_STREAM_HEADER_LEN)?;
+        let name_end = name_at.checked_add(name_len)?;
+        if name_end > buffer.len() {
+            return None;
+        }
+        spans.push(StreamSpan {
+            name_at,
+            name_len,
+            stream_size,
+        });
+        if next_rel == 0 {
+            return Some(spans);
+        }
+        let next_rel = usize::try_from(next_rel).ok()?;
+        if next_rel % 8 != 0 {
+            return None;
+        }
+        let next = offset.checked_add(next_rel)?;
+        if next <= offset || next < name_end || next >= buffer.len() {
+            return None;
+        }
+        offset = next;
+    }
+    None
+}
+
+fn classify_file_stream_info_buffer(buffer: &[u8]) -> StreamDisposition {
+    let Some(spans) = parse_stream_spans(buffer) else {
+        return StreamDisposition::Unverifiable;
+    };
+    let mut reported = Vec::with_capacity(spans.len());
+    for span in spans {
+        let Some(bytes) = buffer
+            .get(span.name_at..)
+            .and_then(|rest| rest.get(..span.name_len))
+        else {
+            return StreamDisposition::Unverifiable;
+        };
+        reported.push(ReportedStream {
+            byte_length: span.name_len,
+            bytes,
+            stream_size: span.stream_size,
+        });
+    }
+    classify_reported_streams(&reported)
+}
+
+fn classify_stream_query_loop(mut query: impl FnMut(usize) -> StreamQuery) -> StreamDisposition {
+    let mut capacity = STREAM_BUFFER_START;
+    loop {
+        match query(capacity) {
+            StreamQuery::Failed => return StreamDisposition::Unverifiable,
+            StreamQuery::TooSmall => {
+                if capacity >= STREAM_BUFFER_MAX {
+                    return StreamDisposition::Unverifiable;
+                }
+                let grown = capacity.saturating_mul(2);
+                capacity = if grown > STREAM_BUFFER_MAX {
+                    STREAM_BUFFER_MAX
+                } else {
+                    grown
+                };
+            }
+            StreamQuery::Complete(buffer) => return classify_file_stream_info_buffer(&buffer),
+        }
+    }
+}
+
+/// Classify streams of an already open file.
+///
+/// The handle is only borrowed. This function does not close it, replace it, reopen a path,
+/// or write stream data. `execution_move.rs` opens the source with
+/// `DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE`. Whether that mask is enough for
+/// `FileStreamInfo` is checked by a temporary-file test on Windows; it is not changed here.
+/// A failed call is `Unverifiable` and is not treated as proof that the file has no named streams.
+#[must_use]
+pub fn classify_open_file_streams(file: &std::fs::File) -> StreamDisposition {
+    #[cfg(windows)]
+    {
+        classify_stream_query_loop(|capacity| query_stream_buffer(file, capacity))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = file;
+        StreamDisposition::Unverifiable
+    }
+}
+
+#[cfg(windows)]
+fn query_stream_buffer(file: &std::fs::File, capacity: usize) -> StreamQuery {
+    use std::os::windows::io::AsRawHandle;
+
+    let Ok(capacity_u32) = u32::try_from(capacity) else {
+        return StreamQuery::Failed;
+    };
+    if capacity == 0 {
+        return StreamQuery::Failed;
+    }
+    let mut buffer = vec![0u8; capacity];
+    // SAFETY: `buffer` is a writable allocation of `capacity` bytes and is not aliased.
+    // `file.as_raw_handle()` is valid for this borrow and is not closed, stored, or written.
+    // FileStreamInfo asks for stream metadata only. The bytes written by Windows are parsed
+    // with bounds checks and are not trusted as a terminated string.
+    let ok = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            FILE_STREAM_INFO_CLASS,
+            buffer.as_mut_ptr(),
+            capacity_u32,
+        )
+    };
+    if ok != 0 {
+        return StreamQuery::Complete(buffer);
+    }
+    // SAFETY: GetLastError reads this thread's last-error slot and takes no pointers.
+    // It is called immediately after the failed query, before any other Windows call.
+    let error = unsafe { GetLastError() };
+    if error == ERROR_MORE_DATA {
+        StreamQuery::TooSmall
+    } else {
+        StreamQuery::Failed
+    }
+}
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetFileInformationByHandleEx(
+        file: std::os::windows::io::RawHandle,
+        file_information_class: i32,
+        file_information: *mut u8,
+        buffer_size: u32,
+    ) -> i32;
+    fn GetLastError() -> u32;
 }
 
 #[cfg(test)]
@@ -429,5 +618,302 @@ mod tests {
             classify_owned(&[(&bytes, bytes.len() - 1, 4)]),
             StreamDisposition::Unverifiable
         );
+    }
+
+    fn le_name(text: &str) -> Vec<u8> {
+        text.encode_utf16()
+            .flat_map(|unit| unit.to_le_bytes())
+            .collect()
+    }
+
+    fn align8(value: usize) -> usize {
+        value.saturating_add(7) & !7
+    }
+
+    fn stream_chain(names: &[&str]) -> Vec<u8> {
+        let mut buffer = Vec::new();
+        for (index, name) in names.iter().enumerate() {
+            let name_bytes = le_name(name);
+            let raw_len = 24usize.saturating_add(name_bytes.len());
+            let next = if index + 1 == names.len() {
+                0u32
+            } else {
+                align8(raw_len) as u32
+            };
+            buffer.extend_from_slice(&next.to_le_bytes());
+            buffer.extend_from_slice(&(name_bytes.len() as u32).to_le_bytes());
+            buffer.extend_from_slice(&0u64.to_le_bytes());
+            buffer.extend_from_slice(&0u64.to_le_bytes());
+            buffer.extend_from_slice(&name_bytes);
+            if next != 0 {
+                buffer.resize(buffer.len() - name_bytes.len() - 24 + next as usize, 0xAB);
+            }
+        }
+        buffer
+    }
+
+    #[test]
+    fn parsed_default_stream_is_allowed() {
+        assert_eq!(
+            super::classify_file_stream_info_buffer(&stream_chain(&[r"::$DATA"])),
+            StreamDisposition::AllowNoExtraStreams
+        );
+    }
+
+    #[test]
+    fn parsed_default_and_zone_identifier_are_allowed() {
+        assert_eq!(
+            super::classify_file_stream_info_buffer(&stream_chain(&[
+                r"::$DATA",
+                ":Zone.Identifier:$DATA"
+            ])),
+            StreamDisposition::AllowOnlyZoneIdentifier
+        );
+    }
+
+    #[test]
+    fn parsed_foreign_stream_is_denied() {
+        assert_eq!(
+            super::classify_file_stream_info_buffer(&stream_chain(&[
+                r"::$DATA",
+                ":Zusatzdaten:$DATA"
+            ])),
+            StreamDisposition::DenyForeignStreams
+        );
+    }
+
+    #[test]
+    fn parsed_zone_and_foreign_stream_are_denied() {
+        assert_eq!(
+            super::classify_file_stream_info_buffer(&stream_chain(&[
+                r"::$DATA",
+                ":Zone.Identifier:$DATA",
+                ":Zusatzdaten:$DATA"
+            ])),
+            StreamDisposition::DenyForeignStreams
+        );
+    }
+
+    #[test]
+    fn unaligned_next_offset_is_unverifiable() {
+        let mut buffer = stream_chain(&[r"::$DATA", ":Zone.Identifier:$DATA"]);
+        buffer[..4].copy_from_slice(&4u32.to_le_bytes());
+        assert_eq!(
+            super::classify_file_stream_info_buffer(&buffer),
+            StreamDisposition::Unverifiable
+        );
+    }
+
+    #[test]
+    fn next_offset_outside_buffer_is_unverifiable() {
+        let mut buffer = stream_chain(&[r"::$DATA"]);
+        buffer[..4].copy_from_slice(&4_096u32.to_le_bytes());
+        assert_eq!(
+            super::classify_file_stream_info_buffer(&buffer),
+            StreamDisposition::Unverifiable
+        );
+    }
+
+    #[test]
+    fn next_offset_without_progress_is_unverifiable() {
+        let mut buffer = stream_chain(&[r"::$DATA"]);
+        buffer[..4].copy_from_slice(&8u32.to_le_bytes());
+        assert_eq!(
+            super::classify_file_stream_info_buffer(&buffer),
+            StreamDisposition::Unverifiable
+        );
+    }
+
+    #[test]
+    fn short_entry_is_unverifiable() {
+        assert_eq!(
+            super::classify_file_stream_info_buffer(&[0u8; 20]),
+            StreamDisposition::Unverifiable
+        );
+    }
+
+    #[test]
+    fn oversized_stream_name_length_is_unverifiable() {
+        let mut buffer = stream_chain(&[r"::$DATA"]);
+        buffer[4..8].copy_from_slice(&1_000u32.to_le_bytes());
+        assert_eq!(
+            super::classify_file_stream_info_buffer(&buffer),
+            StreamDisposition::Unverifiable
+        );
+    }
+
+    #[test]
+    fn odd_stream_name_length_is_unverifiable() {
+        let mut buffer = stream_chain(&[r"::$DATA"]);
+        buffer[4..8].copy_from_slice(&1u32.to_le_bytes());
+        assert_eq!(
+            super::classify_file_stream_info_buffer(&buffer),
+            StreamDisposition::Unverifiable
+        );
+    }
+
+    #[test]
+    fn malformed_utf16_in_stream_info_is_unverifiable() {
+        let mut buffer = vec![0u8; 24 + 2];
+        buffer[4..8].copy_from_slice(&2u32.to_le_bytes());
+        buffer[24..26].copy_from_slice(&0xD800u16.to_le_bytes());
+        assert_eq!(
+            super::classify_file_stream_info_buffer(&buffer),
+            StreamDisposition::Unverifiable
+        );
+    }
+
+    #[test]
+    fn empty_stream_info_success_is_unverifiable() {
+        assert_eq!(
+            super::classify_file_stream_info_buffer(&[]),
+            StreamDisposition::Unverifiable
+        );
+    }
+
+    #[test]
+    fn bytes_after_final_entry_are_not_another_stream() {
+        let mut buffer = stream_chain(&[r"::$DATA"]);
+        buffer.extend_from_slice(&le_name(":Zusatzdaten:$DATA"));
+        buffer.extend_from_slice(&[0xFF; 32]);
+        assert_eq!(
+            super::classify_file_stream_info_buffer(&buffer),
+            StreamDisposition::AllowNoExtraStreams
+        );
+    }
+
+    #[test]
+    fn overlapping_entry_length_is_unverifiable() {
+        let mut buffer = stream_chain(&[r"::$DATA", ":Zone.Identifier:$DATA"]);
+        let name_len = u32::from_le_bytes(buffer[4..8].try_into().unwrap());
+        let overlap = 24u32.saturating_add(name_len).saturating_sub(8);
+        let overlap = overlap - (overlap % 8);
+        buffer[..4].copy_from_slice(&overlap.to_le_bytes());
+        assert_eq!(
+            super::classify_file_stream_info_buffer(&buffer),
+            StreamDisposition::Unverifiable
+        );
+    }
+
+    #[test]
+    fn overflowing_lengths_are_unverifiable() {
+        let mut name_overflow = stream_chain(&[r"::$DATA"]);
+        name_overflow[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(
+            super::classify_file_stream_info_buffer(&name_overflow),
+            StreamDisposition::Unverifiable
+        );
+        let mut offset_overflow = stream_chain(&[r"::$DATA"]);
+        offset_overflow[..4].copy_from_slice(&(u32::MAX & !7).to_le_bytes());
+        assert_eq!(
+            super::classify_file_stream_info_buffer(&offset_overflow),
+            StreamDisposition::Unverifiable
+        );
+    }
+
+    #[test]
+    fn too_small_buffer_is_retried_and_not_classified() {
+        let mut calls = 0usize;
+        let result = super::classify_stream_query_loop(|capacity| {
+            calls = calls.saturating_add(1);
+            if calls == 1 {
+                assert_eq!(capacity, super::STREAM_BUFFER_START);
+                return super::StreamQuery::TooSmall;
+            }
+            assert_eq!(capacity, super::STREAM_BUFFER_START * 2);
+            super::StreamQuery::Complete(stream_chain(&[r"::$DATA", ":Zusatzdaten:$DATA"]))
+        });
+        assert_eq!(calls, 2);
+        assert_eq!(result, StreamDisposition::DenyForeignStreams);
+    }
+
+    #[test]
+    fn other_api_failure_is_unverifiable() {
+        let result = super::classify_stream_query_loop(|_| super::StreamQuery::Failed);
+        assert_eq!(result, StreamDisposition::Unverifiable);
+    }
+
+    #[test]
+    fn buffer_cap_stops_growth() {
+        let mut seen = Vec::new();
+        let result = super::classify_stream_query_loop(|capacity| {
+            assert!(capacity <= super::STREAM_BUFFER_MAX);
+            seen.push(capacity);
+            super::StreamQuery::TooSmall
+        });
+        assert_eq!(result, StreamDisposition::Unverifiable);
+        assert_eq!(seen.first().copied(), Some(super::STREAM_BUFFER_START));
+        assert_eq!(seen.last().copied(), Some(super::STREAM_BUFFER_MAX));
+        assert!(seen.windows(2).all(|pair| pair[1] > pair[0]));
+        assert!(seen
+            .iter()
+            .all(|capacity| *capacity <= super::STREAM_BUFFER_MAX));
+    }
+
+    #[test]
+    fn buffer_grows_until_a_complete_enumeration() {
+        let mut seen = Vec::new();
+        let result = super::classify_stream_query_loop(|capacity| {
+            seen.push(capacity);
+            if capacity < 64 * 1024 {
+                super::StreamQuery::TooSmall
+            } else {
+                super::StreamQuery::Complete(stream_chain(&[r"::$DATA"]))
+            }
+        });
+        assert_eq!(seen, vec![16 * 1024, 32 * 1024, 64 * 1024]);
+        assert_eq!(result, StreamDisposition::AllowNoExtraStreams);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn ordinary_temp_file_exposes_only_the_default_stream() {
+        use std::io::{Read, Seek, SeekFrom};
+
+        struct TempPath(std::path::PathBuf);
+        impl Drop for TempPath {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let path = TempPath(std::env::temp_dir().join(format!(
+            "dotty-stream-query-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        )));
+        std::fs::write(&path.0, b"hello").unwrap();
+        let mut file = std::fs::File::open(&path.0).unwrap();
+        assert_eq!(
+            super::classify_open_file_streams(&file),
+            StreamDisposition::AllowNoExtraStreams
+        );
+        file.seek(SeekFrom::Start(0)).unwrap();
+        let mut content = Vec::new();
+        file.read_to_end(&mut content).unwrap();
+        assert_eq!(content, b"hello");
+        drop(file);
+
+        let small = std::fs::File::open(&path.0).unwrap();
+        assert!(matches!(
+            super::query_stream_buffer(&small, 32),
+            super::StreamQuery::TooSmall
+        ));
+        drop(small);
+
+        use std::os::windows::fs::OpenOptionsExt;
+        let move_like = std::fs::OpenOptions::new()
+            .share_mode(0x1 | 0x2 | 0x4)
+            .access_mode(0x0001_0000 | 0x80 | 0x0010_0000)
+            .custom_flags(0x0020_0000 | 0x0200_0000)
+            .open(&path.0)
+            .unwrap();
+        assert_eq!(
+            super::classify_open_file_streams(&move_like),
+            StreamDisposition::AllowNoExtraStreams
+        );
+        drop(move_like);
     }
 }
