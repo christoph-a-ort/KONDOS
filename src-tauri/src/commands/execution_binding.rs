@@ -1340,4 +1340,192 @@ mod tests {
         assert!(app.join("dest").join("a.txt").exists());
         let _ = fs::remove_dir_all(app);
     }
+
+    #[test]
+    fn relative_ads_source_creates_no_journal() {
+        let app = dir();
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
+        fs::write(app.join("a.txt"), b"hello").unwrap();
+        let result = start_bound_run_at(
+            &app,
+            root,
+            "owner-a",
+            "j1",
+            0,
+            &journal_ops(
+                "j1",
+                1,
+                root,
+                "owner-a",
+                "reserved",
+                serde_json::json!([move_op("a.txt:stream", "b.txt")]),
+                serde_json::json!({"op-file": "pending"}),
+            ),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("nicht zuverlässig"));
+        assert!(!journal(&journal_store(&app), "j1").unwrap().exists());
+        assert_eq!(fs::read(app.join("a.txt")).unwrap(), b"hello");
+        let _ = fs::remove_dir_all(app);
+    }
+
+    #[test]
+    fn relative_ads_data_suffix_creates_no_journal() {
+        let app = dir();
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
+        fs::write(app.join("a.txt"), b"hello").unwrap();
+        let result = start_bound_run_at(
+            &app,
+            root,
+            "owner-a",
+            "j1",
+            0,
+            &journal_ops(
+                "j1",
+                1,
+                root,
+                "owner-a",
+                "reserved",
+                serde_json::json!([move_op("a.txt", "b.txt:$DATA")]),
+                serde_json::json!({"op-file": "pending"}),
+            ),
+        );
+        assert!(result.is_err());
+        assert!(!journal(&journal_store(&app), "j1").unwrap().exists());
+        assert_eq!(fs::read(app.join("a.txt")).unwrap(), b"hello");
+        assert!(!app.join("b.txt").exists());
+        let _ = fs::remove_dir_all(app);
+    }
+
+    #[test]
+    fn nested_ads_path_creates_no_journal() {
+        let app = dir();
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
+        fs::write(app.join("a.txt"), b"hello").unwrap();
+        let result = start_bound_run_at(
+            &app,
+            root,
+            "owner-a",
+            "j1",
+            0,
+            &journal_ops(
+                "j1",
+                1,
+                root,
+                "owner-a",
+                "reserved",
+                serde_json::json!([move_op("a.txt", "Docs/a.txt:stream:$DATA")]),
+                serde_json::json!({"op-file": "pending"}),
+            ),
+        );
+        assert!(result.is_err());
+        assert!(!journal(&journal_store(&app), "j1").unwrap().exists());
+        assert_eq!(fs::read(app.join("a.txt")).unwrap(), b"hello");
+        let _ = fs::remove_dir_all(app);
+    }
+
+    #[test]
+    fn mixed_local_and_ads_operations_block_whole_journal() {
+        let app = dir();
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
+        fs::write(app.join("a.txt"), b"hello").unwrap();
+        fs::write(app.join("c.txt"), b"other").unwrap();
+        let local = move_op("a.txt", "b.txt");
+        let mut ads = move_op("c.txt", "d.txt:stream");
+        ads["id"] = serde_json::json!("op-ads");
+        let result = start_bound_run_at(
+            &app,
+            root,
+            "owner-a",
+            "j1",
+            0,
+            &journal_ops(
+                "j1",
+                1,
+                root,
+                "owner-a",
+                "reserved",
+                serde_json::json!([local, ads]),
+                serde_json::json!({"op-file": "pending", "op-ads": "pending"}),
+            ),
+        );
+        assert!(result.is_err());
+        assert!(!journal(&journal_store(&app), "j1").unwrap().exists());
+        assert_eq!(fs::read(app.join("a.txt")).unwrap(), b"hello");
+        assert_eq!(fs::read(app.join("c.txt")).unwrap(), b"other");
+        let _ = fs::remove_dir_all(app);
+    }
+
+    #[test]
+    fn progress_rejects_ads_injection_and_keeps_original_journal() {
+        let app = dir();
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
+        fs::write(app.join("a.txt"), b"hello").unwrap();
+        let original = journal_ops(
+            "j1",
+            1,
+            root,
+            "owner-a",
+            "reserved",
+            serde_json::json!([move_op("a.txt", "b.txt")]),
+            serde_json::json!({"op-file": "pending"}),
+        );
+        start_bound_run_at(&app, root, "owner-a", "j1", 0, &original).unwrap();
+        let before = fs::read_to_string(journal(&journal_store(&app), "j1").unwrap()).unwrap();
+        let injected = journal_ops(
+            "j1",
+            2,
+            root,
+            "owner-a",
+            "reserved",
+            serde_json::json!([move_op("a.txt", "b.txt:stream")]),
+            serde_json::json!({"op-file": "pending"}),
+        );
+        let result = progress_bound_run_at(&app, root, "owner-a", "j1", 1, &injected);
+        assert!(result.is_err());
+        let after = fs::read_to_string(journal(&journal_store(&app), "j1").unwrap()).unwrap();
+        assert_eq!(before, after);
+        assert!(!after.contains("b.txt:stream"));
+        assert_eq!(fs::read(app.join("a.txt")).unwrap(), b"hello");
+        let _ = fs::remove_dir_all(app);
+    }
+
+    #[test]
+    fn release_paths_cannot_bypass_ads_path_check() {
+        let app = dir();
+        let root_buf = scan_root(&app);
+        let root = root_buf.as_str();
+        fs::write(app.join("a.txt"), b"hello").unwrap();
+        let original = journal_ops(
+            "j1",
+            1,
+            root,
+            "owner-a",
+            "reserved",
+            serde_json::json!([move_op("a.txt", "b.txt")]),
+            serde_json::json!({"op-file": "pending"}),
+        );
+        start_bound_run_at(&app, root, "owner-a", "j1", 0, &original).unwrap();
+        let before = fs::read_to_string(journal(&journal_store(&app), "j1").unwrap()).unwrap();
+        let prepare_injected = journal_ops(
+            "j1",
+            2,
+            root,
+            "owner-a",
+            "releasePrepared",
+            serde_json::json!([move_op("a.txt:$DATA", "b.txt")]),
+            serde_json::json!({"op-file": "pending"}),
+        );
+        assert!(prepare_release_at(&app, root, "owner-a", "j1", 1, &prepare_injected).is_err());
+        assert_eq!(
+            fs::read_to_string(journal(&journal_store(&app), "j1").unwrap()).unwrap(),
+            before
+        );
+        let _ = fs::remove_dir_all(app);
+    }
 }

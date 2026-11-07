@@ -2,6 +2,7 @@
 use serde::Serialize;
 
 use crate::error::AppError;
+use crate::paths::windows_rules::{execution_path_looks_unsafe, is_allowed_relative_plan_path};
 use crate::paths::windows_storage::{classify_opened_path, StorageKind};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -121,6 +122,10 @@ fn field_is_unusable(path: &str) -> bool {
     path.contains('\0') || path_has_dotdot(path)
 }
 
+fn relative_journal_field_is_disallowed(path: &str) -> bool {
+    !is_allowed_relative_plan_path(path)
+}
+
 fn classify_absolute_field(path: &str) -> StorageKind {
     if crate::paths::windows_rules::is_windows_device_path(path) {
         return inspect_path_kind(path);
@@ -207,9 +212,15 @@ fn classify_journal_storage(scan_root: &str, journal_json: &str) -> StorageKind 
         }
         if field_looks_absolute(source_field) {
             acc = fold_storage_kind(acc, classify_absolute_field(source_field));
+        } else if kind != "createVirtualFolder" || !source_field.trim().is_empty() {
+            if relative_journal_field_is_disallowed(source_field) {
+                return StorageKind::Unverifiable;
+            }
         }
         if field_looks_absolute(target_field) {
             acc = fold_storage_kind(acc, classify_absolute_field(target_field));
+        } else if relative_journal_field_is_disallowed(target_field) {
+            return StorageKind::Unverifiable;
         }
         if acc == StorageKind::Remote {
             return StorageKind::Remote;
@@ -225,6 +236,9 @@ fn classify_journal_storage(scan_root: &str, journal_json: &str) -> StorageKind 
         let source = join_abs(scan_root, source_field);
         let target = join_abs(scan_root, target_field);
         if path_has_dotdot(&source) || path_has_dotdot(&target) {
+            return StorageKind::Unverifiable;
+        }
+        if execution_path_looks_unsafe(&source) || execution_path_looks_unsafe(&target) {
             return StorageKind::Unverifiable;
         }
         let source_existing = inspect_existing_path_kind(&source);
@@ -349,6 +363,85 @@ mod tests {
             fold_storage_kind(StorageKind::Unsupported, StorageKind::Unverifiable),
             StorageKind::Unsupported
         );
+    }
+
+    fn journal_ops_json(root: &str, source: &str, target: &str, status: &str) -> String {
+        serde_json::json!({
+            "schemaVersion": 1,
+            "journalId": "j1",
+            "revision": 1,
+            "operations": [{
+                "id": "op-file",
+                "kind": "moveFile",
+                "sourcePath": source,
+                "targetPath": target
+            }],
+            "scanRoot": root,
+            "ownerRunId": "owner-a",
+            "bindingStatus": "reserved",
+            "operationStatus": {"op-file": status}
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn relative_ads_syntax_is_never_a_local_journal_field() {
+        assert!(relative_journal_field_is_disallowed("datei.txt:stream"));
+        assert!(relative_journal_field_is_disallowed("datei.txt:$DATA"));
+        assert!(relative_journal_field_is_disallowed(
+            "datei.txt:stream:$DATA"
+        ));
+        assert!(relative_journal_field_is_disallowed(
+            "Docs/datei.txt:stream"
+        ));
+        assert!(!relative_journal_field_is_disallowed("datei.txt"));
+        assert!(!relative_journal_field_is_disallowed("Docs/datei.txt"));
+        assert!(!relative_journal_field_is_disallowed("."));
+        assert!(
+            crate::paths::windows_rules::is_allowed_absolute_windows_path(r"C:\Ordner\Datei.txt")
+        );
+        assert!(!crate::paths::windows_rules::is_allowed_relative_plan_path(
+            r"C:\Ordner\Datei.txt"
+        ));
+        assert!(!execution_path_looks_unsafe(r"C:\Ordner\Datei.txt"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn relative_ads_payload_is_rejected_before_journal_storage_is_local() {
+        let path = std::env::temp_dir().join(format!(
+            "dotty-journal-ads-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        std::fs::write(path.join("a.txt"), b"hello").unwrap();
+        let root = path.to_string_lossy().replace('\\', "/");
+        let cases = [
+            ("a.txt:stream", "b.txt"),
+            ("a.txt", "b.txt:$DATA"),
+            ("a.txt", "Docs/a.txt:stream:$DATA"),
+            ("CON.txt", "b.txt"),
+        ];
+        for (source, target) in cases {
+            let result = require_local_storage_for_journal_payload(
+                &root,
+                &journal_ops_json(&root, source, target, "pending"),
+            );
+            assert!(
+                result.is_err(),
+                "payload {source} -> {target} must not be local"
+            );
+        }
+        let allowed = require_local_storage_for_journal_payload(
+            &root,
+            &journal_ops_json(&root, "a.txt", "b.txt", "pending"),
+        );
+        assert!(allowed.is_ok());
+        let _ = std::fs::remove_dir_all(&path);
     }
 
     #[cfg(windows)]
