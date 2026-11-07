@@ -130,6 +130,147 @@ enum StreamQuery {
     Failed,
 }
 
+/// Byte buffer whose start is aligned for `FILE_STREAM_INFO` / `LARGE_INTEGER` (8 bytes).
+///
+/// Windows requires the `GetFileInformationByHandleEx` output pointer to keep `StreamSize` and
+/// `StreamAllocationSize` 8-byte aligned. `Vec<u8>` does not guarantee that. `Vec<u64>` does,
+/// because `align_of::<u64>() == 8`. Capacity is rounded up to a whole number of `u64` words.
+struct AlignedStreamBuffer {
+    words: Vec<u64>,
+}
+
+impl AlignedStreamBuffer {
+    fn with_byte_capacity(capacity: usize) -> Option<Self> {
+        if capacity == 0 {
+            return None;
+        }
+        let words = capacity.div_ceil(8);
+        if words == 0 {
+            return None;
+        }
+        Some(Self {
+            words: vec![0u64; words],
+        })
+    }
+
+    fn byte_len(&self) -> usize {
+        self.words.len().saturating_mul(8)
+    }
+
+    fn as_mut_ptr(&mut self) -> *mut u8 {
+        self.words.as_mut_ptr().cast::<u8>()
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        let len = self.byte_len();
+        if len == 0 {
+            return &[];
+        }
+        // SAFETY: `words` is a live `Vec<u64>` of initialized zeroes. Its allocation is aligned
+        // to 8 bytes. `byte_len` is exactly `words.len() * size_of::<u64>()` and does not extend
+        // past the allocation. The `u8` view is only used to copy bytes after Windows has written
+        // `FILE_STREAM_INFO`; it is not used to construct a `FILE_STREAM_INFO` reference.
+        unsafe { std::slice::from_raw_parts(self.words.as_ptr().cast::<u8>(), len) }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static FORCE_KIND: std::cell::Cell<Option<StreamDisposition>> =
+        const { std::cell::Cell::new(None) };
+    static FORCE_QUERY_FAIL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static LAST_QUERY_HANDLE: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
+    static QUERY_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn force_stream_kind(kind: Option<StreamDisposition>) {
+    FORCE_KIND.with(|cell| cell.set(kind));
+}
+
+#[cfg(test)]
+pub struct ForcedStreamDisposition {
+    _private: (),
+}
+
+#[cfg(test)]
+impl ForcedStreamDisposition {
+    pub fn new(kind: StreamDisposition) -> Self {
+        force_stream_kind(Some(kind));
+        Self { _private: () }
+    }
+}
+
+#[cfg(test)]
+impl Drop for ForcedStreamDisposition {
+    fn drop(&mut self) {
+        force_stream_kind(None);
+    }
+}
+
+#[cfg(test)]
+fn force_stream_query_fail(fail: bool) {
+    FORCE_QUERY_FAIL.with(|cell| cell.set(fail));
+}
+
+/// Test hook: treat the next open-file query as an API failure (`StreamQuery::Failed`).
+#[cfg(test)]
+pub struct ForcedStreamQueryFailed {
+    _private: (),
+}
+
+#[cfg(test)]
+impl ForcedStreamQueryFailed {
+    pub fn new() -> Self {
+        force_stream_query_fail(true);
+        Self { _private: () }
+    }
+}
+
+#[cfg(test)]
+impl Drop for ForcedStreamQueryFailed {
+    fn drop(&mut self) {
+        force_stream_query_fail(false);
+    }
+}
+
+#[cfg(test)]
+pub fn last_stream_query_handle() -> isize {
+    LAST_QUERY_HANDLE.with(|cell| cell.get())
+}
+
+#[cfg(test)]
+pub fn stream_query_count() -> usize {
+    QUERY_COUNT.with(|cell| cell.get())
+}
+
+#[cfg(test)]
+pub fn reset_stream_query_probe() {
+    LAST_QUERY_HANDLE.with(|cell| cell.set(0));
+    QUERY_COUNT.with(|cell| cell.set(0));
+}
+
+fn test_stream_override(file: &std::fs::File) -> Option<StreamDisposition> {
+    #[cfg(test)]
+    {
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            LAST_QUERY_HANDLE.with(|cell| cell.set(file.as_raw_handle() as isize));
+        }
+        QUERY_COUNT.with(|cell| cell.set(cell.get().saturating_add(1)));
+        if FORCE_QUERY_FAIL.with(|cell| cell.get()) {
+            return Some(classify_stream_query_loop(|_| StreamQuery::Failed));
+        }
+        return FORCE_KIND.with(|cell| cell.get());
+    }
+    #[cfg(not(test))]
+    {
+        let _ = file;
+        None
+    }
+}
+
 struct StreamSpan {
     name_at: usize,
     name_len: usize,
@@ -255,6 +396,9 @@ fn classify_stream_query_loop(mut query: impl FnMut(usize) -> StreamQuery) -> St
 /// A failed call is `Unverifiable` and is not treated as proof that the file has no named streams.
 #[must_use]
 pub fn classify_open_file_streams(file: &std::fs::File) -> StreamDisposition {
+    if let Some(kind) = test_stream_override(file) {
+        return kind;
+    }
     #[cfg(windows)]
     {
         classify_stream_query_loop(|capacity| query_stream_buffer(file, capacity))
@@ -270,17 +414,19 @@ pub fn classify_open_file_streams(file: &std::fs::File) -> StreamDisposition {
 fn query_stream_buffer(file: &std::fs::File, capacity: usize) -> StreamQuery {
     use std::os::windows::io::AsRawHandle;
 
-    let Ok(capacity_u32) = u32::try_from(capacity) else {
+    let Some(mut buffer) = AlignedStreamBuffer::with_byte_capacity(capacity) else {
         return StreamQuery::Failed;
     };
-    if capacity == 0 {
+    let Ok(capacity_u32) = u32::try_from(buffer.byte_len()) else {
         return StreamQuery::Failed;
-    }
-    let mut buffer = vec![0u8; capacity];
-    // SAFETY: `buffer` is a writable allocation of `capacity` bytes and is not aliased.
-    // `file.as_raw_handle()` is valid for this borrow and is not closed, stored, or written.
-    // FileStreamInfo asks for stream metadata only. The bytes written by Windows are parsed
-    // with bounds checks and are not trusted as a terminated string.
+    };
+    // SAFETY: `buffer` is an 8-byte-aligned, zeroed allocation of `byte_len` bytes owned by
+    // `AlignedStreamBuffer` for this call. `file.as_raw_handle()` is valid for this borrow and is
+    // not closed, stored, or written. The pointer is derived from `Vec<u64>` (`align_of::<u64>()
+    // == 8`), which satisfies `FILE_STREAM_INFO` / `LARGE_INTEGER` alignment. FileStreamInfo asks
+    // for stream metadata only. The bytes written by Windows are copied into a `[u8]` slice and
+    // parsed with bounds checks; they are not trusted as a terminated string or as a typed
+    // `FILE_STREAM_INFO` reference.
     let ok = unsafe {
         GetFileInformationByHandleEx(
             file.as_raw_handle(),
@@ -290,7 +436,7 @@ fn query_stream_buffer(file: &std::fs::File, capacity: usize) -> StreamQuery {
         )
     };
     if ok != 0 {
-        return StreamQuery::Complete(buffer);
+        return StreamQuery::Complete(buffer.as_bytes().to_vec());
     }
     // SAFETY: GetLastError reads this thread's last-error slot and takes no pointers.
     // It is called immediately after the failed query, before any other Windows call.
@@ -863,6 +1009,58 @@ mod tests {
         });
         assert_eq!(seen, vec![16 * 1024, 32 * 1024, 64 * 1024]);
         assert_eq!(result, StreamDisposition::AllowNoExtraStreams);
+    }
+
+    #[test]
+    fn aligned_stream_buffer_is_eight_byte_aligned() {
+        let mut buffer = super::AlignedStreamBuffer::with_byte_capacity(16 * 1024).unwrap();
+        assert_eq!(buffer.as_mut_ptr() as usize % 8, 0);
+        assert_eq!(buffer.byte_len() % 8, 0);
+        assert!(buffer.byte_len() >= 16 * 1024);
+        assert!(buffer.as_bytes().iter().all(|byte| *byte == 0));
+        let mut odd = super::AlignedStreamBuffer::with_byte_capacity(1).unwrap();
+        assert_eq!(odd.as_mut_ptr() as usize % 8, 0);
+        assert_eq!(odd.byte_len(), 8);
+        assert!(super::AlignedStreamBuffer::with_byte_capacity(0).is_none());
+    }
+
+    #[test]
+    fn forced_stream_disposition_overrides_open_file_query() {
+        let _force = super::ForcedStreamDisposition::new(StreamDisposition::DenyForeignStreams);
+        let file = tempfile_for_force();
+        assert_eq!(
+            super::classify_open_file_streams(&file),
+            StreamDisposition::DenyForeignStreams
+        );
+        drop(_force);
+        drop(file);
+    }
+
+    #[test]
+    fn forced_stream_query_failure_is_unverifiable() {
+        let _force = super::ForcedStreamQueryFailed::new();
+        let file = tempfile_for_force();
+        assert_eq!(
+            super::classify_open_file_streams(&file),
+            StreamDisposition::Unverifiable
+        );
+        drop(_force);
+        drop(file);
+    }
+
+    fn tempfile_for_force() -> std::fs::File {
+        let path = std::env::temp_dir().join(format!(
+            "dotty-stream-force-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, b"x").unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        file
     }
 
     #[cfg(windows)]
