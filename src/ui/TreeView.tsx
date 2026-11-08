@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type UIEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, type UIEvent } from "react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 import { ContentSearchResults } from "./ContentSearchResults";
@@ -98,6 +98,15 @@ import {
   canCommitPendingTreeReveal,
   resolveInsightTreeReveal,
 } from "./structureInsightIntegration";
+import {
+  WORKBENCH_TREE_ROW_ID_ATTR,
+  canDragWorkbenchFile,
+  workbenchDropKind,
+  workbenchMoveRequest,
+  workbenchPointerDragShouldStart,
+  workbenchRowIdFromPointTarget,
+  type WorkbenchMoveRequest,
+} from "./treeWorkbenchMove";
 
 interface TreeViewProps {
   result: ScanResult | null;
@@ -121,6 +130,7 @@ interface TreeViewProps {
   folderInsightIdsByLocation?: ReadonlyMap<string, readonly string[]> | null;
   /** P2-J-F: marker click → show insights for this folder location. */
   onInsightMarkerActivate?: (locationId: string) => void;
+  onWorkbenchFileMove?: (request: WorkbenchMoveRequest) => void;
 }
 
 export function TreeView({
@@ -142,11 +152,12 @@ export function TreeView({
   revealRequest = null,
   folderInsightIdsByLocation = null,
   onInsightMarkerActivate,
+  onWorkbenchFileMove,
 }: TreeViewProps) {
   if (result === null) {
     return (
       <section className="tree-panel">
-        <h2>Struktur</h2>
+        <h2>Dateien & Ordner</h2>
         <div className="tree-toolbar">
           <button type="button" disabled>
             Alles aufklappen
@@ -220,6 +231,7 @@ export function TreeView({
       revealRequest={revealRequest}
       folderInsightIdsByLocation={folderInsightIdsByLocation}
       onInsightMarkerActivate={onInsightMarkerActivate}
+      onWorkbenchFileMove={onWorkbenchFileMove}
     />
   );
 }
@@ -243,6 +255,7 @@ interface PopulatedTreeViewProps {
   revealRequest: TreeRevealRequest | null;
   folderInsightIdsByLocation: ReadonlyMap<string, readonly string[]> | null;
   onInsightMarkerActivate?: (locationId: string) => void;
+  onWorkbenchFileMove?: (request: WorkbenchMoveRequest) => void;
 }
 
 function PopulatedTreeView({
@@ -264,6 +277,7 @@ function PopulatedTreeView({
   revealRequest,
   folderInsightIdsByLocation,
   onInsightMarkerActivate,
+  onWorkbenchFileMove,
 }: PopulatedTreeViewProps) {
   const [expandedIds, setExpandedIds] = useState(() => defaultExpandedIds(result.root.id));
   const [activeResult, setActiveResult] = useState(result);
@@ -286,6 +300,21 @@ function PopulatedTreeView({
   const [warningNotice, setWarningNotice] = useState<string | null>(null);
   const [warningOfferReset, setWarningOfferReset] = useState(false);
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const dragSessionRef = useRef<{
+    sourceId: string;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    active: boolean;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
+  const occupancyIdleRef = useRef(true);
+  const onWorkbenchFileMoveRef = useRef(onWorkbenchFileMove);
+  const treeRootRef = useRef<FsNode>(result.root);
+  const scanRootPathRef = useRef(result.root.path);
+  const dropTargetIdRef = useRef<string | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const pendingRevealRef = useRef<string | null>(null);
   /** Reveal after user explicitly resets Anzeigefilter (insight→tree when hidden). */
@@ -316,6 +345,9 @@ function PopulatedTreeView({
     setWarningNotice(null);
     setWarningOfferReset(false);
     setReportDialogOpen(false);
+    setDraggingId(null);
+    setDropTargetId(null);
+    dragSessionRef.current = null;
     pendingRevealRef.current = null;
     pendingRevealAfterFilterResetRef.current = null;
   }
@@ -463,6 +495,113 @@ function PopulatedTreeView({
     isFileSelected: selectedNode !== undefined && isFile(selectedNode),
     occupancyIdle,
   });
+  occupancyIdleRef.current = occupancyIdle;
+  onWorkbenchFileMoveRef.current = onWorkbenchFileMove;
+  treeRootRef.current = viewRoot ?? result.root;
+  scanRootPathRef.current = result.root.path;
+  dropTargetIdRef.current = dropTargetId;
+
+  useEffect(() => {
+    function finishPointerDrag(event: globalThis.PointerEvent) {
+      const session = dragSessionRef.current;
+      if (session === null || session.pointerId !== event.pointerId) {
+        return;
+      }
+      dragSessionRef.current = null;
+      const targetId = dropTargetIdRef.current;
+      setDraggingId(null);
+      setDropTargetId(null);
+      if (!session.active) {
+        return;
+      }
+      suppressClickRef.current = true;
+      const move = onWorkbenchFileMoveRef.current;
+      if (move === undefined || !occupancyIdleRef.current || targetId === null) {
+        return;
+      }
+      const source = findNodeById(treeRootRef.current, session.sourceId);
+      const destination = findNodeById(treeRootRef.current, targetId);
+      if (source === undefined || destination === undefined) {
+        return;
+      }
+      const prepared = workbenchMoveRequest(scanRootPathRef.current, source, destination);
+      if (!prepared.ok) {
+        return;
+      }
+      move(prepared.request);
+    }
+
+    function onPointerMove(event: globalThis.PointerEvent) {
+      const session = dragSessionRef.current;
+      if (session === null || session.pointerId !== event.pointerId) {
+        return;
+      }
+      if (!session.active) {
+        if (
+          !workbenchPointerDragShouldStart(event.clientX - session.startX, event.clientY - session.startY)
+        ) {
+          return;
+        }
+        session.active = true;
+        setDraggingId(session.sourceId);
+      }
+      event.preventDefault();
+      const under = document.elementFromPoint(event.clientX, event.clientY);
+      const targetId = workbenchRowIdFromPointTarget(under);
+      if (targetId === null) {
+        if (dropTargetIdRef.current !== null) {
+          setDropTargetId(null);
+        }
+        return;
+      }
+      const source = findNodeById(treeRootRef.current, session.sourceId);
+      const destination = findNodeById(treeRootRef.current, targetId);
+      if (source === undefined || destination === undefined) {
+        if (dropTargetIdRef.current !== null) {
+          setDropTargetId(null);
+        }
+        return;
+      }
+      if (workbenchDropKind(source, destination) === "valid") {
+        if (dropTargetIdRef.current !== targetId) {
+          setDropTargetId(targetId);
+        }
+        return;
+      }
+      if (dropTargetIdRef.current !== null) {
+        setDropTargetId(null);
+      }
+    }
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", finishPointerDrag);
+    window.addEventListener("pointercancel", finishPointerDrag);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", finishPointerDrag);
+      window.removeEventListener("pointercancel", finishPointerDrag);
+    };
+  }, []);
+
+  function handleFilePointerDown(event: PointerEvent<HTMLDivElement>, row: VisibleTreeRow) {
+    if (event.button !== 0) {
+      return;
+    }
+    if (onWorkbenchFileMove === undefined || !canDragWorkbenchFile(row.node, occupancyIdle)) {
+      return;
+    }
+    const target = event.target;
+    if (target instanceof Element && target.closest("button")) {
+      return;
+    }
+    dragSessionRef.current = {
+      sourceId: row.id,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      active: false,
+    };
+  }
 
   function scrollRowIntoView(id: string, nextRows: VisibleTreeRow[] = rows) {
     const index = rowIndexById(nextRows, id);
@@ -929,8 +1068,8 @@ function PopulatedTreeView({
   }, [sort]);
 
   return (
-    <section className="tree-panel">
-      <h2>Struktur</h2>
+    <section className={draggingId !== null ? "tree-panel workbench-file-dragging" : "tree-panel"}>
+      <h2>Dateien & Ordner</h2>
       <p className="muted tree-stats">
         <span>
           {formatTreeStatsLine({
@@ -1224,9 +1363,19 @@ function PopulatedTreeView({
                   match={matchIdSet.has(row.id)}
                   currentMatch={row.id === currentMatchId}
                   insightCount={insightCount}
-                  onSelect={() => handleRowClick(row)}
+                  fileDraggable={onWorkbenchFileMove !== undefined && canDragWorkbenchFile(row.node, occupancyIdle)}
+                  dragging={draggingId === row.id}
+                  dropTarget={dropTargetId === row.id}
+                  onSelect={() => {
+                    if (suppressClickRef.current) {
+                      suppressClickRef.current = false;
+                      return;
+                    }
+                    handleRowClick(row);
+                  }}
                   onDoubleClick={() => handleRowDoubleClick(row)}
                   onTwist={(event) => handleTwistClick(event, row.id)}
+                  onPointerDown={(event) => handleFilePointerDown(event, row)}
                   onInsightMarkerActivate={
                     insightCount > 0 && onInsightMarkerActivate !== undefined
                       ? (event) => {
@@ -1326,9 +1475,13 @@ interface VirtualTreeRowProps {
   match: boolean;
   currentMatch: boolean;
   insightCount: number;
+  fileDraggable: boolean;
+  dragging: boolean;
+  dropTarget: boolean;
   onSelect: () => void;
   onDoubleClick: () => void;
   onTwist: (event: MouseEvent<HTMLButtonElement>) => void;
+  onPointerDown: (event: PointerEvent<HTMLDivElement>) => void;
   onInsightMarkerActivate?: (event: MouseEvent<HTMLButtonElement>) => void;
 }
 
@@ -1341,9 +1494,13 @@ function VirtualTreeRow({
   match,
   currentMatch,
   insightCount,
+  fileDraggable,
+  dragging,
+  dropTarget,
   onSelect,
   onDoubleClick,
   onTwist,
+  onPointerDown,
   onInsightMarkerActivate,
 }: VirtualTreeRowProps) {
   const { node, depth, directory, expandable } = row;
@@ -1370,6 +1527,9 @@ function VirtualTreeRow({
     match ? "match" : "",
     currentMatch ? "current-match" : "",
     isRoot ? "root-node" : "",
+    dragging ? "dragging" : "",
+    dropTarget ? "drop-target" : "",
+    fileDraggable ? "file-draggable" : "",
   ]
     .filter((part) => part.length > 0)
     .join(" ");
@@ -1382,8 +1542,10 @@ function VirtualTreeRow({
       aria-selected={selected}
       className={rowClass}
       style={{ gridTemplateColumns: gridTemplate, height: ROW_HEIGHT }}
+      {...{ [WORKBENCH_TREE_ROW_ID_ATTR]: row.id }}
       onClick={onSelect}
       onDoubleClick={onDoubleClick}
+      onPointerDown={onPointerDown}
     >
       {columns.map((column) => {
         if (column === "name") {

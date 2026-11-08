@@ -9,7 +9,8 @@ import {
   isRealFolderCreateKind, journalBoundToApprovedPlan, nextRealExecutionOperation, nextRealFileMoveOperation,
   nextRealFolderOperation, realExecutionConfirmKey, realExecutionOperationsFrom, realExecutionUiOpen,
   realFileMoveConfirmIsCurrent, realFileMoveDisableReason, realFileMoveOperationLabel,
-  realFolderOperationLabel, shouldAutoExecuteNext, shouldAutoResumeExecution,
+  realFileMoveWorkbenchEvent, realFileMoveWorkbenchFollowUp, realFolderOperationLabel,
+  shouldAutoExecuteNext, shouldAutoResumeExecution,
 } from "./virtualPlanExecution";
 
 function assert(value: boolean, label: string): void {
@@ -311,4 +312,60 @@ export function runVirtualPlanExecutionCheck(): void {
   assert(outside.status === "blocked" && outside.reason.includes("außerhalb"), "F: path outside scan root is blocked");
   assert(!readyMoveSubmit({ snapshotCurrent: false, journalBoundToPlan: true, decisionStatus: outside.status }), "F: submit rejects outside-root operation");
   assert(!readyMoveSubmit({ approvedTestRoot: false, snapshotCurrent: false, journalBoundToPlan: true }), "F: missing test-root approval blocks execution");
+
+  // P2-L.5: workbench follow-up after a single confirmed MOVE
+  const successFollowUp = realFileMoveWorkbenchFollowUp({ outcome: "moved", moved: true });
+  assert(successFollowUp.refreshWorkbench, "successful MOVE refreshes the workbench tree");
+  assert(successFollowUp.autoExecuteNext === false, "successful MOVE does not auto-run the next MOVE");
+  assert(realFileMoveWorkbenchEvent({
+    outcome: "moved", message: "Datei wurde verschoben.", moved: true,
+  }).refreshWorkbench, "success event asks for a tree refresh");
+
+  const blockedFollowUp = realFileMoveWorkbenchFollowUp({ outcome: "blocked", moved: false });
+  assert(!blockedFollowUp.refreshWorkbench, "blocked MOVE does not refresh the tree");
+  assert(blockedFollowUp.autoExecuteNext === false, "blocked MOVE does not continue");
+  assert(realFileMoveWorkbenchEvent({
+    outcome: "blocked", message: "Ziel ist belegt.", moved: false,
+  }).refreshWorkbench === false, "blocked event keeps the current view");
+
+  const failedFollowUp = realFileMoveWorkbenchFollowUp({ outcome: "failed", moved: false });
+  assert(!failedFollowUp.refreshWorkbench, "failed MOVE does not refresh the tree");
+  assert(failedFollowUp.autoExecuteNext === false, "failed MOVE does not continue");
+  assert(realFileMoveWorkbenchEvent({
+    outcome: "failed", message: "Die Dateioperation ist fehlgeschlagen.", moved: false,
+  }).outcome === "failed", "failed event keeps the failed outcome");
+
+  const unverifiedFollowUp = realFileMoveWorkbenchFollowUp({ outcome: "unverified", moved: false });
+  assert(!unverifiedFollowUp.refreshWorkbench, "unverified MOVE does not refresh the tree");
+  assert(!realFileMoveWorkbenchFollowUp({ outcome: "moved", moved: false }).refreshWorkbench, "moved flag must be true to refresh");
+  assert(!readyMoveSubmit({ explicitConfirm: false }), "abort before confirmation never submits a MOVE");
+  assert(!shouldAutoExecuteNext(boundJournal), "workbench refresh must not auto-execute a second MOVE");
+}
+
+export function assertWorkbenchMoveFollowUpSourceGuards(sources: {
+  execution: string;
+  panel: string;
+  preview: string;
+  app: string;
+  api: string;
+}): void {
+  assert(sources.execution.includes("realFileMoveWorkbenchFollowUp"), "follow-up helper exists");
+  assert(sources.execution.includes("refreshWorkbench"), "follow-up names tree refresh");
+  assert(sources.execution.includes("autoExecuteNext: false"), "follow-up never auto-executes");
+  assert(sources.panel.includes("onRealFileMoveFinished"), "execution panel reports MOVE result to workbench");
+  assert(sources.panel.includes("realFileMoveWorkbenchEvent"), "panel uses shared follow-up event");
+  assert(sources.panel.includes("executeMoveFile"), "panel still calls the productive MOVE command");
+  assert((sources.panel.match(/executeMoveFile\(/g) ?? []).length === 1, "exactly one productive MOVE call site in the panel");
+  assert(sources.panel.includes("const [executionOpen, setExecutionOpen] = useState(true)"), "execution section starts open in the planning workbench");
+  assert(sources.preview.includes("onRealFileMoveFinished"), "planning view forwards MOVE result");
+  assert(sources.app.includes("handleRealFileMoveFinished"), "workbench handles MOVE result");
+  assert(sources.app.includes("handleStartScan"), "workbench can refresh the tree after MOVE");
+  assert(sources.app.includes("handleWorkbenchFileMove"), "workbench DnD executes MOVE without the plan panel");
+  assert(sources.app.includes("workbenchNotice"), "workbench shows MOVE outcome");
+  assert(sources.app.includes("event.refreshWorkbench"), "workbench refreshes only when follow-up asks");
+  assert(!sources.app.includes("executeMoveFile"), "plan MOVE API is not called from App");
+  assert(sources.app.includes("executeWorkbenchMoveFile"), "workbench DnD calls the shared MOVE engine wrapper");
+  assert(!sources.app.includes("execute_move_file"), "workbench does not invoke the plan MOVE command");
+  assert(sources.api.includes("execute_move_file") && sources.api.includes('confirmedKind: "moveFile"'), "plan MOVE API remains");
+  assert(sources.api.includes("execute_workbench_move_file"), "workbench MOVE reuses the productive backend command");
 }

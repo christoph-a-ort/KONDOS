@@ -29,12 +29,14 @@ import {
   type VirtualPlanApprovalAssessment,
 } from "./virtualPlanApproval";
 import { revalidateVirtualPlan, type VirtualPlanRevalidation } from "./virtualPlanRevalidation";
+import { emptyVirtualPlanBlockReason } from "./virtualPlanEditor";
 import { VirtualPlanEditorPanel } from "./VirtualPlanEditorPanel";
 import { VirtualPlanPreferencesPanel } from "./VirtualPlanPreferencesPanel";
 import { VirtualPlanDryRunPanel } from "./VirtualPlanDryRunPanel";
 import { VirtualPlanJournalPanel } from "./VirtualPlanJournalPanel";
 import { VirtualPlanPreflightPanel } from "./VirtualPlanPreflightPanel";
 import { VirtualPlanExecutionPanel } from "./VirtualPlanExecutionPanel";
+import type { RealFileMoveWorkbenchEvent } from "./virtualPlanExecution";
 import { VirtualPlanReservationAdminPanel } from "./VirtualPlanReservationAdminPanel";
 
 export type PlanCompareMode = "ist" | "soll" | "split";
@@ -51,10 +53,12 @@ export interface VirtualPlanPreviewViewProps {
   historicalPlanEntries: VirtualPlanDraftListEntry[];
   historicalPlansLoading: boolean;
   onSelectProposal: (proposal: VirtualReorgProposal) => void;
+  onStartEmptyPlan: () => void;
   onPlanChange: (plan: VirtualPlan) => void;
   onSavePlan: () => void;
   onApprovePlan: () => void;
   onRecheckHistoricalPlans: () => void;
+  onRealFileMoveFinished?: (event: RealFileMoveWorkbenchEvent) => void;
 }
 
 function suggestionLabel(kind: SollNodeProjection["suggestionKind"]): string {
@@ -205,10 +209,12 @@ export function VirtualPlanPreviewView({
   historicalPlanEntries,
   historicalPlansLoading,
   onSelectProposal,
+  onStartEmptyPlan,
   onPlanChange,
   onSavePlan,
   onApprovePlan,
   onRecheckHistoricalPlans,
+  onRealFileMoveFinished,
 }: VirtualPlanPreviewViewProps) {
   const [mode, setMode] = useState<PlanCompareMode>("split");
   const [mainView, setMainView] = useState<PlanningMainView>("editor");
@@ -312,6 +318,13 @@ export function VirtualPlanPreviewView({
     }
     return `Gespeicherter Entwurf vorhanden (Revision ${draftLoad.plan.revision}) — keine automatische Überschreibung.`;
   }, [draftLoad, loadingDraft, preview]);
+  const emptyPlanBlock = preview === null
+    ? "Für die virtuelle SOLL-Ansicht wird ein erfolgreich eingelesener Bestand benötigt."
+    : emptyVirtualPlanBlockReason({
+      binding: preview.binding,
+      draftLoad,
+      loadingDraft,
+    });
 
   const toggleExpand = (nodeId: string) => {
     setExpandedIds((current) => {
@@ -459,6 +472,21 @@ export function VirtualPlanPreviewView({
 
       {mainView === "editor" && editablePlan === null ? (
         <div className="plan-proposals">
+        <div className="plan-empty-start">
+          <p className="muted">
+            Kein gespeicherter Entwurf für diesen Snapshot. Sie können eine leere Planung anlegen
+            und Dateien einem Zielordner zuordnen.
+          </p>
+          <button
+            type="button"
+            disabled={emptyPlanBlock !== null}
+            onClick={onStartEmptyPlan}
+          >
+            Leere Planung anlegen
+          </button>
+          {emptyPlanBlock !== null ? <p className="plan-draft-note muted">{emptyPlanBlock}</p> : null}
+          {planSaveMessage !== null ? <p className="plan-editor-notice" role="status">{planSaveMessage}</p> : null}
+        </div>
         <button
           type="button"
           className="plan-details-toggle"
@@ -500,7 +528,7 @@ export function VirtualPlanPreviewView({
             plan={editablePlan}
             saving={planSaving}
             saveMessage={planSaveMessage}
-            proposalTitle={selectedProposal?.title ?? "Ausgewählter virtueller Vorschlag"}
+            proposalTitle={selectedProposal?.title ?? "Manuelle Planung"}
             usefulnessLabel={
               selectedProposal === undefined
                 ? null
@@ -538,6 +566,7 @@ export function VirtualPlanPreviewView({
             scanResult={scanResult}
             binding={preview.binding}
             current={currentPlanRevalidation?.kind === "current"}
+            onRealFileMoveFinished={onRealFileMoveFinished}
           />
         </>
       ) : null}

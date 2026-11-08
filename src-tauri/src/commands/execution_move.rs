@@ -11,7 +11,7 @@ use crate::paths::windows_lengths::{maximum_component_length_for_path, target_le
 use crate::paths::windows_rules::{execution_path_looks_unsafe, is_allowed_windows_component};
 use crate::paths::windows_storage::{classify_opened_path, StorageKind};
 use crate::paths::windows_streams::StreamDisposition;
-use crate::scan::must_not_follow;
+use crate::scan::path_has_blocking_reparse;
 use crate::state::AppState;
 
 use super::execution_binding::{inspect_scan_root_at, progress_bound_run_locked, BoundExecutionView};
@@ -19,7 +19,7 @@ use super::execution_journal::{
     journal, journal_status_blocks_real_ops, journal_store, load_at, success_journal_status,
 };
 use super::execution_preflight::{path_has_parent_dir, within_scan_root};
-use super::execution_test_root::require_approved_test_root;
+use super::execution_test_root::{require_approved_test_root, scan_root_is_unsafe_for_real_ops};
 use super::scan_root_coordination::acquire_at;
 
 const REAL_CHANGE_NOTICE: &str =
@@ -302,6 +302,7 @@ enum MoveBlock {
     ParentMissing,
     NotFile,
     Reparse,
+    ContentNotLocal,
     OutsideRoot,
     InvalidName,
     Fingerprint,
@@ -324,6 +325,9 @@ impl MoveBlock {
             MoveBlock::ParentMissing => "Der Zielordner existiert nicht.",
             MoveBlock::NotFile => "Die Quelle ist keine reguläre Datei. Ordner dürfen nicht verschoben werden.",
             MoveBlock::Reparse => "Symlink, Junction oder anderer Reparse-Point blockiert die Operation.",
+            MoveBlock::ContentNotLocal => {
+                "Die Datei ist lokal nicht vollständig vorhanden. Nur vollständig synchronisierte Dateien können verschoben werden."
+            }
             MoveBlock::OutsideRoot => "Quelle oder Ziel liegt außerhalb der freigegebenen Scanwurzel.",
             MoveBlock::InvalidName => "Der Dateiname ist unzulässig.",
             MoveBlock::Fingerprint => "Die Quelldatei hat sich seit der Planung verändert. Ablauf angehalten.",
@@ -363,12 +367,16 @@ fn move_stream_gate(kind: StreamDisposition) -> Result<(), MoveBlock> {
     }
 }
 
-fn metadata_is_reparse(metadata: &fs::Metadata) -> bool {
-    must_not_follow(metadata.file_type(), Some(metadata))
+fn path_blocks_as_reparse(path: &str) -> Result<bool, MoveBlock> {
+    match path_has_blocking_reparse(Path::new(&path.replace('/', "\\"))) {
+        Ok(value) => Ok(value),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Err(MoveBlock::Unverifiable),
+    }
 }
 
 fn precheck_paths(scan_root: &str, source: &str, target: &str) -> Result<(), MoveBlock> {
-    if win_move::path_is_reparse(scan_root)? || win_move::path_is_reparse(source)? || win_move::path_is_reparse(target)? {
+    if path_blocks_as_reparse(scan_root)? || path_blocks_as_reparse(source)? || path_blocks_as_reparse(target)? {
         return Err(MoveBlock::Reparse);
     }
     if let Some(parent) = Path::new(&target.replace('/', "\\")).parent() {
@@ -376,7 +384,7 @@ fn precheck_paths(scan_root: &str, source: &str, target: &str) -> Result<(), Mov
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Err(MoveBlock::ParentMissing),
             Err(_) => return Err(MoveBlock::Unverifiable),
             Ok(metadata) => {
-                if metadata_is_reparse(&metadata) {
+                if path_blocks_as_reparse(&parent.to_string_lossy())? {
                     return Err(MoveBlock::Reparse);
                 }
                 if !metadata.is_dir() {
@@ -389,7 +397,7 @@ fn precheck_paths(scan_root: &str, source: &str, target: &str) -> Result<(), Mov
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Err(MoveBlock::SourceMissing),
         Err(_) => return Err(MoveBlock::Unverifiable),
         Ok(metadata) => {
-            if metadata_is_reparse(&metadata) {
+            if path_blocks_as_reparse(source)? {
                 return Err(MoveBlock::Reparse);
             }
             if metadata.is_dir() || !metadata.is_file() {
@@ -401,9 +409,10 @@ fn precheck_paths(scan_root: &str, source: &str, target: &str) -> Result<(), Mov
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(_) => return Err(MoveBlock::Unverifiable),
         Ok(metadata) => {
-            if metadata_is_reparse(&metadata) {
+            if path_blocks_as_reparse(target)? {
                 return Err(MoveBlock::Reparse);
             }
+            let _ = metadata;
             return Err(MoveBlock::Exists);
         }
     }
@@ -413,12 +422,15 @@ fn precheck_paths(scan_root: &str, source: &str, target: &str) -> Result<(), Mov
 #[cfg(windows)]
 mod win_move {
     use super::{
-        metadata_is_reparse, move_storage_gate, move_stream_gate, within_scan_root, FileIdentity,
-        MoveBlock,
+        move_storage_gate, move_stream_gate, within_scan_root, FileIdentity, MoveBlock,
+    };
+    use crate::scan::{
+        attributes_are_recall_on_data_access, handle_attributes, handle_has_blocking_reparse,
+        path_has_blocking_reparse,
     };
     use crate::paths::windows_streams::classify_open_file_streams;
     use crate::paths::windows_storage::classify_storage_from_file_with_origin;
-    use std::fs::{self, File, OpenOptions};
+    use std::fs::{File, OpenOptions};
     use std::os::windows::ffi::OsStrExt;
     use std::os::windows::fs::OpenOptionsExt;
     use std::os::windows::io::{AsRawHandle, FromRawHandle, RawHandle};
@@ -610,8 +622,10 @@ mod win_move {
 
     fn check_dir_handle(file: &File, scan_root: &str) -> Result<u32, MoveBlock> {
         let metadata = file.metadata().map_err(|_| MoveBlock::Unverifiable)?;
-        if metadata_is_reparse(&metadata) {
-            return Err(MoveBlock::Reparse);
+        match handle_has_blocking_reparse(file) {
+            Ok(true) => return Err(MoveBlock::Reparse),
+            Ok(false) => {}
+            Err(_) => return Err(MoveBlock::Unverifiable),
         }
         if !metadata.is_dir() {
             return Err(MoveBlock::Unverifiable);
@@ -622,9 +636,6 @@ mod win_move {
         }
         move_storage_gate(classify_storage_from_file_with_origin(file, scan_root))?;
         let info = handle_info(file)?;
-        if info.file_attributes & 0x400 != 0 {
-            return Err(MoveBlock::Reparse);
-        }
         if info.volume_serial_number == 0 {
             return Err(MoveBlock::Unverifiable);
         }
@@ -638,8 +649,15 @@ mod win_move {
         expected_modified_at_ms: u64,
     ) -> Result<FileIdentity, MoveBlock> {
         let metadata = file.metadata().map_err(|_| MoveBlock::Unverifiable)?;
-        if metadata_is_reparse(&metadata) {
-            return Err(MoveBlock::Reparse);
+        match handle_has_blocking_reparse(file) {
+            Ok(true) => return Err(MoveBlock::Reparse),
+            Ok(false) => {}
+            Err(_) => return Err(MoveBlock::Unverifiable),
+        }
+        if let Ok(attributes) = handle_attributes(file) {
+            if attributes_are_recall_on_data_access(attributes) {
+                return Err(MoveBlock::ContentNotLocal);
+            }
         }
         if metadata.is_dir() || !metadata.is_file() {
             return Err(MoveBlock::NotFile);
@@ -806,11 +824,12 @@ mod win_move {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub(crate) fn path_is_reparse(path: &str) -> Result<bool, MoveBlock> {
-        match fs::symlink_metadata(path.replace('/', "\\")) {
+        match path_has_blocking_reparse(Path::new(&path.replace('/', "\\"))) {
+            Ok(value) => Ok(value),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
             Err(_) => Err(MoveBlock::Unverifiable),
-            Ok(metadata) => Ok(metadata_is_reparse(&metadata)),
         }
     }
 
@@ -1144,7 +1163,11 @@ fn execute_move_file_locked(
                 _ => false,
             };
             let dest_ok = match fs::symlink_metadata(target.replace('/', "\\")) {
-                Ok(metadata) => metadata.is_file() && !metadata_is_reparse(&metadata),
+                Ok(metadata) => {
+                    metadata.is_file()
+                        && !path_has_blocking_reparse(Path::new(&target.replace('/', "\\")))
+                            .unwrap_or(true)
+                }
                 Err(_) => false,
             };
             if !source_gone || !dest_ok {
@@ -1302,6 +1325,229 @@ pub fn execute_move_file(
         expected_size_bytes,
         expected_modified_at_ms,
         explicit_confirm,
+    )
+}
+
+const WORKBENCH_MOVE_DIR: &str = "workbench-moves";
+const WORKBENCH_MOVED_MESSAGE: &str = "Die Datei wurde verschoben.";
+const WORKBENCH_UNFINISHED: &str =
+    "Eine frühere echte Dateioperation ist nicht abgeschlossen. Keine automatische Wiederholung.";
+const WORKBENCH_SAME_FOLDER: &str = "Die Datei liegt bereits in diesem Ordner.";
+
+fn workbench_intent_file(app_data: &Path) -> PathBuf {
+    app_data.join(WORKBENCH_MOVE_DIR).join("active.json")
+}
+
+fn unfinished_workbench_move(app_data: &Path) -> Option<String> {
+    let raw = fs::read_to_string(workbench_intent_file(app_data)).ok()?;
+    let value: Value = serde_json::from_str(&raw).ok()?;
+    let phase = value.get("phase").and_then(Value::as_str)?;
+    matches!(phase, "started" | "unverified").then(|| WORKBENCH_UNFINISHED.to_string())
+}
+
+fn write_workbench_intent(
+    app_data: &Path,
+    scan_root: &str,
+    source: &str,
+    target: &str,
+    phase: &str,
+    identity: Option<&FileIdentity>,
+) -> Result<(), MoveBlock> {
+    let dir = app_data.join(WORKBENCH_MOVE_DIR);
+    fs::create_dir_all(&dir).map_err(|_| MoveBlock::Unverifiable)?;
+    let mut payload = json!({
+        "kind": "moveFile",
+        "phase": phase,
+        "scanRoot": scan_root,
+        "sourcePath": source,
+        "targetPath": target,
+        "explicitConfirm": true,
+    });
+    if let (Some(identity), Some(object)) = (identity, payload.as_object_mut()) {
+        object.insert(
+            "sourceIdentity".into(),
+            json!({
+                "volumeSerial": format!("{:08x}", identity.volume_serial),
+                "fileIndex": format!("{:08x}{:08x}", identity.index_high, identity.index_low),
+                "sizeBytes": identity.size_bytes,
+                "modifiedAtMs": identity.modified_at_ms,
+            }),
+        );
+    }
+    fs::write(workbench_intent_file(app_data), payload.to_string()).map_err(|_| MoveBlock::Unverifiable)
+}
+
+fn clear_workbench_intent(app_data: &Path) {
+    let _ = fs::remove_file(workbench_intent_file(app_data));
+}
+
+fn execute_workbench_move_file_locked(
+    app_data: &Path,
+    scan_root: &str,
+    source: &str,
+    target: &str,
+    expected_size_bytes: u64,
+    expected_modified_at_ms: u64,
+) -> Result<MoveFileResult, AppError> {
+    if scan_root_is_unsafe_for_real_ops(scan_root) {
+        return Ok(blocked_result(
+            source,
+            target,
+            "Diese Scanwurzel ist kein zulässiger Pfad für echte Dateioperationen.",
+            empty_view(),
+        ));
+    }
+    if let Some(reason) = unfinished_workbench_move(app_data) {
+        return Ok(blocked_result(source, target, reason, empty_view()));
+    }
+    let source_components = match relative_components(scan_root, source) {
+        Ok(value) => value,
+        Err(error) => return Ok(blocked_result(source, target, error.message, empty_view())),
+    };
+    let dest_components = match relative_components(scan_root, target) {
+        Ok(value) => value,
+        Err(error) => return Ok(blocked_result(source, target, error.message, empty_view())),
+    };
+    if source_components.len() == dest_components.len()
+        && source_components[..source_components.len() - 1] == dest_components[..dest_components.len() - 1]
+    {
+        return Ok(blocked_result(source, target, WORKBENCH_SAME_FOLDER, empty_view()));
+    }
+    if let Err(block) = precheck_paths(scan_root, source, target) {
+        return Ok(blocked_result(source, target, block.message(), empty_view()));
+    }
+    let Some(new_name) = dest_components.last() else {
+        return Ok(blocked_result(
+            source,
+            target,
+            "Neue Zielkomponenten sind nicht sicher bestimmbar.",
+            empty_view(),
+        ));
+    };
+    if let Some(reason) = target_length_blocks_real_operation(
+        target,
+        &[new_name.as_str()],
+        maximum_component_length_for_path(scan_root),
+    ) {
+        return Ok(blocked_result(source, target, reason, empty_view()));
+    }
+    if let Err(block) = move_storage_gate(classify_opened_path(scan_root)) {
+        return Ok(blocked_result(source, target, block.message(), empty_view()));
+    }
+
+    let intent_written = std::cell::Cell::new(false);
+    let move_result = win_move::prepare_and_move(
+        scan_root,
+        &source_components,
+        &dest_components,
+        expected_size_bytes,
+        expected_modified_at_ms,
+        |identity| {
+            write_workbench_intent(app_data, scan_root, source, target, "started", Some(identity))?;
+            intent_written.set(true);
+            Ok(())
+        },
+    );
+
+    match move_result {
+        Ok(_identity) => {
+            let source_gone = match fs::symlink_metadata(source.replace('/', "\\")) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+                _ => false,
+            };
+            let dest_ok = match fs::symlink_metadata(target.replace('/', "\\")) {
+                Ok(metadata) => {
+                    metadata.is_file()
+                        && !path_has_blocking_reparse(Path::new(&target.replace('/', "\\")))
+                            .unwrap_or(true)
+                }
+                Err(_) => false,
+            };
+            if !source_gone || !dest_ok {
+                let _ = write_workbench_intent(app_data, scan_root, source, target, "unverified", None);
+                return Ok(MoveFileResult {
+                    outcome: "unverified".to_string(),
+                    source_path: source.to_string(),
+                    target_path: target.to_string(),
+                    message: MoveBlock::MovedUnverified.message().to_string(),
+                    moved: false,
+                    halted: true,
+                    binding_status: String::new(),
+                    journal_json: None,
+                    reminder: REAL_CHANGE_NOTICE.to_string(),
+                });
+            }
+            clear_workbench_intent(app_data);
+            Ok(MoveFileResult {
+                outcome: "moved".to_string(),
+                source_path: source.to_string(),
+                target_path: target.to_string(),
+                message: WORKBENCH_MOVED_MESSAGE.to_string(),
+                moved: true,
+                halted: false,
+                binding_status: String::new(),
+                journal_json: None,
+                reminder: REAL_CHANGE_NOTICE.to_string(),
+            })
+        }
+        Err(block) => {
+            if intent_written.get() {
+                let _ = write_workbench_intent(app_data, scan_root, source, target, "failed", None);
+                Ok(MoveFileResult {
+                    outcome: "failed".to_string(),
+                    source_path: source.to_string(),
+                    target_path: target.to_string(),
+                    message: format!("{} Ablauf angehalten.", block.message()),
+                    moved: false,
+                    halted: true,
+                    binding_status: String::new(),
+                    journal_json: None,
+                    reminder: REAL_CHANGE_NOTICE.to_string(),
+                })
+            } else {
+                Ok(blocked_result(source, target, block.message(), empty_view()))
+            }
+        }
+    }
+}
+
+pub(crate) fn execute_workbench_move_file_at(
+    app_data: &Path,
+    scan_root: &str,
+    source_path: &str,
+    target_path: &str,
+    expected_size_bytes: u64,
+    expected_modified_at_ms: u64,
+) -> Result<MoveFileResult, AppError> {
+    let _guard = acquire_at(app_data, scan_root)?;
+    execute_workbench_move_file_locked(
+        app_data,
+        scan_root,
+        source_path,
+        target_path,
+        expected_size_bytes,
+        expected_modified_at_ms,
+    )
+}
+
+#[tauri::command]
+pub fn execute_workbench_move_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    scan_root: String,
+    source_path: String,
+    target_path: String,
+    expected_size_bytes: u64,
+    expected_modified_at_ms: u64,
+) -> Result<MoveFileResult, AppError> {
+    let _occupancy = state.try_begin_execution()?;
+    execute_workbench_move_file_at(
+        &app_data(&app)?,
+        &scan_root,
+        &source_path,
+        &target_path,
+        expected_size_bytes,
+        expected_modified_at_ms,
     )
 }
 
@@ -2538,5 +2784,128 @@ mod tests {
         );
         assert!(names_after.iter().any(|name| name == "DottyFmRace"));
         eprintln!("LIVE_F PASS");
+    }
+
+    fn workbench_setup() -> (PathBuf, String) {
+        let root = dir();
+        fs::create_dir(root.join("dest")).unwrap();
+        fs::write(root.join("a.txt"), b"hello").unwrap();
+        fs::write(root.join("keep.txt"), b"keep").unwrap();
+        let scan = root.to_string_lossy().replace('\\', "/");
+        (root, scan)
+    }
+
+    fn workbench_execute(
+        app: &Path,
+        scan: &str,
+        source: &str,
+        target: &str,
+        size: u64,
+        modified: u64,
+    ) -> MoveFileResult {
+        execute_workbench_move_file_at(app, scan, source, target, size, modified).unwrap()
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_moves_file_without_plan_or_approval() {
+        let (root, scan) = workbench_setup();
+        let source = format!("{scan}/a.txt");
+        let target = format!("{scan}/dest/a.txt");
+        let (size, modified) = fingerprint(&root.join("a.txt"));
+        let result = workbench_execute(&root, &scan, &source, &target, size, modified);
+        assert_eq!(result.outcome, "moved", "{}", result.message);
+        assert!(result.moved);
+        assert!(!root.join("a.txt").exists());
+        assert!(root.join("dest").join("a.txt").is_file());
+        assert_eq!(fs::read(root.join("dest").join("a.txt")).unwrap(), b"hello");
+        assert_eq!(fs::read(root.join("keep.txt")).unwrap(), b"keep");
+        assert!(!workbench_intent_file(&root).exists());
+        let (size_back, modified_back) = fingerprint(&root.join("dest").join("a.txt"));
+        let back = workbench_execute(&root, &scan, &target, &source, size_back, modified_back);
+        assert_eq!(back.outcome, "moved", "{}", back.message);
+        assert!(root.join("a.txt").is_file());
+        assert!(!root.join("dest").join("a.txt").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_same_folder_is_blocked() {
+        let (root, scan) = workbench_setup();
+        let source = format!("{scan}/a.txt");
+        let (size, modified) = fingerprint(&root.join("a.txt"));
+        let result = workbench_execute(&root, &scan, &source, &source, size, modified);
+        assert_eq!(result.outcome, "blocked");
+        assert!(result.message.contains("bereits in diesem Ordner"));
+        assert_eq!(fs::read(root.join("a.txt")).unwrap(), b"hello");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_existing_target_is_blocked() {
+        let (root, scan) = workbench_setup();
+        fs::write(root.join("dest").join("a.txt"), b"other").unwrap();
+        let (size, modified) = fingerprint(&root.join("a.txt"));
+        let result = workbench_execute(
+            &root,
+            &scan,
+            &format!("{scan}/a.txt"),
+            &format!("{scan}/dest/a.txt"),
+            size,
+            modified,
+        );
+        assert_eq!(result.outcome, "blocked");
+        assert_eq!(fs::read(root.join("a.txt")).unwrap(), b"hello");
+        assert_eq!(fs::read(root.join("dest").join("a.txt")).unwrap(), b"other");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_directory_source_is_blocked() {
+        let (root, scan) = workbench_setup();
+        let result = workbench_execute(
+            &root,
+            &scan,
+            &format!("{scan}/dest"),
+            &format!("{scan}/keep.txt/dest"),
+            0,
+            0,
+        );
+        assert_eq!(result.outcome, "blocked");
+        assert!(root.join("dest").is_dir());
+        assert!(root.join("a.txt").is_file());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_unfinished_intent_blocks_without_retry() {
+        let (root, scan) = workbench_setup();
+        write_workbench_intent(
+            &root,
+            &scan,
+            &format!("{scan}/a.txt"),
+            &format!("{scan}/dest/a.txt"),
+            "started",
+            None,
+        )
+        .unwrap();
+        let (size, modified) = fingerprint(&root.join("a.txt"));
+        let result = workbench_execute(
+            &root,
+            &scan,
+            &format!("{scan}/a.txt"),
+            &format!("{scan}/dest/a.txt"),
+            size,
+            modified,
+        );
+        assert_eq!(result.outcome, "blocked");
+        assert!(result.message.contains("Keine automatische Wiederholung"));
+        assert!(root.join("a.txt").is_file());
+        assert!(!root.join("dest").join("a.txt").exists());
+        let _ = fs::remove_dir_all(root);
     }
 }

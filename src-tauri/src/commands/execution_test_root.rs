@@ -37,7 +37,7 @@ pub(crate) fn approval_file(base: &Path, scan_root: &str) -> Result<PathBuf, App
     Ok(base.join(DIR).join(format!("{}.v1.json", identity(scan_root)?)))
 }
 
-fn productive_or_unsafe_root(scan_root: &str) -> bool {
+pub(crate) fn scan_root_is_unsafe_for_real_ops(scan_root: &str) -> bool {
     if scan_root.trim().is_empty() || scan_root.contains('\0') || path_has_parent_dir(scan_root) {
         return true;
     }
@@ -77,7 +77,7 @@ pub struct TestRootApprovalView {
 }
 
 pub(crate) fn inspect_test_root_at(base: &Path, scan_root: &str) -> Result<TestRootApprovalView, AppError> {
-    if productive_or_unsafe_root(scan_root) {
+    if scan_root_is_unsafe_for_real_ops(scan_root) {
         return Ok(TestRootApprovalView {
             approved: false,
             scan_root: scan_root.to_string(),
@@ -128,7 +128,7 @@ pub(crate) fn approve_test_root_at(
             "Die Testpfad-Freigabe braucht eine ausdrückliche Bestätigung für genau diesen Pfad.",
         ));
     }
-    if productive_or_unsafe_root(scan_root) {
+    if scan_root_is_unsafe_for_real_ops(scan_root) {
         return Err(AppError::invalid_config(
             "Diese Scanwurzel ist kein zulässiger Testpfad.",
         ));

@@ -50,6 +50,16 @@ export function executeCreateFolder(options: {
   return invoke<CreateFolderResult>("execute_create_folder", options);
 }
 
+export function executeWorkbenchMoveFile(options: {
+  scanRoot: string;
+  sourcePath: string;
+  targetPath: string;
+  expectedSizeBytes: number;
+  expectedModifiedAtMs: number;
+}): Promise<MoveFileResult> {
+  return invoke<MoveFileResult>("execute_workbench_move_file", options);
+}
+
 export function executeMoveFile(options: {
   scanRoot: string;
   ownerRunId: string;

@@ -4,13 +4,21 @@
  */
 
 import {
+  AUTOSORT_NAV_LABEL,
+  FILES_NAV_LABEL,
   INSIGHT_EVIDENCE_INFO,
+  INSIGHTS_NAV_LABEL,
+  PLANNING_NAV_LABEL,
+  canSelectAutosortView,
   canSelectInsightsView,
   defaultMainView,
   formatInsightEvidenceSummary,
   formatInsightReadyHeadline,
   insightNavCountLabel,
+  isAutosortMainView,
+  mainNavSection,
   mainViewAfterScanStart,
+  selectMainNavSection,
   shouldAutoSwitchMainViewOnPhase,
 } from "./structureInsightsViewHelpers";
 import type { InsightCardModel, StructureInsightViewModel } from "./structureInsightViewModel";
@@ -63,8 +71,19 @@ function stubInsight(): InsightCardModel {
 export function runStructureInsightsViewCheck(): void {
   assert(defaultMainView() === "structure", "default main view");
   assert(mainViewAfterScanStart() === "structure", "scan start main view");
+  assert(FILES_NAV_LABEL === "Dateien & Ordner", "files nav label");
+  assert(AUTOSORT_NAV_LABEL === "Automatische Sortierung", "autosort nav label");
+  assert(INSIGHTS_NAV_LABEL === "Erkenntnisse", "insights remain reachable");
+  assert(PLANNING_NAV_LABEL === "Planung", "planning remains reachable");
+  assert(mainNavSection("structure") === "files", "structure is files section");
+  assert(mainNavSection("insights") === "autosort" && mainNavSection("planning") === "autosort", "insights and planning stay under autosort");
+  assert(!isAutosortMainView("structure") && isAutosortMainView("insights") && isAutosortMainView("planning"), "autosort views");
+  assert(selectMainNavSection("files", "planning") === "structure", "files tab returns to tree");
+  assert(selectMainNavSection("autosort", "structure") === "insights", "autosort opens insights first");
+  assert(selectMainNavSection("autosort", "planning") === "planning", "autosort remembers planning");
   assert(!canSelectInsightsView(false), "insights blocked without scan");
   assert(canSelectInsightsView(true), "insights allowed with scan");
+  assert(!canSelectAutosortView(false) && canSelectAutosortView(true), "autosort follows scan availability");
   assert(!shouldAutoSwitchMainViewOnPhase("running"), "no auto on running");
   assert(!shouldAutoSwitchMainViewOnPhase("ready"), "no auto on ready");
   assert(!shouldAutoSwitchMainViewOnPhase("failed"), "no auto on failed");

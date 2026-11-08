@@ -34,13 +34,27 @@ import { withScanRootPath } from "./ui/displayFilter";
 import { TreeView } from "./ui/TreeView";
 import {
   StructureInsightsView,
+  AUTOSORT_NAV_LABEL,
+  FILES_NAV_LABEL,
+  INSIGHTS_NAV_LABEL,
+  PLANNING_NAV_LABEL,
+  canSelectAutosortView,
   canSelectInsightsView,
   canSelectPlanningView,
   insightNavCountLabel,
+  isAutosortMainView,
   mainViewAfterScanStart,
+  selectMainNavSection,
   type MainView,
 } from "./ui/StructureInsightsView";
 import { VirtualPlanPreviewView } from "./ui/VirtualPlanPreviewView";
+import type { RealFileMoveWorkbenchEvent } from "./ui/virtualPlanExecution";
+import { executeWorkbenchMoveFile } from "./ui/virtualPlanExecutionApi";
+import {
+  pathForCurrentScan,
+  workbenchMoveEventFromResult,
+  type WorkbenchMoveRequest,
+} from "./ui/treeWorkbenchMove";
 import {
   listVirtualPlanDrafts,
   loadVirtualPlanDraft,
@@ -58,7 +72,9 @@ import {
   planIdForBinding,
 } from "./ui/virtualPlanPreview";
 import {
+  createEmptyVirtualPlan,
   createVirtualPlanFromProposal,
+  emptyVirtualPlanBlockReason,
   prepareVirtualPlanForSave,
   validateVirtualPlan,
 } from "./ui/virtualPlanEditor";
@@ -158,6 +174,10 @@ function App() {
   const [exportNoticeKind, setExportNoticeKind] = useState<"progress" | "saved" | "failed" | null>(
     null,
   );
+  const [workbenchNotice, setWorkbenchNotice] = useState<string | null>(null);
+  const [workbenchNoticeKind, setWorkbenchNoticeKind] = useState<"success" | "blocked" | "failed" | null>(
+    null,
+  );
   const [exportFormat, setExportFormat] = useState<ExportFormat>("txt");
   const [columnVisibility, setColumnVisibility] = useState<ColumnVisibility>(
     () => defaultWorkbenchPrefs().columnVisibility,
@@ -227,6 +247,9 @@ function App() {
       window.removeEventListener("keydown", onKeyDown);
     };
   }, []);
+  const pendingRevealNodeIdRef = useRef<string | null>(null);
+  const workbenchMoveBusyRef = useRef(false);
+  const lastAutosortViewRef = useRef<MainView>("insights");
   const navRequestIdRef = useRef(0);
   const handleDroppedPathsRef = useRef<(paths: string[]) => void>(() => {});
   const jsonStoreRef = useRef<WorkbenchPrefsJsonStore | null>(createJsonPrefsStore());
@@ -373,7 +396,11 @@ function App() {
 
   const insightsSelectable = canSelectInsightsView(result !== null && resultScanId !== null);
   const planningSelectable = canSelectPlanningView(result !== null && resultScanId !== null);
+  const autosortSelectable = canSelectAutosortView(result !== null && resultScanId !== null);
   const insightsNavCount = insightNavCountLabel(insightAnalysisPhase, insightViewModel);
+  if (isAutosortMainView(mainView)) {
+    lastAutosortViewRef.current = mainView;
+  }
 
   const virtualPlanPreview = useMemo(() => {
     if (result === null || resultScanId === null) {
@@ -464,6 +491,31 @@ function App() {
     }
     setEditableVirtualPlan(created.plan);
     setPlanSaveMessage("Virtueller Entwurf aus dem ausgewählten Vorschlag angelegt. Noch nicht gespeichert.");
+  }
+
+  function startEmptyVirtualPlan(): void {
+    if (result === null || virtualPlanPreview === null) {
+      return;
+    }
+    const blocked = emptyVirtualPlanBlockReason({
+      binding: virtualPlanPreview.binding,
+      draftLoad: planDraftLoad,
+      loadingDraft: planDraftLoading,
+    });
+    if (blocked !== null) {
+      setPlanSaveMessage(blocked);
+      return;
+    }
+    const created = createEmptyVirtualPlan({
+      scanResult: result,
+      binding: virtualPlanPreview.binding,
+    });
+    if (!created.ok) {
+      setPlanSaveMessage(created.error);
+      return;
+    }
+    setEditableVirtualPlan(created.plan);
+    setPlanSaveMessage("Leere Planung angelegt. Noch nicht gespeichert.");
   }
 
   function changeEditableVirtualPlan(plan: VirtualPlan): void {
@@ -737,6 +789,17 @@ function App() {
       }
       setResult(next);
       assignResultScanId(scanId);
+      const pendingReveal = pendingRevealNodeIdRef.current;
+      pendingRevealNodeIdRef.current = null;
+      if (pendingReveal !== null) {
+        navRequestIdRef.current += 1;
+        setTreeRevealRequest({
+          id: navRequestIdRef.current,
+          scanId,
+          nodeId: pendingReveal,
+        });
+        setMainView("structure");
+      }
       setAppliedExtensions(scanConfig.extensions);
       setProgress({
         scanId,
@@ -901,6 +964,52 @@ function App() {
     }
   }
 
+  function handleRealFileMoveFinished(event: RealFileMoveWorkbenchEvent) {
+    setWorkbenchNotice(event.message);
+    setWorkbenchNoticeKind(
+      event.outcome === "moved" ? "success" : event.outcome === "blocked" ? "blocked" : "failed",
+    );
+    if (event.refreshWorkbench) {
+      void handleStartScan();
+    }
+  }
+
+  async function handleWorkbenchFileMove(request: WorkbenchMoveRequest) {
+    if (
+      workbenchMoveBusyRef.current ||
+      scanLockRef.current ||
+      scanningRef.current ||
+      exportBusyRef.current ||
+      preparingContentRef.current
+    ) {
+      return;
+    }
+    workbenchMoveBusyRef.current = true;
+    try {
+      const result = await executeWorkbenchMoveFile({
+        scanRoot: request.scanRoot,
+        sourcePath: request.sourcePath,
+        targetPath: request.targetPath,
+        expectedSizeBytes: request.expectedSizeBytes,
+        expectedModifiedAtMs: request.expectedModifiedAtMs,
+      });
+      const event = workbenchMoveEventFromResult(result, request);
+      setWorkbenchNotice(event.message);
+      setWorkbenchNoticeKind(
+        event.outcome === "moved" ? "success" : event.outcome === "blocked" ? "blocked" : "failed",
+      );
+      if (event.refreshWorkbench) {
+        pendingRevealNodeIdRef.current = pathForCurrentScan(request.scanRoot, result.targetPath);
+        void handleStartScan();
+      }
+    } catch (cause) {
+      setWorkbenchNotice(toUserError(cause));
+      setWorkbenchNoticeKind("failed");
+    } finally {
+      workbenchMoveBusyRef.current = false;
+    }
+  }
+
   if (!prefsReady) {
     return (
       <div className="app">
@@ -977,6 +1086,19 @@ function App() {
           {exportNotice}
         </p>
       ) : null}
+      {workbenchNotice !== null ? (
+        <p
+          className={
+            workbenchNoticeKind === "failed"
+              ? "error"
+              : workbenchNoticeKind === "success"
+                ? "success"
+                : "status-line"
+          }
+        >
+          {workbenchNotice}
+        </p>
+      ) : null}
       <div className="layout">
         <aside>
           <ConfigPanel
@@ -1021,43 +1143,69 @@ function App() {
               className="insight-view-tab"
               aria-pressed={mainView === "structure"}
               onClick={() => {
-                setMainView("structure");
+                setMainView(selectMainNavSection("files", mainView));
               }}
             >
-              Struktur
+              {FILES_NAV_LABEL}
             </button>
             <button
               type="button"
               className="insight-view-tab"
-              aria-pressed={insightsSelectable && mainView === "insights"}
-              disabled={!insightsSelectable}
+              aria-pressed={autosortSelectable && isAutosortMainView(mainView)}
+              disabled={!autosortSelectable}
               onClick={() => {
-                if (insightsSelectable) {
-                  setMainView("insights");
+                if (autosortSelectable) {
+                  setMainView(selectMainNavSection("autosort", lastAutosortViewRef.current));
                 }
               }}
             >
-              Erkenntnisse
+              {AUTOSORT_NAV_LABEL}
               {insightsNavCount !== null ? (
                 <span className="insight-view-tab-count" aria-label={`${insightsNavCount} Erkenntnisse`}>
                   {insightsNavCount}
                 </span>
               ) : null}
             </button>
-            <button
-              type="button"
-              className="insight-view-tab"
-              aria-pressed={planningSelectable && mainView === "planning"}
-              disabled={!planningSelectable}
-              onClick={() => {
-                if (planningSelectable) {
-                  setMainView("planning");
-                }
-              }}
-            >
-              Planung
-            </button>
           </div>
+          {autosortSelectable && isAutosortMainView(mainView) ? (
+            <div
+              className="insight-view-switcher sub-switcher"
+              role="group"
+              aria-label="Automatische Sortierung"
+            >
+              <button
+                type="button"
+                className="insight-view-tab"
+                aria-pressed={insightsSelectable && mainView === "insights"}
+                disabled={!insightsSelectable}
+                onClick={() => {
+                  if (insightsSelectable) {
+                    setMainView("insights");
+                  }
+                }}
+              >
+                {INSIGHTS_NAV_LABEL}
+                {insightsNavCount !== null ? (
+                  <span className="insight-view-tab-count" aria-label={`${insightsNavCount} Erkenntnisse`}>
+                    {insightsNavCount}
+                  </span>
+                ) : null}
+              </button>
+              <button
+                type="button"
+                className="insight-view-tab"
+                aria-pressed={planningSelectable && mainView === "planning"}
+                disabled={!planningSelectable}
+                onClick={() => {
+                  if (planningSelectable) {
+                    setMainView("planning");
+                  }
+                }}
+              >
+                {PLANNING_NAV_LABEL}
+              </button>
+            </div>
+          ) : null}
           <div className="main-view-panels">
             <div
               className={
@@ -1087,6 +1235,9 @@ function App() {
                 revealRequest={treeRevealRequest}
                 folderInsightIdsByLocation={folderInsightIdsByLocation}
                 onInsightMarkerActivate={requestShowInsightsForLocation}
+                onWorkbenchFileMove={(request) => {
+                  void handleWorkbenchFileMove(request);
+                }}
               />
             </div>
             {insightsSelectable ? (
@@ -1130,10 +1281,12 @@ function App() {
                   historicalPlanEntries={historicalPlanEntries}
                   historicalPlansLoading={historicalPlansLoading}
                   onSelectProposal={selectVirtualProposalForEditing}
+                  onStartEmptyPlan={startEmptyVirtualPlan}
                   onPlanChange={changeEditableVirtualPlan}
                   onSavePlan={saveEditableVirtualPlan}
                   onApprovePlan={approveEditableVirtualPlan}
                   onRecheckHistoricalPlans={refreshHistoricalVirtualPlans}
+                  onRealFileMoveFinished={handleRealFileMoveFinished}
                 />
               </div>
             ) : null}

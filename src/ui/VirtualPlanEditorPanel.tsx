@@ -6,6 +6,7 @@ import { useState } from "react";
 import type { VirtualPlan } from "./virtualPlan";
 import type { VirtualPlanApprovalAssessment } from "./virtualPlanApproval";
 import {
+  addVirtualPlanFolder,
   assignFileToVirtualFolder,
   excludeFileFromVirtualPlan,
   listVirtualPlanFolders,
@@ -48,6 +49,7 @@ export function VirtualPlanEditorPanel({
   const [renameValues, setRenameValues] = useState<Record<string, string>>({});
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
   const [fullPlanOpen, setFullPlanOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
 
   if (plan === null) {
     return null;
@@ -124,8 +126,8 @@ export function VirtualPlanEditorPanel({
       ) : null}
 
       {folders.length === 0 ? (
-        <p className="muted">Der geladene Entwurf enthält keine bearbeitbaren virtuellen Zielordner.</p>
-      ) : (
+        <p className="muted">Noch kein virtueller Zielordner. Legen Sie einen an, um Dateien zuzuordnen.</p>
+      ) : null}
         <details className="plan-editor-section plan-editor-target-folders" open>
           <summary>Virtuelle Zielordner ({folders.length})</summary>
           <div className="plan-editor-folder-list">
@@ -192,8 +194,28 @@ export function VirtualPlanEditorPanel({
               </div>
             ))}
           </div>
+          {!isApproved ? (
+            <div className="plan-editor-add-folder">
+              <input
+                aria-label="Name des virtuellen Zielordners"
+                placeholder="Zielordnername"
+                value={newFolderName}
+                onChange={(event) => setNewFolderName(event.target.value)}
+              />
+              <button
+                type="button"
+                disabled={newFolderName.trim().length === 0}
+                onClick={() => {
+                  const result = addVirtualPlanFolder(plan, newFolderName);
+                  apply(result, "Virtueller Zielordner hinzugefügt.");
+                  if (result.ok) setNewFolderName("");
+                }}
+              >
+                Zielordner hinzufügen
+              </button>
+            </div>
+          ) : null}
         </details>
-      )}
 
       <details className="plan-editor-section plan-editor-file-section" open>
         <summary>Datei-Zuordnung ({editableFiles.length})</summary>

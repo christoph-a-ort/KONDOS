@@ -935,6 +935,20 @@ button:disabled {
   cursor: default;
 }
 
+.tree-data-row.file-draggable {
+  cursor: grab;
+}
+
+.tree-data-row.dragging {
+  opacity: 0.55;
+}
+
+.tree-panel.workbench-file-dragging,
+.tree-panel.workbench-file-dragging .tree-data-row {
+  cursor: grabbing;
+  user-select: none;
+}
+
 .tree-data-row:hover {
   background: #eef3f8;
 }
@@ -996,6 +1010,23 @@ button:disabled {
 .tree-data-row.selected:hover .tree-col-name.sticky-name,
 .tree-data-row.selected.current-match:hover .tree-col-name.sticky-name {
   background: #d5e2f5;
+}
+
+.tree-data-row.drop-target,
+.tree-data-row.drop-target:hover,
+.tree-data-row.drop-target.match,
+.tree-data-row.drop-target.selected,
+.tree-data-row.drop-target.selected:hover {
+  background: #e4ebf6;
+  outline: 2px solid #1f4b99;
+  outline-offset: -2px;
+}
+
+.tree-data-row.drop-target .tree-col-name.sticky-name,
+.tree-data-row.drop-target:hover .tree-col-name.sticky-name,
+.tree-data-row.drop-target.selected .tree-col-name.sticky-name,
+.tree-data-row.drop-target.selected:hover .tree-col-name.sticky-name {
+  background: #e4ebf6;
 }
 
 .tree-col-name .name {
@@ -1456,6 +1487,10 @@ button:disabled {
   margin: 0 0 8px;
   padding: 0;
   border-bottom: 1px solid #d5dbe3;
+}
+
+.insight-view-switcher.sub-switcher {
+  margin-top: -4px;
 }
 
 .insight-view-tab {
@@ -2796,6 +2831,14 @@ button:disabled {
   line-height: 1.4;
 }
 
+.plan-empty-start {
+  margin: 0 0 10px;
+}
+
+.plan-empty-start button {
+  margin-top: 6px;
+}
+
 .plan-proposal-badge,
 .plan-proposal-status {
   display: inline-block;
@@ -3087,6 +3130,26 @@ button:disabled {
 .plan-editor-folder-actions {
   display: flex;
   gap: 4px;
+}
+
+.plan-editor-add-folder {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  min-width: 0;
+}
+
+.plan-editor-add-folder input {
+  min-width: 0;
+  flex: 1 1 140px;
+  padding: 3px 5px;
+  border: 1px solid #b8c3ce;
+  border-radius: 3px;
+  background: #fff;
+  color: #263442;
+  font: inherit;
+  font-size: 0.8rem;
 }
 
 .plan-editor-file-list {

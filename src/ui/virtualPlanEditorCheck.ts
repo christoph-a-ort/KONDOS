@@ -3,9 +3,13 @@
 import type { DirectoryNode, FileNode, ScanConfig, ScanResult } from "../model";
 import { makeSnapshotBinding } from "./virtualPlan";
 import {
+  addVirtualPlanFolder,
   assignFileToVirtualFolder,
+  createEmptyVirtualPlan,
   createVirtualPlanFromProposal,
+  emptyVirtualPlanBlockReason,
   excludeFileFromVirtualPlan,
+  MANUAL_VIRTUAL_FOLDER_SOURCE,
   prepareVirtualPlanForSave,
   projectVirtualPlan,
   renameVirtualPlanFolder,
@@ -82,6 +86,66 @@ export function runVirtualPlanEditorCheck(): void {
   const result = fixture();
   const binding = makeSnapshotBinding(result, config, 7);
   const proposal = buildVirtualReorgProposals({ scanResult: result, binding })[0]!;
+  const empty = createEmptyVirtualPlan({ scanResult: result, binding });
+  assert(empty.ok, "empty plan can be created for a complete scan");
+  if (!empty.ok) return;
+  assert(empty.plan.planId === `vp_${binding.snapshotFingerprint}`, "empty plan binds to the current snapshot");
+  assert(empty.plan.items.length === 6, "empty plan includes every observed object");
+  assert(empty.plan.virtualFolders?.length === 0, "empty plan starts without virtual folders");
+  assert(
+    empty.plan.items.filter((item) => item.observed.kind === "file").every((item) => item.status === "excluded"),
+    "empty plan leaves files unchanged",
+  );
+  assert(
+    emptyVirtualPlanBlockReason({ binding, draftLoad: { kind: "missing" }, loadingDraft: false }) === null,
+    "missing draft allows an empty plan",
+  );
+  assert(
+    emptyVirtualPlanBlockReason({ binding, draftLoad: { kind: "valid", plan: empty.plan }, loadingDraft: false }) !== null,
+    "existing draft is not overwritten by an empty plan",
+  );
+  assert(
+    emptyVirtualPlanBlockReason({ binding, draftLoad: { kind: "blocked", reason: "corrupt" }, loadingDraft: false }) !== null,
+    "blocked draft is not overwritten by an empty plan",
+  );
+  assert(
+    !createEmptyVirtualPlan({ scanResult: result, binding: { ...binding, incomplete: true } }).ok,
+    "incomplete scan cannot start an empty plan",
+  );
+  const addedFolder = addVirtualPlanFolder(empty.plan, "Berichte");
+  assert(addedFolder.ok, "empty plan can add a virtual target folder");
+  if (!addedFolder.ok) return;
+  assert(addedFolder.plan.virtualFolders?.[0]?.sourceProposalId === MANUAL_VIRTUAL_FOLDER_SOURCE, "manual folder is marked");
+  assert(!addVirtualPlanFolder(addedFolder.plan, "Berichte").ok, "duplicate virtual folder is rejected");
+  const emptyNote = addedFolder.plan.items.find((item) => item.observed.relativePath.endsWith("notiz.txt"));
+  assert(emptyNote !== undefined, "empty plan contains the fixture file");
+  if (emptyNote === undefined) return;
+  const emptyAssigned = assignFileToVirtualFolder(addedFolder.plan, emptyNote.id, addedFolder.plan.virtualFolders![0]!.id);
+  assert(emptyAssigned.ok, "file can be assigned after adding a folder to an empty plan");
+  if (!emptyAssigned.ok) return;
+  const undoAssignmentOnEmpty = undoLastVirtualPlanEdit(emptyAssigned.plan);
+  assert(undoAssignmentOnEmpty.ok, "assignment on empty plan can be undone");
+  if (!undoAssignmentOnEmpty.ok) return;
+  const undoAddedFolder = undoLastVirtualPlanEdit(undoAssignmentOnEmpty.plan);
+  assert(undoAddedFolder.ok && (undoAddedFolder.plan.virtualFolders?.length ?? 0) === 0, "added folder can be undone");
+  const emptySaved = prepareVirtualPlanForSave(emptyAssigned.plan, 0);
+  const emptyApproved = prepareVirtualPlanApproval(emptySaved, emptySaved.revision);
+  const emptyDryRun = buildVirtualPlanDryRun({
+    plan: emptyApproved,
+    scanResult: result,
+    binding,
+    current: true,
+  });
+  assert(emptyDryRun.status === "restricted", "approved empty-plan assignment produces a dry run");
+  assert(emptyDryRun.operations.some((operation) => operation.kind === "createVirtualFolder"), "empty-plan dry run can create the target folder");
+  assert(emptyDryRun.operations.some((operation) => operation.kind === "moveFile"), "empty-plan dry run plans the file move");
+  assert(
+    emptyVirtualPlanBlockReason({ binding, draftLoad: { kind: "missing" }, loadingDraft: false }) === null
+      && emptyVirtualPlanBlockReason({ binding, draftLoad: { kind: "missing" }, loadingDraft: true }) !== null
+      && emptyVirtualPlanBlockReason({ binding, draftLoad: null, loadingDraft: false }) !== null,
+    "loading or unknown draft blocks starting an empty plan",
+  );
+
   const created = createVirtualPlanFromProposal({ proposal, scanResult: result, binding });
   assert(created.ok, "explicit proposal selection creates plan");
   if (!created.ok) return;

@@ -33,4 +33,4 @@ pub use execution_preflight::inspect_planned_operation;
 pub use execution_storage::{inspect_storage_kind, inspect_storage_kinds};
 pub use execution_test_root::{approve_test_scan_root, inspect_test_scan_root};
 pub use execution_mkdir::execute_create_folder;
-pub use execution_move::execute_move_file;
+pub use execution_move::{execute_move_file, execute_workbench_move_file};

@@ -25,8 +25,9 @@ import {
   canSubmitRealFolderCreate, confirmedSourcePath, confirmedTargetPath, executionMustHalt,
   isRealFileMoveKind, isRealFolderCreateKind, journalBoundToApprovedPlan, nextRealExecutionOperation,
   realExecutionConfirmKey, realExecutionOperationsFrom, realExecutionUiOpen, realFileMoveDisableReason,
-  realFileMoveOperationLabel, realFolderOperationLabel, shouldAutoExecuteNext, shouldAutoResumeExecution,
-  type RealFileMoveConfirm,
+  realFileMoveOperationLabel, realFileMoveWorkbenchEvent, realFolderOperationLabel, shouldAutoExecuteNext,
+  shouldAutoResumeExecution,
+  type RealFileMoveConfirm, type RealFileMoveWorkbenchEvent,
 } from "./virtualPlanExecution";
 
 function bindingLabel(status: BoundExecutionStatus): string {
@@ -37,7 +38,15 @@ function bindingLabel(status: BoundExecutionStatus): string {
   return "Keine aktive Reservierung";
 }
 
-export function VirtualPlanExecutionPanel({ plan, scanResult, binding, current }: { plan: VirtualPlan | null; scanResult: ScanResult; binding: SnapshotBinding; current: boolean }) {
+export function VirtualPlanExecutionPanel({
+  plan, scanResult, binding, current, onRealFileMoveFinished,
+}: {
+  plan: VirtualPlan | null;
+  scanResult: ScanResult;
+  binding: SnapshotBinding;
+  current: boolean;
+  onRealFileMoveFinished?: (event: RealFileMoveWorkbenchEvent) => void;
+}) {
   const [approval, setApproval] = useState<TestRootApprovalView | null>(null);
   const [wantApprove, setWantApprove] = useState(false);
   const [view, setView] = useState<BoundExecutionView | null>(null);
@@ -49,6 +58,7 @@ export function VirtualPlanExecutionPanel({ plan, scanResult, binding, current }
   const [confirmMove, setConfirmMove] = useState(false);
   const [moveConfirm, setMoveConfirm] = useState<RealFileMoveConfirm | null>(null);
   const [inspectTick, setInspectTick] = useState(0);
+  const [executionOpen, setExecutionOpen] = useState(true);
   const scanRoot = binding.normalizedRootPath;
   const displayRoot = scanResult.root.path;
   const canPrepare = plan?.status === "virtuallyApproved" && current;
@@ -252,15 +262,22 @@ export function VirtualPlanExecutionPanel({ plan, scanResult, binding, current }
       await reload();
       if (result.moved && !shouldAutoExecuteNext(journal)) setInspectTick((tick) => tick + 1);
       if (!result.moved) setDecision(null);
+      onRealFileMoveFinished?.(realFileMoveWorkbenchEvent(result));
     } catch (cause) {
-      setNotice(toUserError(cause));
+      const message = toUserError(cause);
+      setNotice(message);
       setDecision(null);
       try { await reload(); } catch { /* fail-closed reload */ }
+      onRealFileMoveFinished?.(realFileMoveWorkbenchEvent({ outcome: "failed", message, moved: false }));
     } finally {
       setBusy(false);
     }
   };
-  return <details className="plan-execution">
+  return <details
+    className="plan-execution"
+    open={executionOpen}
+    onToggle={(event) => setExecutionOpen(event.currentTarget.open)}
+  >
     <summary>Echte Ausführung (nur Testverzeichnis)</summary>
     <p className="muted">Nur die ausdrücklich freigegebene Testwurzel. Neue Ordner und einzelne Dateiverschiebungen nach aktueller Prüfung und Einzelbestätigung. Umbenennen und Löschen bleiben unzulässig.</p>
     <p><strong>Kopplung: {view === null ? "unbekannt" : bindingLabel(view.status)}</strong></p>

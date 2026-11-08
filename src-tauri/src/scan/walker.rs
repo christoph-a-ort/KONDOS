@@ -13,7 +13,7 @@ use crate::model::{
 };
 
 use super::hidden::is_hidden;
-use super::reparse::{must_not_follow, refuse_unverified_windows_directory};
+use super::reparse::{must_not_follow_with_path, refuse_unverified_windows_directory};
 
 const PROGRESS_MIN_INTERVAL_MS: u128 = 100;
 const PROGRESS_EVERY_N_ENTRIES: u64 = 250;
@@ -244,7 +244,7 @@ where
         }
     };
 
-    if must_not_follow(file_type, metadata.as_ref()) {
+    if must_not_follow_with_path(&path, file_type, metadata.as_ref()) {
         let is_file = metadata
             .as_ref()
             .map(Metadata::is_file)

@@ -10,7 +10,7 @@ use crate::error::AppError;
 use crate::paths::windows_lengths::{maximum_component_length_for_path, target_length_blocks_real_operation};
 use crate::paths::windows_rules::{execution_path_looks_unsafe, is_allowed_windows_component};
 use crate::paths::windows_storage::{classify_opened_path, StorageKind};
-use crate::scan::must_not_follow;
+use crate::scan::path_has_blocking_reparse;
 use crate::state::AppState;
 
 use super::execution_binding::{inspect_scan_root_at, progress_bound_run_locked, BoundExecutionView};
@@ -313,15 +313,20 @@ fn mkdir_storage_gate(kind: StorageKind) -> Result<(), MkdirBlock> {
     }
 }
 
-fn metadata_is_reparse(metadata: &fs::Metadata) -> bool {
-    must_not_follow(metadata.file_type(), Some(metadata))
+fn path_blocks_as_reparse(path: &str) -> Result<bool, MkdirBlock> {
+    match path_has_blocking_reparse(Path::new(&path.replace('/', "\\"))) {
+        Ok(value) => Ok(value),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Err(MkdirBlock::Unverifiable),
+    }
 }
 
 #[cfg(windows)]
 mod win_mkdir {
-    use super::{metadata_is_reparse, mkdir_storage_gate, within_scan_root, MkdirBlock};
+    use super::{mkdir_storage_gate, within_scan_root, MkdirBlock};
+    use crate::scan::handle_has_blocking_reparse;
     use crate::paths::windows_storage::classify_storage_from_file_with_origin;
-    use std::fs::{self, File, OpenOptions};
+    use std::fs::{File, OpenOptions};
     use std::os::windows::ffi::OsStrExt;
     use std::os::windows::fs::OpenOptionsExt;
     use std::os::windows::io::{AsRawHandle, FromRawHandle, RawHandle};
@@ -422,8 +427,10 @@ mod win_mkdir {
 
     fn check_dir_handle(file: &File, scan_root: &str, must_be_within: bool) -> Result<(), MkdirBlock> {
         let metadata = file.metadata().map_err(|_| MkdirBlock::Unverifiable)?;
-        if metadata_is_reparse(&metadata) {
-            return Err(MkdirBlock::Reparse);
+        match handle_has_blocking_reparse(file) {
+            Ok(true) => return Err(MkdirBlock::Reparse),
+            Ok(false) => {}
+            Err(_) => return Err(MkdirBlock::Unverifiable),
         }
         if !metadata.is_dir() {
             return Err(MkdirBlock::Unverifiable);
@@ -533,10 +540,10 @@ mod win_mkdir {
     }
 
     pub(crate) fn path_exists_reparse(path: &str) -> Result<bool, MkdirBlock> {
-        match fs::symlink_metadata(path.replace('/', "\\")) {
+        match crate::scan::path_has_blocking_reparse(Path::new(&path.replace('/', "\\"))) {
+            Ok(value) => Ok(value),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
             Err(_) => Err(MkdirBlock::Unverifiable),
-            Ok(metadata) => Ok(metadata_is_reparse(&metadata)),
         }
     }
 }
@@ -559,7 +566,7 @@ fn precheck_target(scan_root: &str, target: &str, components: &[String]) -> Resu
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Err(MkdirBlock::ParentMissing),
             Err(_) => return Err(MkdirBlock::Unverifiable),
             Ok(metadata) => {
-                if metadata_is_reparse(&metadata) {
+                if path_blocks_as_reparse(&parent)? {
                     return Err(MkdirBlock::Reparse);
                 }
                 if !metadata.is_dir() {
@@ -571,8 +578,8 @@ fn precheck_target(scan_root: &str, target: &str, components: &[String]) -> Resu
     match fs::symlink_metadata(target.replace('/', "\\")) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(_) => return Err(MkdirBlock::Unverifiable),
-        Ok(metadata) => {
-            if metadata_is_reparse(&metadata) {
+        Ok(_metadata) => {
+            if path_blocks_as_reparse(target)? {
                 return Err(MkdirBlock::Reparse);
             }
             return Err(MkdirBlock::Exists);

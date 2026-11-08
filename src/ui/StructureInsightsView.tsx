@@ -63,14 +63,22 @@ import {
 
 export type { MainView } from "./structureInsightsViewHelpers";
 export {
+  AUTOSORT_NAV_LABEL,
+  FILES_NAV_LABEL,
   INSIGHT_EVIDENCE_INFO,
+  INSIGHTS_NAV_LABEL,
+  PLANNING_NAV_LABEL,
+  canSelectAutosortView,
   canSelectInsightsView,
   canSelectPlanningView,
   defaultMainView,
   formatInsightEvidenceSummary,
   formatInsightReadyHeadline,
   insightNavCountLabel,
+  isAutosortMainView,
+  mainNavSection,
   mainViewAfterScanStart,
+  selectMainNavSection,
   shouldAutoSwitchMainViewOnPhase,
 } from "./structureInsightsViewHelpers";
 

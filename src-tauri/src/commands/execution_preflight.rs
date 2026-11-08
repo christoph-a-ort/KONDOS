@@ -9,7 +9,7 @@ use tauri::{AppHandle, Manager};
 use crate::error::AppError;
 use crate::paths::windows_lengths::maximum_component_length_for_path;
 use crate::paths::windows_rules::execution_path_looks_unsafe;
-use crate::scan::must_not_follow;
+use crate::scan::must_not_follow_with_path;
 
 use super::execution_binding::inspect_scan_root_at;
 use super::execution_storage::{storage_kind_name, worst_existing_storage_kind};
@@ -107,7 +107,7 @@ fn observe(scan_root: &str, path: &str) -> PathObservation {
                 exists: true,
                 is_file: metadata.is_file(),
                 is_dir: metadata.is_dir(),
-                is_reparse: must_not_follow(file_type, Some(&metadata)),
+                is_reparse: must_not_follow_with_path(Path::new(path), file_type, Some(&metadata)),
                 readable: true,
                 within_root,
                 size_bytes: metadata.is_file().then_some(metadata.len()),

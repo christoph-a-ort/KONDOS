@@ -1,4 +1,4 @@
-/** P2-L.4b.1 / P2-L.4b.2: real folder-create and single-file-move confirmation. No automatic execution. */
+/** P2-L.4b.1 / P2-L.4b.2 / P2-L.5: real folder-create and single-file-move confirmation. No automatic execution. */
 import type { DryRunOperationKind, VirtualDryRunOperation } from "./virtualPlanDryRun";
 import type { BoundExecutionStatus, JournalOperationStatus, VirtualPlanJournal } from "./virtualPlanJournal";
 import type { PreflightDecision, PreflightStatus } from "./virtualPlanPreflight";
@@ -24,6 +24,40 @@ export interface RealFileMoveConfirm {
 
 export function shouldAutoExecuteNext(_journal: VirtualPlanJournal | null): false {
   return false;
+}
+
+export interface RealFileMoveWorkbenchFollowUp {
+  refreshWorkbench: boolean;
+  autoExecuteNext: false;
+}
+
+export interface RealFileMoveWorkbenchEvent {
+  outcome: RealFileMoveOutcome;
+  message: string;
+  refreshWorkbench: boolean;
+}
+
+/** After a real MOVE: refresh the tree only on success; never start the next MOVE. */
+export function realFileMoveWorkbenchFollowUp(result: {
+  outcome: RealFileMoveOutcome;
+  moved: boolean;
+}): RealFileMoveWorkbenchFollowUp {
+  return {
+    refreshWorkbench: result.moved && result.outcome === "moved",
+    autoExecuteNext: false,
+  };
+}
+
+export function realFileMoveWorkbenchEvent(result: {
+  outcome: RealFileMoveOutcome;
+  message: string;
+  moved: boolean;
+}): RealFileMoveWorkbenchEvent {
+  return {
+    outcome: result.outcome,
+    message: result.message,
+    refreshWorkbench: realFileMoveWorkbenchFollowUp(result).refreshWorkbench,
+  };
 }
 
 export function shouldAutoResumeExecution(_status: BoundExecutionStatus, _journal: VirtualPlanJournal | null): false {

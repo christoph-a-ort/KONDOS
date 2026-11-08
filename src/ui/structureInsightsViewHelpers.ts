@@ -10,6 +10,12 @@ import type {
 } from "./structureInsightViewModel";
 
 export type MainView = "structure" | "insights" | "planning";
+export type MainNavSection = "files" | "autosort";
+
+export const FILES_NAV_LABEL = "Dateien & Ordner";
+export const AUTOSORT_NAV_LABEL = "Automatische Sortierung";
+export const INSIGHTS_NAV_LABEL = "Erkenntnisse";
+export const PLANNING_NAV_LABEL = "Planung";
 
 /** Default and post-scan-start view — never auto-switches on analysis phase. */
 export function defaultMainView(): MainView {
@@ -26,6 +32,25 @@ export function canSelectInsightsView(hasSuccessfulScanResult: boolean): boolean
 
 export function canSelectPlanningView(hasSuccessfulScanResult: boolean): boolean {
   return hasSuccessfulScanResult;
+}
+
+export function canSelectAutosortView(hasSuccessfulScanResult: boolean): boolean {
+  return canSelectInsightsView(hasSuccessfulScanResult) || canSelectPlanningView(hasSuccessfulScanResult);
+}
+
+export function mainNavSection(view: MainView): MainNavSection {
+  return view === "structure" ? "files" : "autosort";
+}
+
+export function isAutosortMainView(view: MainView): boolean {
+  return view === "insights" || view === "planning";
+}
+
+export function selectMainNavSection(section: MainNavSection, current: MainView): MainView {
+  if (section === "files") {
+    return "structure";
+  }
+  return isAutosortMainView(current) ? current : "insights";
 }
 
 /** Contract helper: phase transitions must not change the main view. */

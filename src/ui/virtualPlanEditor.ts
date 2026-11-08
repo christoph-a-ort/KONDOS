@@ -8,6 +8,7 @@ import { isDirectory } from "../model";
 import {
   normalizeVirtualPlanPath,
   type DecisionRecord,
+  type DraftLoadResult,
   type ObservedObjectRef,
   type SnapshotBinding,
   type VirtualPlan,
@@ -19,6 +20,7 @@ import { isAllowedWindowsComponent, isReservedDeviceStem } from "./windowsPathRu
 import { existingWindowsNameIssue, type ExistingWindowsNameIssue } from "./windowsInventoryNames";
 
 export const VIRTUAL_PLAN_EDITOR_BUILDER_VERSION = 1 as const;
+export const MANUAL_VIRTUAL_FOLDER_SOURCE = "manual" as const;
 
 export interface VirtualPlanProjectionRow {
   itemId: string;
@@ -67,6 +69,62 @@ function joinVirtualPath(parent: string, name: string): string {
 
 function itemId(nodeId: string): string {
   return `vpi_${normalizeVirtualPlanPath(nodeId).replace(/[^a-z0-9_./-]+/gi, "_")}`;
+}
+
+function collectObservedItems(
+  scanResult: ScanResult,
+  targetByNodeId: ReadonlyMap<string, string>,
+): VirtualPlanItem[] {
+  const items: VirtualPlanItem[] = [];
+  walk(scanResult.root, (node) => {
+    const sourceRelativePath = relativePath(scanResult.root.path, node.path);
+    const target = targetByNodeId.get(node.id) ?? parentPath(sourceRelativePath);
+    const observed: ObservedObjectRef = {
+      nodeId: node.id,
+      relativePath: sourceRelativePath,
+      kind: node.kind,
+      identityStatus: "scanLocalOnly",
+      metadata: {
+        sizeBytes: node.sizeBytes,
+        createdAtMs: node.createdAtMs,
+        modifiedAtMs: node.modifiedAtMs,
+      },
+    };
+    items.push({
+      id: itemId(node.id),
+      observed,
+      virtualTargetPath: target,
+      originalVirtualTargetPath: target,
+      status: targetByNodeId.has(node.id) ? "proposed" : "excluded",
+      sourceInsightIds: [],
+      alternatives: [],
+    });
+  });
+  return items;
+}
+
+function draftPlanFromItems(
+  options: { scanResult: ScanResult; binding: SnapshotBinding },
+  items: VirtualPlanItem[],
+  virtualFolders: VirtualPlanFolder[],
+): VirtualPlan {
+  return {
+    schemaVersion: 1,
+    planId: `vp_${options.binding.snapshotFingerprint}`,
+    builderVersion: VIRTUAL_PLAN_EDITOR_BUILDER_VERSION,
+    revision: 1,
+    status: "draft",
+    scope: { kind: "scanRoot", rootNodeId: options.scanResult.root.id },
+    binding: {
+      ...options.binding,
+      scanConfig: { ...options.binding.scanConfig, extensions: [...options.binding.scanConfig.extensions] },
+    },
+    items,
+    virtualFolders,
+    openCases: [],
+    decisions: [],
+    preferences: [],
+  };
 }
 
 function folderId(entry: VirtualPreviewEntry): string {
@@ -181,52 +239,88 @@ export function createVirtualPlanFromProposal(options: {
     }
   }
 
-  const items: VirtualPlanItem[] = [];
-  walk(options.scanResult.root, (node) => {
-    const sourceRelativePath = relativePath(options.scanResult.root.path, node.path);
-    const target = targetByNodeId.get(node.id) ?? parentPath(sourceRelativePath);
-    const observed: ObservedObjectRef = {
-      nodeId: node.id,
-      relativePath: sourceRelativePath,
-      kind: node.kind,
-      identityStatus: "scanLocalOnly",
-      metadata: {
-        sizeBytes: node.sizeBytes,
-        createdAtMs: node.createdAtMs,
-        modifiedAtMs: node.modifiedAtMs,
-      },
-    };
-    items.push({
-      id: itemId(node.id),
-      observed,
-      virtualTargetPath: target,
-      originalVirtualTargetPath: target,
-      status: targetByNodeId.has(node.id) ? "proposed" : "excluded",
-      sourceInsightIds: [],
-      alternatives: [],
-    });
-  });
-
-  const plan: VirtualPlan = {
-    schemaVersion: 1,
-    planId: `vp_${options.binding.snapshotFingerprint}`,
-    builderVersion: VIRTUAL_PLAN_EDITOR_BUILDER_VERSION,
-    revision: 1,
-    status: "draft",
-    scope: { kind: "scanRoot", rootNodeId: options.scanResult.root.id },
-    binding: { ...options.binding, scanConfig: { ...options.binding.scanConfig, extensions: [...options.binding.scanConfig.extensions] } },
-    items,
-    virtualFolders,
-    openCases: [],
-    decisions: [],
-    preferences: [],
-  };
+  const items = collectObservedItems(options.scanResult, targetByNodeId);
+  const plan = draftPlanFromItems(options, items, virtualFolders);
   const validation = validateVirtualPlan(plan, options.scanResult, options.binding);
   return validation.valid ? { ok: true, plan } : { ok: false, error: validation.errors[0] ?? "Der virtuelle Entwurf ist ungültig." };
 }
 
+export function emptyVirtualPlanBlockReason(options: {
+  binding: SnapshotBinding;
+  draftLoad: DraftLoadResult | null;
+  loadingDraft: boolean;
+}): string | null {
+  if (options.loadingDraft || options.draftLoad === null) return "Der Entwurf wird noch geladen.";
+  if (options.draftLoad.kind === "valid") return "Für diesen Snapshot ist bereits ein Entwurf vorhanden.";
+  if (options.draftLoad.kind === "blocked") {
+    return "Ein vorhandener Entwurf ist gesperrt und wird nicht überschrieben.";
+  }
+  if (options.binding.incomplete) {
+    return "Eine leere Planung kann bei eingeschränkter Datengrundlage nicht angelegt werden.";
+  }
+  return null;
+}
+
+export function createEmptyVirtualPlan(options: {
+  scanResult: ScanResult;
+  binding: SnapshotBinding;
+}): VirtualPlanEditResult {
+  if (options.binding.incomplete) {
+    return {
+      ok: false,
+      error: "Eine leere Planung kann bei eingeschränkter Datengrundlage nicht angelegt werden.",
+    };
+  }
+  const items = collectObservedItems(options.scanResult, new Map());
+  const plan = draftPlanFromItems(options, items, []);
+  const validation = validateVirtualPlan(plan, options.scanResult, options.binding);
+  return validation.valid
+    ? { ok: true, plan }
+    : { ok: false, error: validation.errors[0] ?? "Der virtuelle Entwurf ist ungültig." };
+}
+
 export function listVirtualPlanFolders(plan: VirtualPlan): readonly VirtualPlanFolder[] {
   return plan.virtualFolders ?? [];
+}
+
+export function addVirtualPlanFolder(
+  plan: VirtualPlan,
+  requestedName: string,
+  parentVirtualPath = ".",
+): VirtualPlanEditResult {
+  const editError = editablePlanError(plan);
+  if (editError !== null) return { ok: false, error: editError };
+  const error = validWindowsName(requestedName);
+  if (error !== null) return { ok: false, error };
+  const name = requestedName.trim();
+  const parent = normalizeVirtualPlanPath(parentVirtualPath);
+  if (parent.includes("..") || parent.startsWith("/")) {
+    return { ok: false, error: "Der virtuelle Zielordner verlässt den beobachteten Quellbereich." };
+  }
+  if (
+    (plan.virtualFolders ?? []).some(
+      (entry) =>
+        entry.parentVirtualPath === parent && entry.name.toLowerCase() === name.toLowerCase(),
+    )
+  ) {
+    return { ok: false, error: "Ein virtueller Zielordner mit diesem Namen ist bereits vorhanden." };
+  }
+  const folder: VirtualPlanFolder = {
+    id: `vpf_${MANUAL_VIRTUAL_FOLDER_SOURCE}_${name.replace(/[^a-z0-9_./-]+/gi, "_")}_${plan.revision + 1}`,
+    sourceProposalId: MANUAL_VIRTUAL_FOLDER_SOURCE,
+    parentVirtualPath: parent,
+    name,
+    originalName: name,
+  };
+  const decision = makeDecision(plan, "edit", { virtualFolderId: folder.id });
+  const next = withDecision(plan, decision);
+  return {
+    ok: true,
+    plan: {
+      ...next,
+      virtualFolders: [...(next.virtualFolders ?? []), folder],
+    },
+  };
 }
 
 export function renameVirtualPlanFolder(
@@ -381,6 +475,25 @@ export function undoLastVirtualPlanEdit(plan: VirtualPlan): VirtualPlanEditResul
                 ? `${previousPath}${item.virtualTargetPath.slice(currentPath.length)}`
                 : item.virtualTargetPath,
         })),
+      },
+    };
+  }
+  if (decision.virtualFolderId !== undefined && decision.previousFolderName === undefined) {
+    const folder = next.virtualFolders.find((entry) => entry.id === decision.virtualFolderId);
+    if (folder === undefined) return { ok: false, error: "Der hinzugefügte virtuelle Zielordner ist nicht mehr vorhanden." };
+    const path = joinVirtualPath(folder.parentVirtualPath, folder.name);
+    if (
+      next.items.some(
+        (item) => item.virtualTargetPath === path || item.virtualTargetPath.startsWith(`${path}/`),
+      )
+    ) {
+      return { ok: false, error: "Der virtuelle Zielordner kann nicht entfernt werden, solange Dateien zugeordnet sind." };
+    }
+    return {
+      ok: true,
+      plan: {
+        ...next,
+        virtualFolders: next.virtualFolders.filter((entry) => entry.id !== folder.id),
       },
     };
   }
