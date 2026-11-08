@@ -2175,4 +2175,368 @@ mod tests {
         assert!(!stored.contains("\"status\":\"executionHalted\""));
         let _ = fs::remove_dir_all(root);
     }
+
+    #[cfg(windows)]
+    const LIVE_ZONE_IDENTIFIER: &[u8] = b"[ZoneTransfer]\r\nZoneId=3\r\n";
+
+    #[cfg(windows)]
+    fn live_move_harness(label: &str) -> (crate::paths::windows_streams::LiveAdsRoot, String) {
+        let live = crate::paths::windows_streams::require_live_ads_root(label);
+        fs::create_dir(live.path().join("dest")).unwrap();
+        fs::write(live.path().join("a.txt"), b"hello").unwrap();
+        fs::write(live.path().join("keep.txt"), b"keep").unwrap();
+        let scan = live.path().to_string_lossy().replace('\\', "/");
+        approve_test_root_at(live.path(), &scan, true).unwrap();
+        start_bound_run_at(
+            live.path(),
+            &scan,
+            "owner-a",
+            "j1",
+            0,
+            &journal_json("j1", 1, &scan, "owner-a", "a.txt", "dest/a.txt", "moveFile"),
+        )
+        .unwrap();
+        (live, scan)
+    }
+
+    #[cfg(windows)]
+    fn live_list_path(path: &Path) -> (crate::paths::windows_streams::StreamDisposition, Vec<String>) {
+        let file = fs::File::open(path).unwrap();
+        let listed = crate::paths::windows_streams::live_classify_and_list(&file);
+        (listed.kind, listed.names)
+    }
+
+    #[cfg(windows)]
+    fn live_journal_text(root: &Path) -> String {
+        load_at(&journal(&journal_store(root), "j1").unwrap(), "j1")
+            .unwrap()
+            .unwrap()
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn live_a_plain_ntfs_file_moves_without_extra_streams() {
+        crate::paths::windows_streams::reset_stream_query_probe();
+        win_move::reset_last_rename_handle();
+        let (live, scan) = live_move_harness("A");
+        let source_path = live.path().join("a.txt");
+        let dest_path = live.path().join("dest").join("a.txt");
+        let keep_before = fs::read(live.path().join("keep.txt")).unwrap();
+        let (kind_before, names_before) = live_list_path(&source_path);
+        eprintln!(
+            "LIVE_A before kind={kind_before:?} names={names_before:?} site={}",
+            live.site().final_path
+        );
+        assert_eq!(
+            kind_before,
+            crate::paths::windows_streams::StreamDisposition::AllowNoExtraStreams
+        );
+        let (size, modified) = fingerprint(&source_path);
+        let source = format!("{scan}/a.txt");
+        let target = format!("{scan}/dest/a.txt");
+        let result = execute(live.path(), &scan, 1, true, "moveFile", &source, &target, size, modified);
+        let queries = crate::paths::windows_streams::stream_query_count();
+        let first = crate::paths::windows_streams::first_stream_query_handle();
+        let last = crate::paths::windows_streams::last_stream_query_handle();
+        let rename = win_move::last_rename_handle();
+        let stored = live_journal_text(live.path());
+        eprintln!(
+            "LIVE_A result={} moved={} halted={} queries={} handles first={first} last={last} rename={rename}",
+            result.outcome, result.moved, result.halted, queries
+        );
+        assert_eq!(result.outcome, "moved", "{}", result.message);
+        assert!(result.moved);
+        assert!(!result.halted);
+        assert!(queries >= 2, "expected at least two stream queries, got {queries}");
+        assert_ne!(rename, 0);
+        assert_eq!(first, rename);
+        assert_eq!(last, rename);
+        assert!(!source_path.exists());
+        assert!(dest_path.is_file());
+        assert_eq!(fs::read(&dest_path).unwrap(), b"hello");
+        assert_eq!(fs::read(live.path().join("keep.txt")).unwrap(), keep_before);
+        assert_eq!(keep_before, b"keep");
+        let (kind_after, names_after) = live_list_path(&dest_path);
+        eprintln!("LIVE_A after kind={kind_after:?} names={names_after:?}");
+        assert_eq!(
+            kind_after,
+            crate::paths::windows_streams::StreamDisposition::AllowNoExtraStreams
+        );
+        assert!(stored.contains("\"op-file\":\"executed\""), "{stored}");
+        assert!(!stored.contains("\"status\":\"executionHalted\""));
+        eprintln!("LIVE_A PASS");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn live_b_zone_identifier_survives_move() {
+        crate::paths::windows_streams::reset_stream_query_probe();
+        win_move::reset_last_rename_handle();
+        let (mut live, scan) = live_move_harness("B");
+        let source_path = live.path().join("a.txt");
+        let dest_path = live.path().join("dest").join("a.txt");
+        crate::paths::windows_streams::write_named_stream(
+            &source_path,
+            "Zone.Identifier",
+            LIVE_ZONE_IDENTIFIER,
+        )
+        .unwrap();
+        let zone_before =
+            crate::paths::windows_streams::read_named_stream(&source_path, "Zone.Identifier").unwrap();
+        assert_eq!(zone_before, LIVE_ZONE_IDENTIFIER);
+        let (kind_before, names_before) = live_list_path(&source_path);
+        eprintln!("LIVE_B before kind={kind_before:?} names={names_before:?}");
+        assert_eq!(
+            kind_before,
+            crate::paths::windows_streams::StreamDisposition::AllowOnlyZoneIdentifier
+        );
+        let (size, modified) = fingerprint(&source_path);
+        let source = format!("{scan}/a.txt");
+        let target = format!("{scan}/dest/a.txt");
+        let result = execute(live.path(), &scan, 1, true, "moveFile", &source, &target, size, modified);
+        let stored = live_journal_text(live.path());
+        eprintln!(
+            "LIVE_B result={} moved={} halted={} queries={}",
+            result.outcome,
+            result.moved,
+            result.halted,
+            crate::paths::windows_streams::stream_query_count()
+        );
+        if result.outcome != "moved" || !result.moved {
+            live.keep_for_diagnosis();
+            panic!("LIVE_B FAIL: expected moved, got {} {}", result.outcome, result.message);
+        }
+        assert!(!result.halted);
+        assert!(crate::paths::windows_streams::stream_query_count() >= 2);
+        assert!(!source_path.exists());
+        assert!(dest_path.is_file());
+        assert_eq!(fs::read(&dest_path).unwrap(), b"hello");
+        assert!(crate::paths::windows_streams::named_stream_exists(
+            &dest_path,
+            "Zone.Identifier"
+        ));
+        let zone_after =
+            crate::paths::windows_streams::read_named_stream(&dest_path, "Zone.Identifier").unwrap();
+        assert_eq!(zone_after, zone_before, "Zone.Identifier bytes changed during MOVE");
+        let (kind_after, mut names_after) = live_list_path(&dest_path);
+        names_after.sort();
+        eprintln!("LIVE_B after kind={kind_after:?} names={names_after:?} zone_len={}", zone_after.len());
+        assert_eq!(
+            kind_after,
+            crate::paths::windows_streams::StreamDisposition::AllowOnlyZoneIdentifier
+        );
+        assert_eq!(names_after, ["", "Zone.Identifier"]);
+        assert!(stored.contains("\"op-file\":\"executed\""), "{stored}");
+        eprintln!("LIVE_B PASS");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn live_c_foreign_ads_blocks_before_intent() {
+        crate::paths::windows_streams::reset_stream_query_probe();
+        win_move::reset_last_rename_handle();
+        let (mut live, scan) = live_move_harness("C");
+        let source_path = live.path().join("a.txt");
+        let dest_path = live.path().join("dest").join("a.txt");
+        let payload = b"dotty-foreign-c";
+        crate::paths::windows_streams::write_named_stream(&source_path, "DottyFmTest", payload)
+            .unwrap();
+        let stream_before =
+            crate::paths::windows_streams::read_named_stream(&source_path, "DottyFmTest").unwrap();
+        let default_before = fs::read(&source_path).unwrap();
+        let (kind_before, names_before) = live_list_path(&source_path);
+        eprintln!("LIVE_C before kind={kind_before:?} names={names_before:?}");
+        assert_eq!(
+            kind_before,
+            crate::paths::windows_streams::StreamDisposition::DenyForeignStreams
+        );
+        crate::paths::windows_streams::reset_stream_query_probe();
+        let (size, modified) = fingerprint(&source_path);
+        let source = format!("{scan}/a.txt");
+        let target = format!("{scan}/dest/a.txt");
+        let result = execute(live.path(), &scan, 1, true, "moveFile", &source, &target, size, modified);
+        let queries = crate::paths::windows_streams::stream_query_count();
+        let stored = live_journal_text(live.path());
+        eprintln!(
+            "LIVE_C result={} moved={} halted={} queries={} rename={}",
+            result.outcome,
+            result.moved,
+            result.halted,
+            queries,
+            win_move::last_rename_handle()
+        );
+        if result.moved || result.outcome == "moved" {
+            live.keep_for_diagnosis();
+            panic!("KRITISCHER SICHERHEITSFEHLER C: fremder ADS wurde freigegeben");
+        }
+        assert_eq!(result.outcome, "blocked", "{}", result.message);
+        assert!(!result.moved);
+        assert_eq!(queries, 1, "second ADS check must not run after first deny");
+        assert_eq!(win_move::last_rename_handle(), 0);
+        assert!(source_path.is_file());
+        assert!(!dest_path.exists());
+        assert_eq!(fs::read(&source_path).unwrap(), default_before);
+        assert!(crate::paths::windows_streams::named_stream_exists(
+            &source_path,
+            "DottyFmTest"
+        ));
+        assert_eq!(
+            crate::paths::windows_streams::read_named_stream(&source_path, "DottyFmTest").unwrap(),
+            stream_before
+        );
+        assert_eq!(fs::read(live.path().join("keep.txt")).unwrap(), b"keep");
+        assert!(stored.contains("\"op-file\":\"pending\""), "{stored}");
+        assert!(stored.contains("\"status\":\"prepared\""), "{stored}");
+        assert!(!stored.contains("\"op-file\":\"executed\""));
+        assert!(!stored.contains("\"op-file\":\"started\""));
+        assert!(!stored.contains("\"status\":\"executionHalted\""));
+        eprintln!("LIVE_C PASS");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn live_d_zone_plus_foreign_ads_blocks() {
+        crate::paths::windows_streams::reset_stream_query_probe();
+        win_move::reset_last_rename_handle();
+        let (mut live, scan) = live_move_harness("D");
+        let source_path = live.path().join("a.txt");
+        let dest_path = live.path().join("dest").join("a.txt");
+        crate::paths::windows_streams::write_named_stream(
+            &source_path,
+            "Zone.Identifier",
+            LIVE_ZONE_IDENTIFIER,
+        )
+        .unwrap();
+        crate::paths::windows_streams::write_named_stream(
+            &source_path,
+            "DottyFmTest",
+            b"dotty-foreign-d",
+        )
+        .unwrap();
+        let zone_before =
+            crate::paths::windows_streams::read_named_stream(&source_path, "Zone.Identifier").unwrap();
+        let foreign_before =
+            crate::paths::windows_streams::read_named_stream(&source_path, "DottyFmTest").unwrap();
+        let default_before = fs::read(&source_path).unwrap();
+        let (kind_before, names_before) = live_list_path(&source_path);
+        eprintln!("LIVE_D before kind={kind_before:?} names={names_before:?}");
+        assert_eq!(
+            kind_before,
+            crate::paths::windows_streams::StreamDisposition::DenyForeignStreams
+        );
+        crate::paths::windows_streams::reset_stream_query_probe();
+        let (size, modified) = fingerprint(&source_path);
+        let source = format!("{scan}/a.txt");
+        let target = format!("{scan}/dest/a.txt");
+        let result = execute(live.path(), &scan, 1, true, "moveFile", &source, &target, size, modified);
+        let queries = crate::paths::windows_streams::stream_query_count();
+        let stored = live_journal_text(live.path());
+        eprintln!(
+            "LIVE_D result={} moved={} halted={} queries={}",
+            result.outcome, result.moved, result.halted, queries
+        );
+        if result.moved || result.outcome == "moved" {
+            live.keep_for_diagnosis();
+            panic!("KRITISCHER SICHERHEITSFEHLER D: Zone.Identifier hat fremden ADS mitfreigegeben");
+        }
+        assert_eq!(result.outcome, "blocked", "{}", result.message);
+        assert_eq!(queries, 1);
+        assert_eq!(win_move::last_rename_handle(), 0);
+        assert!(source_path.is_file());
+        assert!(!dest_path.exists());
+        assert_eq!(fs::read(&source_path).unwrap(), default_before);
+        assert_eq!(
+            crate::paths::windows_streams::read_named_stream(&source_path, "Zone.Identifier").unwrap(),
+            zone_before
+        );
+        assert_eq!(
+            crate::paths::windows_streams::read_named_stream(&source_path, "DottyFmTest").unwrap(),
+            foreign_before
+        );
+        assert!(stored.contains("\"op-file\":\"pending\""), "{stored}");
+        assert!(stored.contains("\"status\":\"prepared\""), "{stored}");
+        assert!(!stored.contains("\"op-file\":\"executed\""));
+        assert!(!stored.contains("\"status\":\"executionHalted\""));
+        eprintln!("LIVE_D PASS");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn live_f_direct_ads_between_checks_blocks_rename() {
+        crate::paths::windows_streams::reset_stream_query_probe();
+        win_move::reset_last_rename_handle();
+        let (mut live, scan) = live_move_harness("F");
+        let source_path = live.path().join("a.txt");
+        let dest_path = live.path().join("dest").join("a.txt");
+        let (kind_before, names_before) = live_list_path(&source_path);
+        eprintln!("LIVE_F before kind={kind_before:?} names={names_before:?}");
+        assert_eq!(
+            kind_before,
+            crate::paths::windows_streams::StreamDisposition::AllowNoExtraStreams
+        );
+        crate::paths::windows_streams::reset_stream_query_probe();
+        let (size, modified) = fingerprint(&source_path);
+        let mut callback_reached = false;
+        let mut stream_created = false;
+        let result = win_move::prepare_and_move(
+            &scan,
+            &[String::from("a.txt")],
+            &[String::from("dest"), String::from("a.txt")],
+            size,
+            modified,
+            |_| {
+                callback_reached = true;
+                match crate::paths::windows_streams::write_named_stream(
+                    &source_path,
+                    "DottyFmRace",
+                    b"race-payload-f",
+                ) {
+                    Ok(()) => {
+                        stream_created = true;
+                        Ok(())
+                    }
+                    Err(err) => {
+                        let sharing = err.raw_os_error()
+                            == Some(crate::paths::windows_streams::ERROR_SHARING_VIOLATION);
+                        panic!(
+                            "NICHT NACHGEWIESEN F: DottyFmRace konnte nicht angelegt werden: {err} raw={:?} sharing_violation={sharing}",
+                            err.raw_os_error()
+                        );
+                    }
+                }
+            },
+        );
+        let queries = crate::paths::windows_streams::stream_query_count();
+        let first = crate::paths::windows_streams::first_stream_query_handle();
+        let last = crate::paths::windows_streams::last_stream_query_handle();
+        let rename = win_move::last_rename_handle();
+        eprintln!(
+            "LIVE_F callback={callback_reached} created={stream_created} result={result:?} queries={queries} first={first} last={last} rename={rename}"
+        );
+        if result.is_ok() {
+            live.keep_for_diagnosis();
+            panic!("KRITISCHER SICHERHEITSFEHLER F: Rename nach nachträglich angelegtem ADS");
+        }
+        assert!(callback_reached);
+        assert!(stream_created);
+        assert!(matches!(result, Err(MoveBlock::ForeignStreams)), "{result:?}");
+        assert_eq!(queries, 2);
+        assert_ne!(first, 0);
+        assert_eq!(first, last);
+        assert_eq!(rename, 0);
+        assert!(source_path.is_file());
+        assert!(!dest_path.exists());
+        assert_eq!(
+            crate::paths::windows_streams::read_named_stream(&source_path, "DottyFmRace").unwrap(),
+            b"race-payload-f"
+        );
+        let (kind_after, names_after) = live_list_path(&source_path);
+        eprintln!("LIVE_F after kind={kind_after:?} names={names_after:?}");
+        assert_eq!(
+            kind_after,
+            crate::paths::windows_streams::StreamDisposition::DenyForeignStreams
+        );
+        assert!(names_after.iter().any(|name| name == "DottyFmRace"));
+        eprintln!("LIVE_F PASS");
+    }
 }

@@ -523,6 +523,689 @@ extern "system" {
     fn GetLastError() -> u32;
 }
 
+/// Test-only live NTFS ADS helpers. Not compiled into release builds.
+#[cfg(all(test, windows))]
+pub struct LiveAdsSite {
+    pub temp_dir: std::path::PathBuf,
+    pub final_path: String,
+    pub volume_root: String,
+    pub file_system: String,
+    pub volume_flags: u32,
+    pub drive_type: u32,
+}
+
+#[cfg(all(test, windows))]
+struct LiveRootIdentity {
+    volume_serial: u32,
+    file_index: u64,
+}
+
+#[cfg(all(test, windows))]
+pub struct LiveAdsRoot {
+    path: std::path::PathBuf,
+    site: LiveAdsSite,
+    identity: LiveRootIdentity,
+    keep: bool,
+}
+
+#[cfg(all(test, windows))]
+pub struct LiveStreamList {
+    pub kind: StreamDisposition,
+    pub names: Vec<String>,
+    pub too_small_count: usize,
+    pub capacities: Vec<usize>,
+}
+
+#[cfg(all(test, windows))]
+const FILE_NAMED_STREAMS: u32 = 0x0004_0000;
+#[cfg(all(test, windows))]
+const DRIVE_FIXED: u32 = 3;
+#[cfg(all(test, windows))]
+const DRIVE_REMOTE: u32 = 4;
+#[cfg(all(test, windows))]
+const VOLUME_NAME_DOS: u32 = 0;
+#[cfg(all(test, windows))]
+const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+#[cfg(all(test, windows))]
+const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+#[cfg(all(test, windows))]
+const FILE_SHARE_READ: u32 = 0x1;
+#[cfg(all(test, windows))]
+const FILE_SHARE_WRITE: u32 = 0x2;
+#[cfg(all(test, windows))]
+const FILE_SHARE_DELETE: u32 = 0x4;
+#[cfg(all(test, windows))]
+pub const ERROR_SHARING_VIOLATION: i32 = 32;
+#[cfg(all(test, windows))]
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+
+#[cfg(all(test, windows))]
+#[repr(C)]
+struct ByHandleFileInformation {
+    file_attributes: u32,
+    creation_time_low: u32,
+    creation_time_high: u32,
+    access_time_low: u32,
+    access_time_high: u32,
+    write_time_low: u32,
+    write_time_high: u32,
+    volume_serial_number: u32,
+    file_size_high: u32,
+    file_size_low: u32,
+    number_of_links: u32,
+    file_index_high: u32,
+    file_index_low: u32,
+}
+
+#[cfg(all(test, windows))]
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetVolumePathNameW(file_name: *const u16, volume_path_name: *mut u16, length: u32) -> i32;
+    fn GetVolumeInformationW(
+        root_path_name: *const u16,
+        volume_name_buffer: *mut u16,
+        volume_name_size: u32,
+        volume_serial_number: *mut u32,
+        maximum_component_length: *mut u32,
+        file_system_flags: *mut u32,
+        file_system_name_buffer: *mut u16,
+        file_system_name_size: u32,
+    ) -> i32;
+    fn GetDriveTypeW(root_path_name: *const u16) -> u32;
+    fn GetFinalPathNameByHandleW(
+        handle: std::os::windows::io::RawHandle,
+        buf: *mut u16,
+        length: u32,
+        flags: u32,
+    ) -> u32;
+    fn GetFileInformationByHandle(
+        handle: std::os::windows::io::RawHandle,
+        file_information: *mut ByHandleFileInformation,
+    ) -> i32;
+}
+
+#[cfg(all(test, windows))]
+fn to_wide(value: &str) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    std::ffi::OsStr::new(value)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+#[cfg(all(test, windows))]
+fn from_wide(buffer: &[u16]) -> String {
+    let nul = buffer
+        .iter()
+        .position(|&unit| unit == 0)
+        .unwrap_or(buffer.len());
+    String::from_utf16_lossy(&buffer[..nul])
+}
+
+#[cfg(all(test, windows))]
+fn strip_extended_prefix(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = path.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        path.to_string()
+    }
+}
+
+#[cfg(all(test, windows))]
+fn normalize_for_compare(path: &str) -> String {
+    strip_extended_prefix(path)
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_lowercase()
+}
+
+#[cfg(all(test, windows))]
+fn is_under_normalized(path: &str, ancestor: &str) -> bool {
+    if ancestor.is_empty() {
+        return false;
+    }
+    path == ancestor || path.starts_with(&format!("{ancestor}\\"))
+}
+
+#[cfg(all(test, windows))]
+fn env_dir(name: &str) -> Option<String> {
+    std::env::var_os(name).map(|value| value.to_string_lossy().into_owned())
+}
+
+#[cfg(all(test, windows))]
+fn forbidden_ancestors() -> Vec<String> {
+    let mut out = Vec::new();
+    for name in ["OneDrive", "OneDriveConsumer", "OneDriveCommercial"] {
+        if let Some(value) = env_dir(name) {
+            out.push(normalize_for_compare(&value));
+        }
+    }
+    if let Some(profile) = env_dir("USERPROFILE") {
+        out.push(normalize_for_compare(&format!("{profile}\\OneDrive")));
+        out.push(normalize_for_compare(&format!("{profile}\\Documents")));
+    }
+    out.push(normalize_for_compare(r"C:\Windows"));
+    out.push(normalize_for_compare(r"C:\Windows\Temp"));
+    if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
+        let repo = std::path::Path::new(&manifest)
+            .parent()
+            .unwrap_or(std::path::Path::new(&manifest));
+        out.push(normalize_for_compare(&repo.to_string_lossy()));
+    }
+    out
+}
+
+#[cfg(all(test, windows))]
+fn looks_like_onedrive_or_cloud(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    lower.contains("\\onedrive")
+        || lower.contains("/onedrive")
+        || lower.contains("\\icloud")
+        || lower.contains("\\dropbox")
+        || lower.contains("\\google drive")
+}
+
+#[cfg(all(test, windows))]
+fn open_dir(path: &std::path::Path, open_reparse: bool) -> Result<std::fs::File, String> {
+    use std::os::windows::fs::OpenOptionsExt;
+    let mut flags = FILE_FLAG_BACKUP_SEMANTICS;
+    if open_reparse {
+        flags |= FILE_FLAG_OPEN_REPARSE_POINT;
+    }
+    std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(flags)
+        .open(path)
+        .map_err(|err| {
+            format!(
+                "Verzeichnis konnte nicht geöffnet werden ({}): {err}",
+                path.display()
+            )
+        })
+}
+
+#[cfg(all(test, windows))]
+fn dir_identity(file: &std::fs::File) -> Result<(LiveRootIdentity, u32), String> {
+    use std::os::windows::io::AsRawHandle;
+    let mut info = ByHandleFileInformation {
+        file_attributes: 0,
+        creation_time_low: 0,
+        creation_time_high: 0,
+        access_time_low: 0,
+        access_time_high: 0,
+        write_time_low: 0,
+        write_time_high: 0,
+        volume_serial_number: 0,
+        file_size_high: 0,
+        file_size_low: 0,
+        number_of_links: 0,
+        file_index_high: 0,
+        file_index_low: 0,
+    };
+    // SAFETY: `file` is open for this borrow. `info` is a local C-layout buffer matching
+    // BY_HANDLE_FILE_INFORMATION. The pointer is not stored.
+    let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) };
+    if ok == 0 {
+        return Err("GetFileInformationByHandle fehlgeschlagen.".into());
+    }
+    let file_index = (u64::from(info.file_index_high) << 32) | u64::from(info.file_index_low);
+    Ok((
+        LiveRootIdentity {
+            volume_serial: info.volume_serial_number,
+            file_index,
+        },
+        info.file_attributes,
+    ))
+}
+
+#[cfg(all(test, windows))]
+fn path_is_reparse(path: &std::path::Path) -> Result<bool, String> {
+    let file = open_dir(path, true)?;
+    let (_, attributes) = dir_identity(&file)?;
+    Ok(attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+}
+
+#[cfg(all(test, windows))]
+fn resolve_final_path(path: &std::path::Path, open_reparse: bool) -> Result<String, String> {
+    use std::os::windows::io::AsRawHandle;
+    let file = open_dir(path, open_reparse)?;
+    let mut capacity = 1024usize;
+    loop {
+        let mut buffer = vec![0u16; capacity];
+        // SAFETY: `file` is open for this borrow. `buffer` is a local UTF-16 Vec.
+        let written = unsafe {
+            GetFinalPathNameByHandleW(
+                file.as_raw_handle(),
+                buffer.as_mut_ptr(),
+                buffer.len() as u32,
+                VOLUME_NAME_DOS,
+            )
+        };
+        if written == 0 {
+            return Err("GetFinalPathNameByHandleW konnte den Pfad nicht auflösen.".into());
+        }
+        let written = written as usize;
+        if written >= buffer.len() {
+            if written > 32_768 {
+                return Err("GetFinalPathNameByHandleW: Pfad länger als 32 KiB.".into());
+            }
+            capacity = written.saturating_add(1);
+            continue;
+        }
+        return Ok(from_wide(&buffer));
+    }
+}
+
+#[cfg(all(test, windows))]
+fn query_volume(path: &std::path::Path) -> Result<(String, String, u32, u32), String> {
+    let wide_path = to_wide(&path.to_string_lossy());
+    let mut volume = vec![0u16; 64];
+    // SAFETY: `wide_path` is NUL-terminated. `volume` is a local 64-unit buffer. Both pointers
+    // remain valid for this call only.
+    let ok =
+        unsafe { GetVolumePathNameW(wide_path.as_ptr(), volume.as_mut_ptr(), volume.len() as u32) };
+    if ok == 0 {
+        return Err("GetVolumePathNameW fehlgeschlagen.".into());
+    }
+    let volume_root = from_wide(&volume);
+    let wide_root = to_wide(&volume_root);
+    let mut fs_name = vec![0u16; 32];
+    let mut flags = 0u32;
+    let mut serial = 0u32;
+    let mut component = 0u32;
+    // SAFETY: `wide_root` is NUL-terminated. Output buffers are local Vecs; serial/flags/component
+    // are local stack integers. All remain valid for this call only.
+    let ok = unsafe {
+        GetVolumeInformationW(
+            wide_root.as_ptr(),
+            std::ptr::null_mut(),
+            0,
+            &mut serial,
+            &mut component,
+            &mut flags,
+            fs_name.as_mut_ptr(),
+            fs_name.len() as u32,
+        )
+    };
+    if ok == 0 {
+        return Err("GetVolumeInformationW fehlgeschlagen.".into());
+    }
+    // SAFETY: `wide_root` is still the local NUL-terminated volume-root string.
+    let drive_type = unsafe { GetDriveTypeW(wide_root.as_ptr()) };
+    Ok((volume_root, from_wide(&fs_name), flags, drive_type))
+}
+
+#[cfg(all(test, windows))]
+fn reject_unusable_location(displayed: &str, followed: &str) -> Result<(), String> {
+    if looks_like_onedrive_or_cloud(displayed) || looks_like_onedrive_or_cloud(followed) {
+        return Err(format!(
+            "Pfad liegt in einem Cloud-Ordner (displayed={displayed}, followed={followed})."
+        ));
+    }
+    for ancestor in forbidden_ancestors() {
+        if is_under_normalized(displayed, &ancestor) || is_under_normalized(followed, &ancestor) {
+            return Err(format!(
+                "Pfad liegt in einem ausgeschlossenen Bereich ({ancestor}): {followed}"
+            ));
+        }
+    }
+    if displayed.starts_with("\\\\") || followed.starts_with("\\\\") {
+        return Err(format!("Pfad ist eine UNC-Netzwerkfreigabe: {followed}"));
+    }
+    Ok(())
+}
+
+#[cfg(all(test, windows))]
+fn require_local_ntfs_named_streams(
+    path: &std::path::Path,
+) -> Result<(String, String, u32, u32), String> {
+    let (volume_root, file_system, volume_flags, drive_type) = query_volume(path)?;
+    if drive_type == DRIVE_REMOTE {
+        return Err(format!("Volume ist DRIVE_REMOTE ({volume_root})."));
+    }
+    if drive_type != DRIVE_FIXED {
+        return Err(format!(
+            "Volume ist nicht DRIVE_FIXED (drive_type={drive_type}, root={volume_root})."
+        ));
+    }
+    if !file_system.eq_ignore_ascii_case("NTFS") {
+        return Err(format!(
+            "Volume ist nicht NTFS ({file_system}, {volume_root})."
+        ));
+    }
+    if volume_flags & FILE_NAMED_STREAMS == 0 {
+        return Err(format!(
+            "Volume unterstützt FILE_NAMED_STREAMS nicht (flags=0x{volume_flags:08x})."
+        ));
+    }
+    Ok((volume_root, file_system, volume_flags, drive_type))
+}
+
+#[cfg(all(test, windows))]
+pub fn live_ads_site() -> Result<LiveAdsSite, String> {
+    let temp_dir = std::env::temp_dir();
+    if !temp_dir.exists() {
+        return Err(format!(
+            "std::env::temp_dir existiert nicht: {}",
+            temp_dir.display()
+        ));
+    }
+    if path_is_reparse(&temp_dir)? {
+        return Err(format!(
+            "Temp-Verzeichnis ist ein Reparse-Punkt/Junction: {}",
+            temp_dir.display()
+        ));
+    }
+    let followed = resolve_final_path(&temp_dir, false)?;
+    let unfollowed = resolve_final_path(&temp_dir, true)?;
+    let followed_norm = normalize_for_compare(&followed);
+    let unfollowed_norm = normalize_for_compare(&unfollowed);
+    if followed_norm != unfollowed_norm {
+        return Err(format!(
+            "Temp-Finalpfad und Reparse-Öffnung unterscheiden sich (followed={followed}, unfollowed={unfollowed})."
+        ));
+    }
+    let displayed = normalize_for_compare(&temp_dir.to_string_lossy());
+    reject_unusable_location(&displayed, &followed_norm)?;
+    let followed_path = std::path::PathBuf::from(strip_extended_prefix(&followed));
+    let (volume_root, file_system, volume_flags, drive_type) =
+        require_local_ntfs_named_streams(&followed_path)?;
+    Ok(LiveAdsSite {
+        temp_dir,
+        final_path: followed,
+        volume_root,
+        file_system,
+        volume_flags,
+        drive_type,
+    })
+}
+
+#[cfg(all(test, windows))]
+fn live_root_name_ok(path: &std::path::Path) -> bool {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|name| name.starts_with("dotty-ads-live-") && !name.contains(['\\', '/', ':']))
+}
+
+#[cfg(all(test, windows))]
+fn parent_is_site_temp(path: &std::path::Path, site: &LiveAdsSite) -> bool {
+    let parent = path
+        .parent()
+        .map(|value| normalize_for_compare(&value.to_string_lossy()));
+    let temp = normalize_for_compare(&site.temp_dir.to_string_lossy());
+    parent.as_deref() == Some(temp.as_str())
+}
+
+#[cfg(all(test, windows))]
+fn inspect_owned_root(
+    path: &std::path::Path,
+    site: &LiveAdsSite,
+    expected: &LiveRootIdentity,
+) -> Result<(), String> {
+    if !live_root_name_ok(path) || !parent_is_site_temp(path, site) {
+        return Err("Pfad ist kein eigener dotty-ads-live-Testroot unter TEMP.".into());
+    }
+    if path_is_reparse(path)? {
+        return Err("Testroot ist ein Reparse-Punkt/Junction.".into());
+    }
+    let followed = resolve_final_path(path, false)?;
+    let followed_norm = normalize_for_compare(&followed);
+    let site_final = normalize_for_compare(&site.final_path);
+    if !is_under_normalized(&followed_norm, &site_final) {
+        return Err(format!(
+            "Finalpfad liegt nicht unter dem geprüften TEMP ({followed})."
+        ));
+    }
+    reject_unusable_location(
+        &normalize_for_compare(&path.to_string_lossy()),
+        &followed_norm,
+    )?;
+    let file = open_dir(path, true)?;
+    let (identity, attributes) = dir_identity(&file)?;
+    if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err("Testroot-Handle ist ein Reparse-Punkt.".into());
+    }
+    if identity.volume_serial != expected.volume_serial
+        || identity.file_index != expected.file_index
+    {
+        return Err("Testroot-Identität (Volume/Index) stimmt nicht mehr.".into());
+    }
+    Ok(())
+}
+
+#[cfg(all(test, windows))]
+pub fn create_live_ads_root(label: &str) -> Result<LiveAdsRoot, String> {
+    if label.is_empty() || !label.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+        return Err(format!("Ungültiges Testroot-Label: {label}"));
+    }
+    let site = live_ads_site()?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+    let name = format!("dotty-ads-live-{label}-{stamp}-{}", std::process::id());
+    let path = site.temp_dir.join(&name);
+    if path.exists() {
+        return Err(format!("Testroot existiert bereits: {}", path.display()));
+    }
+    std::fs::create_dir(&path).map_err(|err| format!("Testroot anlegen fehlgeschlagen: {err}"))?;
+    let inspected = (|| {
+        if path_is_reparse(&path)? {
+            return Err("Frisch angelegter Testroot ist ein Reparse-Punkt.".into());
+        }
+        let file = open_dir(&path, true)?;
+        let (identity, attributes) = dir_identity(&file)?;
+        if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err("Frisch angelegter Testroot-Handle ist ein Reparse-Punkt.".into());
+        }
+        inspect_owned_root(&path, &site, &identity)?;
+        Ok(identity)
+    })();
+    let identity = match inspected {
+        Ok(identity) => identity,
+        Err(reason) => {
+            eprintln!(
+                "LIVE_ADS_KEEP {} Anlageprüfung fehlgeschlagen: {reason}",
+                path.display()
+            );
+            return Err(reason);
+        }
+    };
+    Ok(LiveAdsRoot {
+        path,
+        site,
+        identity,
+        keep: false,
+    })
+}
+
+#[cfg(all(test, windows))]
+pub fn require_live_ads_root(label: &str) -> LiveAdsRoot {
+    match create_live_ads_root(label) {
+        Ok(root) => {
+            eprintln!(
+                "LIVE_ADS_RAN {label} root={} final={}",
+                root.path.display(),
+                root.site.final_path
+            );
+            root
+        }
+        Err(reason) => panic!("LIVE_ADS_NOT_RUN {label}: {reason}"),
+    }
+}
+
+#[cfg(all(test, windows))]
+impl LiveAdsRoot {
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    pub fn site(&self) -> &LiveAdsSite {
+        &self.site
+    }
+
+    pub fn keep_for_diagnosis(&mut self) {
+        self.keep = true;
+    }
+}
+
+#[cfg(all(test, windows))]
+impl Drop for LiveAdsRoot {
+    fn drop(&mut self) {
+        if self.keep || std::thread::panicking() {
+            eprintln!("LIVE_ADS_KEEP {}", self.path.display());
+            return;
+        }
+        match inspect_owned_root(&self.path, &self.site, &self.identity) {
+            Ok(()) => {
+                if let Err(err) = std::fs::remove_dir_all(&self.path) {
+                    eprintln!("LIVE_ADS_CLEANUP_FAIL {}: {err}", self.path.display());
+                }
+            }
+            Err(reason) => {
+                eprintln!("LIVE_ADS_CLEANUP_SKIP {}: {reason}", self.path.display());
+            }
+        }
+    }
+}
+
+#[cfg(all(test, windows))]
+fn named_stream_path(file: &std::path::Path, name: &str) -> Result<std::path::PathBuf, String> {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '.' || ch == '_')
+    {
+        return Err(format!("Ungültiger Streamname: {name}"));
+    }
+    if !file.is_file() {
+        return Err(format!("Streamziel ist keine Datei: {}", file.display()));
+    }
+    Ok(std::path::PathBuf::from(format!(
+        "{}:{name}",
+        file.display()
+    )))
+}
+
+#[cfg(all(test, windows))]
+pub fn write_named_stream(
+    file: &std::path::Path,
+    name: &str,
+    bytes: &[u8],
+) -> Result<(), std::io::Error> {
+    use std::io::Write;
+    use std::os::windows::fs::OpenOptionsExt;
+    let path = named_stream_path(file, name)
+        .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?;
+    let mut out = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .open(&path)?;
+    out.write_all(bytes)?;
+    out.flush()?;
+    Ok(())
+}
+
+#[cfg(all(test, windows))]
+pub fn read_named_stream(file: &std::path::Path, name: &str) -> Result<Vec<u8>, std::io::Error> {
+    use std::io::Read;
+    use std::os::windows::fs::OpenOptionsExt;
+    let path = named_stream_path(file, name)
+        .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?;
+    let mut input = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .open(&path)?;
+    let mut bytes = Vec::new();
+    input.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+#[cfg(all(test, windows))]
+pub fn named_stream_exists(file: &std::path::Path, name: &str) -> bool {
+    named_stream_path(file, name)
+        .ok()
+        .map(|path| path.exists())
+        .unwrap_or(false)
+}
+
+#[cfg(all(test, windows))]
+fn stream_names_from_buffer(buffer: &[u8]) -> Option<Vec<String>> {
+    let spans = parse_stream_spans(buffer)?;
+    let mut names = Vec::with_capacity(spans.len());
+    for span in spans {
+        let bytes = buffer.get(span.name_at..)?.get(..span.name_len)?;
+        let text = decode_stream_name(span.name_len, bytes)?;
+        match split_stream_name(&text) {
+            Some((name, _)) => names.push(name.to_string()),
+            None => names.push(text),
+        }
+    }
+    Some(names)
+}
+
+#[cfg(all(test, windows))]
+pub fn live_classify_and_list(file: &std::fs::File) -> LiveStreamList {
+    let mut too_small_count = 0usize;
+    let mut names = Vec::new();
+    let mut capacities = Vec::new();
+    let kind = classify_stream_query_loop(|capacity| {
+        capacities.push(capacity);
+        match query_stream_buffer(file, capacity) {
+            StreamQuery::TooSmall => {
+                too_small_count = too_small_count.saturating_add(1);
+                StreamQuery::TooSmall
+            }
+            StreamQuery::Complete(buffer) => {
+                names = stream_names_from_buffer(&buffer).unwrap_or_default();
+                StreamQuery::Complete(buffer)
+            }
+            other => other,
+        }
+    });
+    LiveStreamList {
+        kind,
+        names,
+        too_small_count,
+        capacities,
+    }
+}
+
+#[cfg(all(test, windows))]
+fn probe_stream_buffer(file: &std::fs::File, capacity: usize) -> (StreamQuery, u32) {
+    use std::os::windows::io::AsRawHandle;
+    let Some(mut buffer) = AlignedStreamBuffer::with_byte_capacity(capacity) else {
+        return (StreamQuery::Failed, 0);
+    };
+    let Ok(capacity_u32) = u32::try_from(buffer.byte_len()) else {
+        return (StreamQuery::Failed, 0);
+    };
+    // SAFETY: same contract as `query_stream_buffer`, test-only diagnostic wrapper.
+    let ok = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            FILE_STREAM_INFO_CLASS,
+            buffer.as_mut_ptr(),
+            capacity_u32,
+        )
+    };
+    if ok != 0 {
+        return (StreamQuery::Complete(buffer.as_bytes().to_vec()), 0);
+    }
+    // SAFETY: GetLastError is read immediately after the failed query on this thread.
+    let error = unsafe { GetLastError() };
+    if error == ERROR_MORE_DATA {
+        (StreamQuery::TooSmall, error)
+    } else {
+        (StreamQuery::Failed, error)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{classify_reported_streams, ReportedStream, StreamDisposition};
@@ -1199,5 +1882,256 @@ mod tests {
             StreamDisposition::AllowNoExtraStreams
         );
         drop(move_like);
+    }
+
+    #[cfg(windows)]
+    fn assert_never_allow(kind: StreamDisposition, live: &mut super::LiveAdsRoot, label: &str) {
+        if matches!(
+            kind,
+            StreamDisposition::AllowNoExtraStreams | StreamDisposition::AllowOnlyZoneIdentifier
+        ) {
+            live.keep_for_diagnosis();
+            panic!(
+                "KRITISCHER SICHERHEITSFEHLER {label}: fälschliche Allow-Klassifikation {kind:?}"
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    fn assert_complete_foreign_enumeration(
+        kind: StreamDisposition,
+        names: &[String],
+        expected: &[String],
+        live: &mut super::LiveAdsRoot,
+        label: &str,
+    ) {
+        assert_never_allow(kind, live, label);
+        if kind != StreamDisposition::DenyForeignStreams {
+            live.keep_for_diagnosis();
+            panic!(
+                "{label} FAIL completeness: {kind:?} ist fail-closed, aber kein Nachweis vollständiger Enumeration"
+            );
+        }
+        let missing: Vec<&String> = expected
+            .iter()
+            .filter(|name| !names.iter().any(|listed| listed == *name))
+            .collect();
+        let extra: Vec<&String> = names
+            .iter()
+            .filter(|name| !name.is_empty() && !expected.iter().any(|expected| expected == *name))
+            .collect();
+        let mut sorted = names.to_vec();
+        sorted.sort();
+        let duplicates = sorted.windows(2).filter(|pair| pair[0] == pair[1]).count();
+        eprintln!(
+            "{label} completeness listed={} expected_foreign={} missing={} extra={} dups={} default={}",
+            names.len(),
+            expected.len(),
+            missing.len(),
+            extra.len(),
+            duplicates,
+            names.iter().any(|name| name.is_empty())
+        );
+        if !missing.is_empty() || !extra.is_empty() || duplicates != 0 {
+            live.keep_for_diagnosis();
+        }
+        assert!(
+            names.iter().any(|name| name.is_empty()),
+            "{label} Default-Stream fehlt in der Liste"
+        );
+        assert!(
+            missing.is_empty(),
+            "{label} fehlende Streamnamen: {:?}",
+            &missing[..missing.len().min(8)]
+        );
+        assert!(
+            extra.is_empty(),
+            "{label} unerwartete Streamnamen: {extra:?}"
+        );
+        assert_eq!(duplicates, 0, "{label} doppelte Streamnamen");
+        assert_eq!(
+            names.len(),
+            expected.len().saturating_add(1),
+            "{label} Listenlänge Default+fremd"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn live_ads_site_probe() {
+        match super::live_ads_site() {
+            Ok(site) => eprintln!(
+                "LIVE_ADS_SITE temp={} final={} volume={} fs={} flags=0x{:08x} drive={}",
+                site.temp_dir.display(),
+                site.final_path,
+                site.volume_root,
+                site.file_system,
+                site.volume_flags,
+                site.drive_type
+            ),
+            Err(reason) => panic!("LIVE_ADS_NOT_RUN site: {reason}"),
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn live_h2_small_stream_buffer_is_too_small() {
+        let mut live = super::require_live_ads_root("H2");
+        let path = live.path().join("h2.txt");
+        std::fs::write(&path, b"h2-default").unwrap();
+        super::write_named_stream(&path, "DottyFmH2a", b"alpha").unwrap();
+        super::write_named_stream(&path, "DottyFmH2b", b"beta").unwrap();
+        super::write_named_stream(&path, "DottyFmH2c", b"gamma").unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        let (small, error) = super::probe_stream_buffer(&file, 32);
+        let small_label = match &small {
+            super::StreamQuery::TooSmall => "TooSmall",
+            super::StreamQuery::Failed => "Failed",
+            super::StreamQuery::Complete(_) => "Complete",
+        };
+        eprintln!("LIVE_H2 small_buffer query={small_label} win32={error}");
+        match small {
+            super::StreamQuery::TooSmall => {
+                assert_eq!(error, super::ERROR_MORE_DATA);
+            }
+            super::StreamQuery::Failed => {
+                live.keep_for_diagnosis();
+                panic!("LIVE_H2 FAIL: 32-Byte-Puffer lieferte Failed, Win32={error}");
+            }
+            super::StreamQuery::Complete(_) => {
+                live.keep_for_diagnosis();
+                panic!("H2 FAIL: 32-Byte-Puffer wurde als vollständig gemeldet");
+            }
+        }
+        let listed = super::live_classify_and_list(&file);
+        eprintln!(
+            "LIVE_H2 full kind={:?} names={:?} too_small={} capacities={:?}",
+            listed.kind, listed.names, listed.too_small_count, listed.capacities
+        );
+        drop(file);
+        assert_never_allow(listed.kind, &mut live, "H2");
+        assert_eq!(
+            listed.kind,
+            StreamDisposition::DenyForeignStreams,
+            "H2 unexpected {:?}",
+            listed.kind
+        );
+        eprintln!("LIVE_H2 PASS");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn live_h1_many_named_streams_never_allow() {
+        let mut live = super::require_live_ads_root("H1");
+        let path = live.path().join("h1.txt");
+        std::fs::write(&path, b"h1-default").unwrap();
+        const COUNT: usize = 250;
+        let mut expected = Vec::with_capacity(COUNT);
+        for index in 0..COUNT {
+            let name = format!("T{index:03}");
+            super::write_named_stream(&path, &name, name.as_bytes()).unwrap();
+            expected.push(name);
+        }
+        eprintln!(
+            "LIVE_H1 created {COUNT} named streams on {}",
+            path.display()
+        );
+        let file = std::fs::File::open(&path).unwrap();
+        let start = super::query_stream_buffer(&file, super::STREAM_BUFFER_START);
+        let start_too_small = matches!(start, super::StreamQuery::TooSmall);
+        let start_label = match &start {
+            super::StreamQuery::TooSmall => "TooSmall",
+            super::StreamQuery::Failed => "Failed",
+            super::StreamQuery::Complete(_) => "Complete",
+        };
+        eprintln!("LIVE_H1 start_buffer_16KiB too_small={start_too_small} query={start_label}");
+        let listed = super::live_classify_and_list(&file);
+        eprintln!(
+            "LIVE_H1 kind={:?} listed={} too_small={} capacities={:?}",
+            listed.kind,
+            listed.names.len(),
+            listed.too_small_count,
+            listed.capacities
+        );
+        drop(file);
+        assert_complete_foreign_enumeration(listed.kind, &listed.names, &expected, &mut live, "H1");
+        eprintln!("LIVE_H1 PASS");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn live_h1b_real_buffer_growth_detects_all_streams() {
+        let mut live = super::require_live_ads_root("H1b");
+        let path = live.path().join("h1b.txt");
+        std::fs::write(&path, b"h1b-default").unwrap();
+        const COUNT: usize = 250;
+        let mut expected = Vec::with_capacity(COUNT);
+        for index in 0..COUNT {
+            let name = format!("DottyH1bStreamName{index:03}");
+            super::write_named_stream(&path, &name, name.as_bytes()).unwrap();
+            expected.push(name);
+        }
+        eprintln!(
+            "LIVE_H1b created {COUNT} named streams on {}",
+            path.display()
+        );
+        let file = std::fs::File::open(&path).unwrap();
+        let (start, error) = super::probe_stream_buffer(&file, super::STREAM_BUFFER_START);
+        let start_label = match &start {
+            super::StreamQuery::TooSmall => "TooSmall",
+            super::StreamQuery::Failed => "Failed",
+            super::StreamQuery::Complete(_) => "Complete",
+        };
+        eprintln!(
+            "LIVE_H1b start_buffer={} query={start_label} win32={error}",
+            super::STREAM_BUFFER_START
+        );
+        match start {
+            super::StreamQuery::TooSmall => {
+                assert_eq!(error, super::ERROR_MORE_DATA, "H1b Win32={error}");
+            }
+            super::StreamQuery::Failed | super::StreamQuery::Complete(_) => {
+                live.keep_for_diagnosis();
+                panic!(
+                    "H1b FAIL: 16-KiB-Startpuffer lieferte {start_label} statt TooSmall (Win32={error}). Nicht künstlich angepasst."
+                );
+            }
+        }
+        let listed = super::live_classify_and_list(&file);
+        eprintln!(
+            "LIVE_H1b kind={:?} listed={} too_small={} capacities={:?}",
+            listed.kind,
+            listed.names.len(),
+            listed.too_small_count,
+            listed.capacities
+        );
+        drop(file);
+        assert!(
+            listed.too_small_count >= 1,
+            "H1b produktive Schleife hat TooSmall nicht gesehen: {:?}",
+            listed.capacities
+        );
+        assert_eq!(
+            listed.capacities.first().copied(),
+            Some(super::STREAM_BUFFER_START)
+        );
+        assert!(
+            listed.capacities.len() >= 2,
+            "H1b kein Pufferwachstum: {:?}",
+            listed.capacities
+        );
+        assert!(
+            listed.capacities[1] > listed.capacities[0],
+            "H1b Puffer nicht vergrößert: {:?}",
+            listed.capacities
+        );
+        assert_complete_foreign_enumeration(
+            listed.kind,
+            &listed.names,
+            &expected,
+            &mut live,
+            "H1b",
+        );
+        eprintln!("LIVE_H1b PASS");
     }
 }
