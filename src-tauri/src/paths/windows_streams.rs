@@ -179,8 +179,19 @@ thread_local! {
     static FORCE_KIND: std::cell::Cell<Option<StreamDisposition>> =
         const { std::cell::Cell::new(None) };
     static FORCE_QUERY_FAIL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static FORCE_SEQUENCE: std::cell::RefCell<std::collections::VecDeque<ForcedQueryStep>> =
+        const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+    static FIRST_QUERY_HANDLE: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
     static LAST_QUERY_HANDLE: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
     static QUERY_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// One synthetic result for a single `classify_open_file_streams` call in tests.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ForcedQueryStep {
+    Disposition(StreamDisposition),
+    QueryFailed,
 }
 
 #[cfg(test)]
@@ -234,6 +245,39 @@ impl Drop for ForcedStreamQueryFailed {
     }
 }
 
+/// RAII sequence of per-call stream results. Restores the previous sequence on drop.
+#[cfg(test)]
+pub struct ForcedStreamQuerySequence {
+    previous: std::collections::VecDeque<ForcedQueryStep>,
+}
+
+#[cfg(test)]
+impl ForcedStreamQuerySequence {
+    pub fn new(steps: impl IntoIterator<Item = ForcedQueryStep>) -> Self {
+        let previous = FORCE_SEQUENCE.with(|cell| {
+            let mut queue = cell.borrow_mut();
+            let previous = std::mem::take(&mut *queue);
+            queue.extend(steps);
+            previous
+        });
+        Self { previous }
+    }
+}
+
+#[cfg(test)]
+impl Drop for ForcedStreamQuerySequence {
+    fn drop(&mut self) {
+        FORCE_SEQUENCE.with(|cell| {
+            *cell.borrow_mut() = std::mem::take(&mut self.previous);
+        });
+    }
+}
+
+#[cfg(test)]
+pub fn first_stream_query_handle() -> isize {
+    FIRST_QUERY_HANDLE.with(|cell| cell.get())
+}
+
 #[cfg(test)]
 pub fn last_stream_query_handle() -> isize {
     LAST_QUERY_HANDLE.with(|cell| cell.get())
@@ -246,6 +290,7 @@ pub fn stream_query_count() -> usize {
 
 #[cfg(test)]
 pub fn reset_stream_query_probe() {
+    FIRST_QUERY_HANDLE.with(|cell| cell.set(0));
     LAST_QUERY_HANDLE.with(|cell| cell.set(0));
     QUERY_COUNT.with(|cell| cell.set(0));
 }
@@ -256,9 +301,27 @@ fn test_stream_override(file: &std::fs::File) -> Option<StreamDisposition> {
         #[cfg(windows)]
         {
             use std::os::windows::io::AsRawHandle;
-            LAST_QUERY_HANDLE.with(|cell| cell.set(file.as_raw_handle() as isize));
+            let handle = file.as_raw_handle() as isize;
+            let count = QUERY_COUNT.with(|cell| {
+                let next = cell.get().saturating_add(1);
+                cell.set(next);
+                next
+            });
+            if count == 1 {
+                FIRST_QUERY_HANDLE.with(|cell| cell.set(handle));
+            }
+            LAST_QUERY_HANDLE.with(|cell| cell.set(handle));
         }
-        QUERY_COUNT.with(|cell| cell.set(cell.get().saturating_add(1)));
+        #[cfg(not(windows))]
+        {
+            QUERY_COUNT.with(|cell| cell.set(cell.get().saturating_add(1)));
+        }
+        if let Some(step) = FORCE_SEQUENCE.with(|cell| cell.borrow_mut().pop_front()) {
+            return Some(match step {
+                ForcedQueryStep::Disposition(kind) => kind,
+                ForcedQueryStep::QueryFailed => classify_stream_query_loop(|_| StreamQuery::Failed),
+            });
+        }
         if FORCE_QUERY_FAIL.with(|cell| cell.get()) {
             return Some(classify_stream_query_loop(|_| StreamQuery::Failed));
         }
@@ -1046,6 +1109,29 @@ mod tests {
         );
         drop(_force);
         drop(file);
+    }
+
+    #[test]
+    fn forced_stream_query_sequence_applies_per_call_and_restores() {
+        super::reset_stream_query_probe();
+        let file = tempfile_for_force();
+        let _force = super::ForcedStreamQuerySequence::new([
+            super::ForcedQueryStep::Disposition(StreamDisposition::AllowNoExtraStreams),
+            super::ForcedQueryStep::Disposition(StreamDisposition::DenyForeignStreams),
+        ]);
+        assert_eq!(
+            super::classify_open_file_streams(&file),
+            StreamDisposition::AllowNoExtraStreams
+        );
+        assert_eq!(
+            super::classify_open_file_streams(&file),
+            StreamDisposition::DenyForeignStreams
+        );
+        drop(_force);
+        assert_eq!(super::stream_query_count(), 2);
+        let after = super::classify_open_file_streams(&file);
+        drop(file);
+        assert_ne!(after, StreamDisposition::DenyForeignStreams);
     }
 
     fn tempfile_for_force() -> std::fs::File {

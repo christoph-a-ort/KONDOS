@@ -878,14 +878,17 @@ mod win_move {
             return Err(MoveBlock::Exists);
         }
 
-        // ADS gate on the same NtCreateFile source handle that rename_on_handle will mutate.
+        // Both ADS gates use the same NtCreateFile source handle that rename_on_handle mutates.
         // Access: DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE. Sharing: READ|WRITE|DELETE.
-        // Runs after identity, reparse, volume, and dest-exists checks, and before journal
-        // intent (`after_prepare`) and NtSetInformationFile. A deny returns here, so neither
-        // journal progress nor rename is invoked. Concurrent stream changes on a shared handle
-        // are not closed by this gate (FV2-02e.3e).
+        // First gate: after identity/reparse/volume/dest-exists, before journal intent.
+        // A deny here writes no intent and does not rename.
+        // Second gate: after a successful after_prepare, immediately before NtSetInformationFile.
+        // A deny here uses the Post-Intent-Pfad (failed/executionHalted). Sharing still allows
+        // concurrent stream changes; the second query shrinks the journal-I/O window but is not
+        // an atomic query+rename (FV2-02e.3e).
         move_stream_gate(classify_open_file_streams(&source))?;
         after_prepare(&identity)?;
+        move_stream_gate(classify_open_file_streams(&source))?;
         rename_on_handle(&source, &dest_dir, dest_name)?;
         Ok(identity)
     }
@@ -1887,19 +1890,24 @@ mod tests {
         let (size, modified) = fingerprint(&root.join("a.txt"));
         let result = execute(&root, &scan, 1, true, "moveFile", &source, &target, size, modified);
         assert_eq!(result.outcome, "moved", "{}", result.message);
-        assert!(crate::paths::windows_streams::stream_query_count() >= 1);
-        assert_eq!(
-            crate::paths::windows_streams::last_stream_query_handle(),
-            win_move::last_rename_handle()
-        );
+        assert!(!result.halted);
+        assert!(result.moved);
+        assert!(crate::paths::windows_streams::stream_query_count() >= 2);
+        let rename = win_move::last_rename_handle();
+        assert_ne!(rename, 0);
+        assert_eq!(crate::paths::windows_streams::first_stream_query_handle(), rename);
+        assert_eq!(crate::paths::windows_streams::last_stream_query_handle(), rename);
         assert!(!root.join("a.txt").exists());
         assert!(root.join("dest").join("a.txt").is_file());
+        let stored = load_at(&journal(&journal_store(&root), "j1").unwrap(), "j1").unwrap().unwrap();
+        assert!(stored.contains("\"op-file\":\"executed\""), "{stored}");
         let _ = fs::remove_dir_all(root);
     }
 
     #[cfg(windows)]
     #[test]
     fn zone_identifier_disposition_allows_move_without_creating_ads() {
+        crate::paths::windows_streams::reset_stream_query_probe();
         let (root, scan) = setup();
         let source = format!("{scan}/a.txt");
         let target = format!("{scan}/dest/a.txt");
@@ -1910,6 +1918,9 @@ mod tests {
         let result = execute(&root, &scan, 1, true, "moveFile", &source, &target, size, modified);
         drop(_force);
         assert_eq!(result.outcome, "moved", "{}", result.message);
+        assert!(result.moved);
+        assert!(!result.halted);
+        assert!(crate::paths::windows_streams::stream_query_count() >= 2);
         assert!(!root.join("a.txt").exists());
         assert!(root.join("dest").join("a.txt").is_file());
         let stored = load_at(&journal(&journal_store(&root), "j1").unwrap(), "j1").unwrap().unwrap();
@@ -1920,6 +1931,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn stream_gate_runs_on_source_handle_before_after_prepare() {
+        crate::paths::windows_streams::reset_stream_query_probe();
         let (root, scan) = setup();
         let (size, modified) = fingerprint(&root.join("a.txt"));
         win_move::reset_last_rename_handle();
@@ -1941,6 +1953,7 @@ mod tests {
         drop(_force);
         assert!(matches!(result, Err(MoveBlock::ForeignStreams)));
         assert!(!prepared);
+        assert_eq!(crate::paths::windows_streams::stream_query_count(), 1);
         assert_eq!(win_move::last_rename_handle(), 0);
         assert!(root.join("a.txt").is_file());
         assert!(!root.join("dest").join("a.txt").exists());
@@ -1977,6 +1990,189 @@ mod tests {
         assert!(root.join("a.txt").is_file());
         let stored_after = load_at(&journal(&journal_store(&root), "j1").unwrap(), "j1").unwrap().unwrap();
         assert_eq!(stored_before, stored_after);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn second_stream_blocks_after_intent(
+        second: crate::paths::windows_streams::ForcedQueryStep,
+        needle: &str,
+    ) -> (std::path::PathBuf, String, String, String, u64, u64) {
+        crate::paths::windows_streams::reset_stream_query_probe();
+        #[cfg(windows)]
+        win_move::reset_last_rename_handle();
+        let (root, scan) = setup();
+        let source = format!("{scan}/a.txt");
+        let target = format!("{scan}/dest/a.txt");
+        let (size, modified) = fingerprint(&root.join("a.txt"));
+        let _force = crate::paths::windows_streams::ForcedStreamQuerySequence::new([
+            crate::paths::windows_streams::ForcedQueryStep::Disposition(
+                crate::paths::windows_streams::StreamDisposition::AllowNoExtraStreams,
+            ),
+            second,
+        ]);
+        let result = execute(&root, &scan, 1, true, "moveFile", &source, &target, size, modified);
+        drop(_force);
+        assert_eq!(result.outcome, "failed", "{}", result.message);
+        assert!(result.message.contains(needle), "{}", result.message);
+        assert!(result.message.contains("Ablauf angehalten"), "{}", result.message);
+        assert!(!result.moved);
+        assert!(result.halted);
+        assert!(root.join("a.txt").is_file());
+        assert!(!root.join("dest").join("a.txt").exists());
+        assert_eq!(crate::paths::windows_streams::stream_query_count(), 2);
+        #[cfg(windows)]
+        assert_eq!(win_move::last_rename_handle(), 0);
+        let stored = load_at(&journal(&journal_store(&root), "j1").unwrap(), "j1").unwrap().unwrap();
+        assert!(stored.contains("\"op-file\":\"failed\""), "{stored}");
+        assert!(stored.contains("\"status\":\"executionHalted\""), "{stored}");
+        assert!(!stored.contains("\"op-file\":\"executed\""));
+        (root, scan, source, target, size, modified)
+    }
+
+    #[test]
+    fn second_foreign_streams_fail_after_intent_without_rename() {
+        let (root, scan, source, target, size, modified) = second_stream_blocks_after_intent(
+            crate::paths::windows_streams::ForcedQueryStep::Disposition(
+                crate::paths::windows_streams::StreamDisposition::DenyForeignStreams,
+            ),
+            "zusätzliche Alternate Data Streams",
+        );
+        let retry = execute(&root, &scan, 1, true, "moveFile", &source, &target, size, modified);
+        assert_eq!(retry.outcome, "blocked", "{}", retry.message);
+        assert!(retry.halted);
+        assert!(!retry.moved);
+        assert!(!retry.message.is_empty());
+        assert!(root.join("a.txt").is_file());
+        assert!(!root.join("dest").join("a.txt").exists());
+        let stored = load_at(&journal(&journal_store(&root), "j1").unwrap(), "j1").unwrap().unwrap();
+        assert!(stored.contains("\"op-file\":\"failed\""), "{stored}");
+        assert!(!stored.contains("\"op-file\":\"executed\""));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn second_unverifiable_streams_fail_after_intent_without_rename() {
+        let (root, _, _, _, _, _) = second_stream_blocks_after_intent(
+            crate::paths::windows_streams::ForcedQueryStep::Disposition(
+                crate::paths::windows_streams::StreamDisposition::Unverifiable,
+            ),
+            "nicht zuverlässig überprüft",
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn second_stream_query_failure_fails_after_intent_without_rename() {
+        let (root, _, _, _, _, _) = second_stream_blocks_after_intent(
+            crate::paths::windows_streams::ForcedQueryStep::QueryFailed,
+            "nicht zuverlässig überprüft",
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn both_stream_checks_use_the_source_handle_before_rename() {
+        crate::paths::windows_streams::reset_stream_query_probe();
+        win_move::reset_last_rename_handle();
+        let (root, scan) = setup();
+        let (size, modified) = fingerprint(&root.join("a.txt"));
+        let _force = crate::paths::windows_streams::ForcedStreamQuerySequence::new([
+            crate::paths::windows_streams::ForcedQueryStep::Disposition(
+                crate::paths::windows_streams::StreamDisposition::AllowNoExtraStreams,
+            ),
+            crate::paths::windows_streams::ForcedQueryStep::Disposition(
+                crate::paths::windows_streams::StreamDisposition::DenyForeignStreams,
+            ),
+        ]);
+        let mut prepared = false;
+        let result = win_move::prepare_and_move(
+            &scan,
+            &[String::from("a.txt")],
+            &[String::from("dest"), String::from("a.txt")],
+            size,
+            modified,
+            |_| {
+                prepared = true;
+                Ok(())
+            },
+        );
+        drop(_force);
+        assert!(matches!(result, Err(MoveBlock::ForeignStreams)));
+        assert!(prepared);
+        assert_eq!(crate::paths::windows_streams::stream_query_count(), 2);
+        assert_eq!(
+            crate::paths::windows_streams::first_stream_query_handle(),
+            crate::paths::windows_streams::last_stream_query_handle()
+        );
+        assert_ne!(crate::paths::windows_streams::last_stream_query_handle(), 0);
+        assert_eq!(win_move::last_rename_handle(), 0);
+        assert!(root.join("a.txt").is_file());
+        assert!(!root.join("dest").join("a.txt").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn existing_journal_cannot_bypass_second_move_stream_gate() {
+        let (root, scan) = setup();
+        let source = format!("{scan}/a.txt");
+        let target = format!("{scan}/dest/a.txt");
+        let (size, modified) = fingerprint(&root.join("a.txt"));
+        let stored_before = load_at(&journal(&journal_store(&root), "j1").unwrap(), "j1").unwrap().unwrap();
+        assert!(stored_before.contains("\"op-file\":\"pending\""));
+        let _force = crate::paths::windows_streams::ForcedStreamQuerySequence::new([
+            crate::paths::windows_streams::ForcedQueryStep::Disposition(
+                crate::paths::windows_streams::StreamDisposition::AllowNoExtraStreams,
+            ),
+            crate::paths::windows_streams::ForcedQueryStep::Disposition(
+                crate::paths::windows_streams::StreamDisposition::DenyForeignStreams,
+            ),
+        ]);
+        let result = execute_move_file_at(
+            &root,
+            &scan,
+            "owner-a",
+            "j1",
+            1,
+            "op-file",
+            "moveFile",
+            &source,
+            &target,
+            size,
+            modified,
+            true,
+        )
+        .unwrap();
+        drop(_force);
+        assert_eq!(result.outcome, "failed");
+        assert!(result.halted);
+        assert!(!result.moved);
+        assert!(root.join("a.txt").is_file());
+        assert!(!root.join("dest").join("a.txt").exists());
+        let stored_after = load_at(&journal(&journal_store(&root), "j1").unwrap(), "j1").unwrap().unwrap();
+        assert!(stored_after.contains("\"op-file\":\"failed\""), "{stored_after}");
+        assert!(stored_after.contains("\"status\":\"executionHalted\""), "{stored_after}");
+        assert!(!stored_after.contains("\"op-file\":\"executed\""));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn first_stream_deny_does_not_run_the_second_query() {
+        crate::paths::windows_streams::reset_stream_query_probe();
+        let (root, scan) = setup();
+        let source = format!("{scan}/a.txt");
+        let target = format!("{scan}/dest/a.txt");
+        let (size, modified) = fingerprint(&root.join("a.txt"));
+        let _force = crate::paths::windows_streams::ForcedStreamDisposition::new(
+            crate::paths::windows_streams::StreamDisposition::DenyForeignStreams,
+        );
+        let result = execute(&root, &scan, 1, true, "moveFile", &source, &target, size, modified);
+        drop(_force);
+        assert_eq!(result.outcome, "blocked");
+        assert_eq!(crate::paths::windows_streams::stream_query_count(), 1);
+        let stored = load_at(&journal(&journal_store(&root), "j1").unwrap(), "j1").unwrap().unwrap();
+        assert!(stored.contains("\"op-file\":\"pending\""));
+        assert!(!stored.contains("\"status\":\"executionHalted\""));
         let _ = fs::remove_dir_all(root);
     }
 }
