@@ -7,6 +7,8 @@ import {
   collectDocumentDateHits,
   formatIsoDate,
   parseUserDocumentDate,
+  isOcrTextSource,
+  preferredAskIso,
   resolveDocumentDate,
   resolveDocumentDateFromView,
   stripLeadingDatePrefix,
@@ -93,6 +95,59 @@ export function runTreeWorkbenchNameSuggestCheck(): void {
   const asked = resolveDocumentDateFromView(unsupported);
   assert(asked.status === "ask", "unsupported types ask for a date instead of faking analysis");
 
+  const ocrInvoice: DocumentTextView = {
+    scanId: 1,
+    path: "C:/scan.pdf",
+    name: "scan.pdf",
+    format: "pdf",
+    status: "searchable",
+    text: "Rechnungsdatum: 28.10.2026\nZahlungsziel: 11.11.2026",
+    source: "ocr",
+    ocrAttempted: true,
+  };
+  const ocrResolved = resolveDocumentDateFromView(ocrInvoice);
+  assert(ocrResolved.status === "ask", "OCR dates are never treated as certain");
+  assert(preferredAskIso(ocrResolved) === "2026-10-28", "unique OCR invoice date is offered for confirmation");
+  assert(isOcrTextSource(ocrInvoice), "OCR source is marked");
+
+  const ocrEmpty: DocumentTextView = {
+    scanId: 1,
+    path: "C:/leer.png",
+    name: "leer.png",
+    format: "png",
+    status: "noExtractableText",
+    text: null,
+    source: "ocr",
+    ocrAttempted: true,
+    message: "Die Texterkennung hat keinen Text gefunden.",
+  };
+  const ocrEmptyResolved = resolveDocumentDateFromView(ocrEmpty);
+  assert(ocrEmptyResolved.status === "ask" && ocrEmptyResolved.hits.length === 0, "image without text asks for a date");
+
+  const ocrFailed: DocumentTextView = {
+    scanId: 1,
+    path: "C:/kaputt.jpg",
+    name: "kaputt.jpg",
+    format: "jpeg",
+    status: "ocrFailed",
+    text: null,
+    source: "ocr",
+    ocrAttempted: true,
+  };
+  assert(resolveDocumentDateFromView(ocrFailed).status === "ask", "unreadable OCR still asks instead of inventing a date");
+
+  const extractPdf: DocumentTextView = {
+    scanId: 1,
+    path: "C:/Rechnung_Mueller.pdf",
+    name: "Rechnung_Mueller.pdf",
+    format: "pdf",
+    status: "searchable",
+    text: "Rechnungsdatum: 28.10.2026",
+    source: "extract",
+  };
+  const extractResolved = resolveDocumentDateFromView(extractPdf);
+  assert(extractResolved.status === "confident", "PDF text layer can still be certain");
+
   const prepared = workbenchNameSuggestRequest(root.path, source, noPrefix);
   assert(prepared.ok, "apply reuses the existing rename request");
   if (prepared.ok) {
@@ -116,4 +171,27 @@ export function runTreeWorkbenchNameSuggestCheck(): void {
     "Ctrl+Shift+U remains the inline rename shortcut",
   );
   assert(!isWorkbenchRenameShortcut({ key: "F2" }), "F2 stays unused for rename");
+
+  const originalOcrRaw = "PNG— oder JPG—Datei mit sichtbarem Text 28 .10.2026";
+  const originalHits = collectDocumentDateHits(originalOcrRaw);
+  assert(originalHits.length === 1, "OCR spaced German date is collected");
+  assert(originalHits[0]?.iso === "2026-10-28", "OCR spaced date maps to 2026-10-28");
+  assert(originalHits[0]?.kind === "unlabeled", "fixture has no document-date label");
+  const originalResolved = resolveDocumentDate(originalOcrRaw);
+  assert(originalResolved.status === "ask", "unlabeled OCR date is not treated as certain");
+  assert(originalResolved.hits.length === 1 && originalResolved.hits[0]?.iso === "2026-10-28", "ask still keeps the OCR date hit");
+  const originalView: DocumentTextView = {
+    scanId: 9,
+    path: "C:/DottyTest/original-word-jpg-771x320.jpg",
+    name: "original-word-jpg-771x320.jpg",
+    format: "jpeg",
+    status: "searchable",
+    text: originalOcrRaw,
+    source: "ocr",
+    ocrAttempted: true,
+  };
+  const originalFromView = resolveDocumentDateFromView(originalView);
+  assert(originalFromView.status === "ask", "OCR source stays uncertain even with a date hit");
+  assert(originalFromView.hits[0]?.iso === "2026-10-28", "OCR date remains available as a choice");
+  assert(preferredAskIso(originalFromView) === "", "unlabeled OCR date is not auto-filled");
 }

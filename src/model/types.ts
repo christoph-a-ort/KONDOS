@@ -4,6 +4,7 @@ export const DEFAULT_DEPTH = 10;
 
 export const SCAN_PROGRESS_EVENT = "scan://progress";
 export const CONTENT_PROGRESS_EVENT = "content://progress";
+export const OCR_PROGRESS_EVENT = "content://ocr-progress";
 
 export type NodeKind = "file" | "directory";
 
@@ -145,4 +146,11 @@ export interface ContentProgress {
   problemCount: number;
   currentFileName: string;
   status: ContentPrepareStatus;
+}
+
+export interface OcrProgress {
+  scanId: number;
+  currentPage: number;
+  totalPages: number;
+  status: string;
 }

@@ -4,13 +4,16 @@ mod docx;
 mod extract;
 mod format;
 mod inspect;
+mod ocr;
 mod ooxml;
 mod prepare;
 mod search;
 mod xlsx;
 
 pub use extract::extract_path;
-pub use inspect::{inspect_document_text, DocumentTextView};
+#[allow(unused_imports)]
+pub use inspect::{inspect_document_text, inspect_document_text_with_progress, DocumentTextView};
+pub use ocr::OCR_PROGRESS_EVENT;
 pub use prepare::{
     run_prepare_content, ContentPrepareStatus, ContentProgress, CONTENT_PROGRESS_EVENT,
 };
@@ -23,6 +26,8 @@ pub enum ContentFormat {
     Pdf,
     Docx,
     Xlsx,
+    Png,
+    Jpeg,
 }
 
 /// Verarbeitungsergebnis einer Datei.
@@ -120,7 +125,13 @@ mod tests {
 
     #[test]
     fn later_formats_are_reserved() {
-        let _ = [ContentFormat::Pdf, ContentFormat::Docx, ContentFormat::Xlsx];
+        let _ = [
+            ContentFormat::Pdf,
+            ContentFormat::Docx,
+            ContentFormat::Xlsx,
+            ContentFormat::Png,
+            ContentFormat::Jpeg,
+        ];
         let _ = [
             ContentStatus::Searchable,
             ContentStatus::NoExtractableText,

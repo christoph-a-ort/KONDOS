@@ -10,6 +10,8 @@ pub fn content_format_from_name(name: &str) -> Option<ContentFormat> {
         "pdf" => Some(ContentFormat::Pdf),
         "docx" => Some(ContentFormat::Docx),
         "xlsx" => Some(ContentFormat::Xlsx),
+        "png" => Some(ContentFormat::Png),
+        "jpg" | "jpeg" => Some(ContentFormat::Jpeg),
         _ => None,
     }
 }
@@ -19,6 +21,7 @@ pub fn is_supported_content_document(format: ContentFormat) -> bool {
     matches!(
         format,
         ContentFormat::Pdf | ContentFormat::Docx | ContentFormat::Xlsx
+        // PNG/JPEG are inspect/OCR-only. The bulk prepare pipeline does not collect them.
     )
 }
 
@@ -37,6 +40,9 @@ mod tests {
     fn later_formats_are_recognized_but_not_extracted_here() {
         assert_eq!(content_format_from_name("Brief.docx"), Some(ContentFormat::Docx));
         assert_eq!(content_format_from_name("Liste.xlsx"), Some(ContentFormat::Xlsx));
+        assert_eq!(content_format_from_name("scan.PNG"), Some(ContentFormat::Png));
+        assert_eq!(content_format_from_name("foto.jpg"), Some(ContentFormat::Jpeg));
+        assert_eq!(content_format_from_name("foto.JPEG"), Some(ContentFormat::Jpeg));
         assert_eq!(content_format_from_name("notiz.txt"), None);
         assert_eq!(content_format_from_name("alt.doc"), None);
         assert_eq!(content_format_from_name("brief.rtf"), None);
@@ -48,5 +54,7 @@ mod tests {
         assert!(is_supported_content_document(ContentFormat::Pdf));
         assert!(is_supported_content_document(ContentFormat::Docx));
         assert!(is_supported_content_document(ContentFormat::Xlsx));
+        assert!(!is_supported_content_document(ContentFormat::Png));
+        assert!(!is_supported_content_document(ContentFormat::Jpeg));
     }
 }

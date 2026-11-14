@@ -1,12 +1,14 @@
 import { useEffect, useId, useState, type FormEvent } from "react";
 
 import { isFile, type FsNode } from "../model";
-import { toUserError } from "../scan";
+import { subscribeOcrProgress, toUserError } from "../scan";
 import { inspectDocumentText } from "./documentTextApi";
 import {
   buildDatedFileName,
+  isOcrTextSource,
   nameSuggestNeedsUserDate,
   parseUserDocumentDate,
+  preferredAskIso,
   resolveDocumentDateFromView,
   uniqueDocumentDateChoices,
   workbenchNameSuggestRequest,
@@ -43,18 +45,37 @@ export function NameSuggestDialog({
   const [resolution, setResolution] = useState<DocumentDateResolution | null>(null);
   const [dateValue, setDateValue] = useState("");
   const [nameValue, setNameValue] = useState("");
+  const [ocrStatus, setOcrStatus] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || node === null || !isFile(node) || scanId === null) {
       return;
     }
     let cancelled = false;
+    let unlisten: (() => void) | undefined;
     setLoading(true);
     setError(null);
     setView(null);
     setResolution(null);
+    setOcrStatus(null);
     setDateValue("");
     setNameValue(node.name);
+    void subscribeOcrProgress((progress) => {
+      if (cancelled || progress.scanId !== scanId) {
+        return;
+      }
+      if (progress.totalPages > 0 && progress.currentPage > 0) {
+        setOcrStatus(`Texterkennung läuft (Seite ${progress.currentPage} von ${progress.totalPages})…`);
+      } else {
+        setOcrStatus("Texterkennung läuft…");
+      }
+    }).then((stop) => {
+      if (cancelled) {
+        stop();
+        return;
+      }
+      unlisten = stop;
+    });
     void inspectDocumentText(scanId, node.id)
       .then((next) => {
         if (cancelled) {
@@ -67,8 +88,14 @@ export function NameSuggestDialog({
           setDateValue(resolved.iso);
           setNameValue(buildDatedFileName(node.name, resolved.iso));
         } else {
-          setDateValue("");
-          setNameValue(node.name);
+          const suggested = preferredAskIso(resolved);
+          if (suggested.length > 0) {
+            setDateValue(suggested);
+            setNameValue(buildDatedFileName(node.name, suggested));
+          } else {
+            setDateValue("");
+            setNameValue(node.name);
+          }
         }
       })
       .catch((cause) => {
@@ -79,10 +106,12 @@ export function NameSuggestDialog({
       .finally(() => {
         if (!cancelled) {
           setLoading(false);
+          setOcrStatus(null);
         }
       });
     return () => {
       cancelled = true;
+      unlisten?.();
     };
   }, [open, scanId, node]);
 
@@ -147,7 +176,11 @@ export function NameSuggestDialog({
       >
         <h2 id={titleId}>Namensvorschlag</h2>
         <p className="muted">Datei: {node.name}</p>
-        {loading ? <p className="muted">Dokumentinhalt wird gelesen…</p> : null}
+        {loading ? (
+          <p className="muted">
+            {ocrStatus ?? "Dokumentinhalt wird gelesen. Bei Scans und Bildern kann die Texterkennung etwas dauern."}
+          </p>
+        ) : null}
         {error !== null ? <p className="report-dialog-error">{error}</p> : null}
         {!loading && error === null && resolution !== null ? (
           <>
@@ -159,7 +192,9 @@ export function NameSuggestDialog({
               <p className="report-dialog-hint">{resolution.reason}</p>
             )}
             {view !== null && view.format !== null ? (
-              <p className="muted">Quelle: {view.format.toUpperCase()} ({view.source})</p>
+              <p className="muted">
+                Quelle: {view.format.toUpperCase()} ({isOcrTextSource(view) ? "Texterkennung" : view.source})
+              </p>
             ) : null}
             {needsDate ? (
               <div className="report-dialog-field">

@@ -1,7 +1,8 @@
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::content::{
-    run_prepare_content, ContentProgress, ContentSearchResult, DocumentTextView, CONTENT_PROGRESS_EVENT,
+    inspect_document_text_with_progress, run_prepare_content, ContentProgress, ContentSearchResult,
+    DocumentTextView, CONTENT_PROGRESS_EVENT, OCR_PROGRESS_EVENT,
 };
 use crate::error::AppError;
 use crate::state::AppState;
@@ -78,7 +79,9 @@ pub async fn inspect_document_text(
     let work_app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let managed = work_app.state::<AppState>();
-        crate::content::inspect_document_text(&managed, scan_id, &node_id)
+        inspect_document_text_with_progress(&managed, scan_id, &node_id, |progress| {
+            let _ = work_app.emit(OCR_PROGRESS_EVENT, &progress);
+        })
     })
     .await
     .map_err(|_| AppError::internal())?

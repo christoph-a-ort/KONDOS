@@ -41,6 +41,16 @@ quick-xml = "0.42"
 rust_xlsxwriter = "0.99"
 genpdf = "0.2"
 fs4 = "0.13"
+windows = { version = "0.58", features = [
+    "Foundation",
+    "Foundation_Collections",
+    "Globalization",
+    "Graphics_Imaging",
+    "Media_Ocr",
+    "Data_Pdf",
+    "Storage_Streams",
+    "Win32_System_Com",
+] }
 
 [profile.release]
 codegen-units = 1

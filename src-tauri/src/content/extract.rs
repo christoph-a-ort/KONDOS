@@ -97,6 +97,9 @@ fn extract_named_path(path: &Path, path_str: String, name: String) -> ContentEnt
             Ok(raw) => entry_from_extracted_text(path_str, name, ContentFormat::Xlsx, raw),
             Err(status) => status_entry(path_str, name, ContentFormat::Xlsx, status),
         },
+        Some(image @ (ContentFormat::Png | ContentFormat::Jpeg)) => {
+            status_entry(path_str, name, image, ContentStatus::NoExtractableText)
+        }
         // Unbekannte Endungen werden nicht gesammelt. ContentEntry.format ist kein Option;
         // ohne neue Enum-Variante bleibt Pdf nur dieser direkte extract_path-Fallback.
         None => status_entry(path_str, name, ContentFormat::Pdf, ContentStatus::ParseError),

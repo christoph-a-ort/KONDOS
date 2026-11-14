@@ -31,7 +31,7 @@ assert(!helper.includes("Date.now"), "today is not used as a fallback date");
 assert(!helper.includes("createdAtMs") && !helper.includes("modifiedAtMs"), "filesystem timestamps are not used as document dates");
 assert(inspectRs.includes("extract_path"), "single-file inspect reuses extract_path");
 assert(extractRs.includes("extract_docx_text") && extractRs.includes("extract_xlsx_text"), "PDF/DOCX/XLSX extractors remain the shared path");
-assert(!inspectRs.includes("ocr") && !helper.includes("openai"), "no OCR or cloud AI");
+assert(!helper.includes("openai"), "no cloud AI");
 assert(tree.includes("Namensvorschlag"), "workbench offers Namensvorschlag");
 assert(tree.includes("NameSuggestDialog"), "suggestion UI is a dialog");
 assert(tree.includes("isWorkbenchRenameShortcut"), "Ctrl+Shift+U remains");

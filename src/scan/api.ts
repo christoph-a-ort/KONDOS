@@ -4,9 +4,11 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 
 import {
   CONTENT_PROGRESS_EVENT,
+  OCR_PROGRESS_EVENT,
   SCAN_PROGRESS_EVENT,
   type ContentProgress,
   type ContentSearchResult,
+  type OcrProgress,
   type ExportFormat,
   type ScanConfig,
   type ScanProgress,
@@ -115,6 +117,14 @@ export function subscribeContentProgress(
 
 export function searchFileContent(scanId: number, query: string): Promise<ContentSearchResult> {
   return invoke<ContentSearchResult>("search_file_content", { scanId, query });
+}
+
+export function subscribeOcrProgress(
+  handler: (progress: OcrProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<OcrProgress>(OCR_PROGRESS_EVENT, (event) => {
+    handler(event.payload);
+  });
 }
 
 export async function pickExportPath(

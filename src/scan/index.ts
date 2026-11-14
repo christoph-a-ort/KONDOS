@@ -16,6 +16,7 @@ export {
   startPrepareContent,
   startScan,
   subscribeContentProgress,
+  subscribeOcrProgress,
   subscribeScanProgress,
   suggestExportFilename,
 } from "./api";

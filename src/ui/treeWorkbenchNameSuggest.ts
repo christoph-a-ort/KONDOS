@@ -19,10 +19,12 @@ export interface DocumentTextView {
   scanId: number;
   path: string;
   name: string;
-  format: "pdf" | "docx" | "xlsx" | null;
+  format: "pdf" | "docx" | "xlsx" | "png" | "jpeg" | null;
   status: DocumentTextStatus | string;
   text: string | null;
-  source: "cache" | "extract" | "none" | string;
+  source: "cache" | "extract" | "ocr" | "none" | string;
+  ocrAttempted?: boolean;
+  message?: string | null;
 }
 
 export type DocumentDateKind = "document" | "other" | "unlabeled";
@@ -107,8 +109,8 @@ const MONTHS: Record<string, number> = {
   dez: 12,
 };
 
-const DATE_DMY = /(?<!\d)(\d{1,2})\.(\d{1,2})\.(\d{4})(?!\d)/g;
-const DATE_DMY2 = /(?<!\d)(\d{1,2})\.(\d{1,2})\.(\d{2})(?!\d)/g;
+const DATE_DMY = /(?<!\d)(\d{1,2})\s*\.\s*(\d{1,2})\s*\.\s*(\d{4})(?!\d)/g;
+const DATE_DMY2 = /(?<!\d)(\d{1,2})\s*\.\s*(\d{1,2})\s*\.\s*(\d{2})(?!\d)/g;
 const DATE_ISO = /(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)/g;
 const DATE_YMD_SLASH = /(?<!\d)(\d{4})\/(\d{2})\/(\d{2})(?!\d)/g;
 const DATE_DMY_SLASH = /(?<!\d)(\d{1,2})\/(\d{1,2})\/(\d{4})(?!\d)/g;
@@ -314,18 +316,33 @@ export function resolveDocumentDate(text: string | null | undefined): DocumentDa
   };
 }
 
+export function isOcrTextSource(view: DocumentTextView): boolean {
+  return view.source === "ocr" || view.ocrAttempted === true;
+}
+
 export function resolveDocumentDateFromView(view: DocumentTextView): DocumentDateResolution {
   if (view.status !== "searchable" || view.text == null || view.text.trim().length === 0) {
     return {
       status: "ask",
-      reason: documentTextAskReason(view),
+      reason: view.message ?? documentTextAskReason(view),
       hits: [],
     };
   }
-  return resolveDocumentDate(view.text);
+  const resolved = resolveDocumentDate(view.text);
+  if (resolved.status === "confident" && isOcrTextSource(view)) {
+    return {
+      status: "ask",
+      reason: "Die Texterkennung ist unsicher. Bitte das erkannte Dokumentdatum prüfen.",
+      hits: resolved.hits,
+    };
+  }
+  return resolved;
 }
 
 export function documentTextAskReason(view: DocumentTextView): string {
+  if (view.message != null && view.message.length > 0) {
+    return view.message;
+  }
   switch (view.status) {
     case "unsupported":
       return "Dieser Dateityp kann aktuell nicht zuverlässig ausgelesen werden. Bitte das Datum eingeben.";
@@ -333,6 +350,10 @@ export function documentTextAskReason(view: DocumentTextView): string {
       return "Der Dokumentinhalt enthält keinen auslesbaren Text. Bitte das Datum eingeben.";
     case "protected":
       return "Das Dokument ist geschützt und wurde nicht ausgelesen. Bitte das Datum eingeben.";
+    case "ocrUnavailable":
+      return "Texterkennung ist auf diesem Gerät nicht verfügbar. Bitte das Datum eingeben.";
+    case "ocrFailed":
+      return "Die Texterkennung ist fehlgeschlagen. Bitte das Datum eingeben.";
     case "parseError":
     case "ioError":
     case "missing":
@@ -354,6 +375,14 @@ function uniqueIsos(hits: DocumentDateHit[]): string[] {
     }
   }
   return out;
+}
+
+export function preferredAskIso(resolution: DocumentDateResolution): string {
+  if (resolution.status === "confident") {
+    return resolution.iso;
+  }
+  const documents = uniqueDocumentDateChoices(resolution.hits).filter((hit) => hit.kind === "document");
+  return documents.length === 1 ? documents[0]!.iso : "";
 }
 
 export function uniqueDocumentDateChoices(hits: DocumentDateHit[]): DocumentDateHit[] {
