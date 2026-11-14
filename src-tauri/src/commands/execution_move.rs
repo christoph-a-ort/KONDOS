@@ -1404,12 +1404,22 @@ fn execute_workbench_move_file_locked(
         Ok(value) => value,
         Err(error) => return Ok(blocked_result(source, target, error.message, empty_view())),
     };
-    let dest_components = match relative_components(scan_root, target) {
+    let mut dest_components = match relative_components(scan_root, target) {
         Ok(value) => value,
         Err(error) => return Ok(blocked_result(source, target, error.message, empty_view())),
     };
+    if let Some(original_name) = last_relative_component(target) {
+        if let Some(last) = dest_components.last_mut() {
+            *last = original_name;
+        }
+    }
     if source_components.len() == dest_components.len()
+        && !source_components.is_empty()
         && source_components[..source_components.len() - 1] == dest_components[..dest_components.len() - 1]
+        && source_components
+            .last()
+            .zip(dest_components.last())
+            .is_some_and(|(from, to)| from.eq_ignore_ascii_case(to))
     {
         return Ok(blocked_result(source, target, WORKBENCH_SAME_FOLDER, empty_view()));
     }
@@ -2906,6 +2916,75 @@ mod tests {
         assert!(result.message.contains("Keine automatische Wiederholung"));
         assert!(root.join("a.txt").is_file());
         assert!(!root.join("dest").join("a.txt").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_renames_file_in_same_folder() {
+        let (root, scan) = workbench_setup();
+        let source = format!("{scan}/a.txt");
+        let target = format!("{scan}/renamed.txt");
+        let (size, modified) = fingerprint(&root.join("a.txt"));
+        let result = workbench_execute(&root, &scan, &source, &target, size, modified);
+        assert_eq!(result.outcome, "moved", "{}", result.message);
+        assert!(result.moved);
+        assert!(!root.join("a.txt").exists());
+        assert!(root.join("renamed.txt").is_file());
+        assert_eq!(fs::read(root.join("renamed.txt")).unwrap(), b"hello");
+        assert_eq!(fs::read(root.join("keep.txt")).unwrap(), b"keep");
+        assert!(!workbench_intent_file(&root).exists());
+        let (size_back, modified_back) = fingerprint(&root.join("renamed.txt"));
+        let back = workbench_execute(
+            &root,
+            &scan,
+            &target,
+            &source,
+            size_back,
+            modified_back,
+        );
+        assert_eq!(back.outcome, "moved", "{}", back.message);
+        assert!(root.join("a.txt").is_file());
+        assert!(!root.join("renamed.txt").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_rename_existing_target_is_blocked() {
+        let (root, scan) = workbench_setup();
+        let (size, modified) = fingerprint(&root.join("a.txt"));
+        let result = workbench_execute(
+            &root,
+            &scan,
+            &format!("{scan}/a.txt"),
+            &format!("{scan}/keep.txt"),
+            size,
+            modified,
+        );
+        assert_eq!(result.outcome, "blocked");
+        assert!(result.message.contains("nicht überschrieben"));
+        assert_eq!(fs::read(root.join("a.txt")).unwrap(), b"hello");
+        assert_eq!(fs::read(root.join("keep.txt")).unwrap(), b"keep");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_rename_invalid_name_is_blocked() {
+        let (root, scan) = workbench_setup();
+        let (size, modified) = fingerprint(&root.join("a.txt"));
+        let result = workbench_execute(
+            &root,
+            &scan,
+            &format!("{scan}/a.txt"),
+            &format!("{scan}/CON.txt"),
+            size,
+            modified,
+        );
+        assert_eq!(result.outcome, "blocked");
+        assert!(root.join("a.txt").is_file());
+        assert!(!root.join("CON.txt").exists());
         let _ = fs::remove_dir_all(root);
     }
 }

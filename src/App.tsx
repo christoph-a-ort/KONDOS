@@ -56,6 +56,10 @@ import {
   type WorkbenchMoveRequest,
 } from "./ui/treeWorkbenchMove";
 import {
+  workbenchRenameEventFromResult,
+  type WorkbenchRenameRequest,
+} from "./ui/treeWorkbenchRename";
+import {
   listVirtualPlanDrafts,
   loadVirtualPlanDraft,
   saveVirtualPlanDraft,
@@ -1010,6 +1014,42 @@ function App() {
     }
   }
 
+  async function handleWorkbenchFileRename(request: WorkbenchRenameRequest) {
+    if (
+      workbenchMoveBusyRef.current ||
+      scanLockRef.current ||
+      scanningRef.current ||
+      exportBusyRef.current ||
+      preparingContentRef.current
+    ) {
+      return;
+    }
+    workbenchMoveBusyRef.current = true;
+    try {
+      const result = await executeWorkbenchMoveFile({
+        scanRoot: request.scanRoot,
+        sourcePath: request.sourcePath,
+        targetPath: request.targetPath,
+        expectedSizeBytes: request.expectedSizeBytes,
+        expectedModifiedAtMs: request.expectedModifiedAtMs,
+      });
+      const event = workbenchRenameEventFromResult(result, request);
+      setWorkbenchNotice(event.message);
+      setWorkbenchNoticeKind(
+        event.outcome === "moved" ? "success" : event.outcome === "blocked" ? "blocked" : "failed",
+      );
+      if (event.refreshWorkbench) {
+        pendingRevealNodeIdRef.current = pathForCurrentScan(request.scanRoot, result.targetPath);
+        void handleStartScan();
+      }
+    } catch (cause) {
+      setWorkbenchNotice(toUserError(cause));
+      setWorkbenchNoticeKind("failed");
+    } finally {
+      workbenchMoveBusyRef.current = false;
+    }
+  }
+
   if (!prefsReady) {
     return (
       <div className="app">
@@ -1237,6 +1277,13 @@ function App() {
                 onInsightMarkerActivate={requestShowInsightsForLocation}
                 onWorkbenchFileMove={(request) => {
                   void handleWorkbenchFileMove(request);
+                }}
+                onWorkbenchFileRename={(request) => {
+                  void handleWorkbenchFileRename(request);
+                }}
+                onWorkbenchRenameIssue={(message) => {
+                  setWorkbenchNotice(message);
+                  setWorkbenchNoticeKind("blocked");
                 }}
               />
             </div>

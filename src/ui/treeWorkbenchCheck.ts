@@ -37,6 +37,7 @@ import { runVirtualPlanEditorCheck } from "./virtualPlanEditorCheck";
 import { runVirtualPlanDryRunCheck } from "./virtualPlanDryRunCheck";
 import { runVirtualPlanExecutionCheck } from "./virtualPlanExecutionCheck";
 import { runTreeWorkbenchMoveCheck } from "./treeWorkbenchMoveCheck";
+import { runTreeWorkbenchRenameCheck } from "./treeWorkbenchRenameCheck";
 import { runScanIdentityMetadataCheck } from "./scanIdentityMetadataCheck";
 import { runVirtualPlanReservationAdminCheck } from "./virtualPlanReservationAdminCheck";
 import { runP1cCheck } from "./p1cCheck";
@@ -368,6 +369,7 @@ export async function runTreeWorkbenchCheck(): Promise<void> {
   runVirtualPlanDryRunCheck();
   runVirtualPlanExecutionCheck();
   runTreeWorkbenchMoveCheck();
+  runTreeWorkbenchRenameCheck();
   runScanIdentityMetadataCheck();
   runVirtualPlanReservationAdminCheck();
 }

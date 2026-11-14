@@ -107,6 +107,14 @@ import {
   workbenchRowIdFromPointTarget,
   type WorkbenchMoveRequest,
 } from "./treeWorkbenchMove";
+import {
+  canRenameWorkbenchFile,
+  fileNameEditSelection,
+  isWorkbenchRenameShortcut,
+  isWorkbenchRenameTypingTarget,
+  workbenchRenameRequest,
+  type WorkbenchRenameRequest,
+} from "./treeWorkbenchRename";
 
 interface TreeViewProps {
   result: ScanResult | null;
@@ -131,6 +139,8 @@ interface TreeViewProps {
   /** P2-J-F: marker click → show insights for this folder location. */
   onInsightMarkerActivate?: (locationId: string) => void;
   onWorkbenchFileMove?: (request: WorkbenchMoveRequest) => void;
+  onWorkbenchFileRename?: (request: WorkbenchRenameRequest) => void;
+  onWorkbenchRenameIssue?: (message: string) => void;
 }
 
 export function TreeView({
@@ -153,6 +163,8 @@ export function TreeView({
   folderInsightIdsByLocation = null,
   onInsightMarkerActivate,
   onWorkbenchFileMove,
+  onWorkbenchFileRename,
+  onWorkbenchRenameIssue,
 }: TreeViewProps) {
   if (result === null) {
     return (
@@ -232,6 +244,8 @@ export function TreeView({
       folderInsightIdsByLocation={folderInsightIdsByLocation}
       onInsightMarkerActivate={onInsightMarkerActivate}
       onWorkbenchFileMove={onWorkbenchFileMove}
+      onWorkbenchFileRename={onWorkbenchFileRename}
+      onWorkbenchRenameIssue={onWorkbenchRenameIssue}
     />
   );
 }
@@ -256,6 +270,8 @@ interface PopulatedTreeViewProps {
   folderInsightIdsByLocation: ReadonlyMap<string, readonly string[]> | null;
   onInsightMarkerActivate?: (locationId: string) => void;
   onWorkbenchFileMove?: (request: WorkbenchMoveRequest) => void;
+  onWorkbenchFileRename?: (request: WorkbenchRenameRequest) => void;
+  onWorkbenchRenameIssue?: (message: string) => void;
 }
 
 function PopulatedTreeView({
@@ -278,6 +294,8 @@ function PopulatedTreeView({
   folderInsightIdsByLocation,
   onInsightMarkerActivate,
   onWorkbenchFileMove,
+  onWorkbenchFileRename,
+  onWorkbenchRenameIssue,
 }: PopulatedTreeViewProps) {
   const [expandedIds, setExpandedIds] = useState(() => defaultExpandedIds(result.root.id));
   const [activeResult, setActiveResult] = useState(result);
@@ -302,6 +320,8 @@ function PopulatedTreeView({
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
   const dragSessionRef = useRef<{
     sourceId: string;
     pointerId: number;
@@ -348,6 +368,8 @@ function PopulatedTreeView({
     setDraggingId(null);
     setDropTargetId(null);
     dragSessionRef.current = null;
+    setRenameId(null);
+    setRenameDraft("");
     pendingRevealRef.current = null;
     pendingRevealAfterFilterResetRef.current = null;
   }
@@ -587,11 +609,14 @@ function PopulatedTreeView({
     if (event.button !== 0) {
       return;
     }
+    if (renameId !== null) {
+      return;
+    }
     if (onWorkbenchFileMove === undefined || !canDragWorkbenchFile(row.node, occupancyIdle)) {
       return;
     }
     const target = event.target;
-    if (target instanceof Element && target.closest("button")) {
+    if (target instanceof Element && target.closest("button, input, textarea")) {
       return;
     }
     dragSessionRef.current = {
@@ -601,6 +626,50 @@ function PopulatedTreeView({
       startY: event.clientY,
       active: false,
     };
+  }
+
+  function cancelFileRename() {
+    setRenameId(null);
+    setRenameDraft("");
+  }
+
+  function beginFileRename(nodeId: string | null = selectedId) {
+    if (onWorkbenchFileRename === undefined || nodeId === null || !occupancyIdle) {
+      return;
+    }
+    const node = findNodeById(viewRoot ?? result.root, nodeId);
+    if (node === undefined || !canRenameWorkbenchFile(node, occupancyIdle)) {
+      return;
+    }
+    dragSessionRef.current = null;
+    setDraggingId(null);
+    setDropTargetId(null);
+    setSelectedId(node.id);
+    setRenameId(node.id);
+    setRenameDraft(node.name);
+  }
+
+  function commitFileRename() {
+    if (renameId === null || onWorkbenchFileRename === undefined) {
+      cancelFileRename();
+      return;
+    }
+    const node = findNodeById(viewRoot ?? result.root, renameId);
+    if (node === undefined) {
+      cancelFileRename();
+      return;
+    }
+    const prepared = workbenchRenameRequest(result.root.path, node, renameDraft);
+    if (!prepared.ok) {
+      if (prepared.unchanged) {
+        cancelFileRename();
+        return;
+      }
+      onWorkbenchRenameIssue?.(prepared.reason);
+      return;
+    }
+    cancelFileRename();
+    onWorkbenchFileRename(prepared.request);
   }
 
   function scrollRowIntoView(id: string, nextRows: VisibleTreeRow[] = rows) {
@@ -652,12 +721,18 @@ function PopulatedTreeView({
   }
 
   function handleRowClick(row: VisibleTreeRow) {
+    if (renameId !== null && renameId !== row.id) {
+      cancelFileRename();
+    }
     setSelectedId(row.id);
     setWarningNotice(null);
     setWarningOfferReset(false);
   }
 
   function handleRowDoubleClick(row: VisibleTreeRow) {
+    if (renameId !== null) {
+      return;
+    }
     if (row.expandable) {
       toggleExpanded(row.id);
       return;
@@ -927,6 +1002,7 @@ function PopulatedTreeView({
 
   function handleViewportClick(event: MouseEvent<HTMLDivElement>) {
     if (event.target === event.currentTarget) {
+      cancelFileRename();
       clearSelectionFromPointer();
     }
   }
@@ -936,7 +1012,18 @@ function PopulatedTreeView({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (renameId !== null) {
+      return;
+    }
     if (rows.length === 0) {
+      return;
+    }
+    if (isWorkbenchRenameShortcut(event)) {
+      if (isWorkbenchRenameTypingTarget(event.target)) {
+        return;
+      }
+      event.preventDefault();
+      beginFileRename();
       return;
     }
     const currentIndex = selectedId === null ? -1 : rowIndexById(rows, selectedId);
@@ -1363,9 +1450,11 @@ function PopulatedTreeView({
                   match={matchIdSet.has(row.id)}
                   currentMatch={row.id === currentMatchId}
                   insightCount={insightCount}
-                  fileDraggable={onWorkbenchFileMove !== undefined && canDragWorkbenchFile(row.node, occupancyIdle)}
+                  fileDraggable={onWorkbenchFileMove !== undefined && canDragWorkbenchFile(row.node, occupancyIdle) && renameId === null}
                   dragging={draggingId === row.id}
                   dropTarget={dropTargetId === row.id}
+                  renaming={renameId === row.id}
+                  renameValue={renameId === row.id ? renameDraft : row.node.name}
                   onSelect={() => {
                     if (suppressClickRef.current) {
                       suppressClickRef.current = false;
@@ -1376,6 +1465,9 @@ function PopulatedTreeView({
                   onDoubleClick={() => handleRowDoubleClick(row)}
                   onTwist={(event) => handleTwistClick(event, row.id)}
                   onPointerDown={(event) => handleFilePointerDown(event, row)}
+                  onRenameValueChange={setRenameDraft}
+                  onRenameCommit={commitFileRename}
+                  onRenameCancel={cancelFileRename}
                   onInsightMarkerActivate={
                     insightCount > 0 && onInsightMarkerActivate !== undefined
                       ? (event) => {
@@ -1478,10 +1570,15 @@ interface VirtualTreeRowProps {
   fileDraggable: boolean;
   dragging: boolean;
   dropTarget: boolean;
+  renaming: boolean;
+  renameValue: string;
   onSelect: () => void;
   onDoubleClick: () => void;
   onTwist: (event: MouseEvent<HTMLButtonElement>) => void;
   onPointerDown: (event: PointerEvent<HTMLDivElement>) => void;
+  onRenameValueChange: (value: string) => void;
+  onRenameCommit: () => void;
+  onRenameCancel: () => void;
   onInsightMarkerActivate?: (event: MouseEvent<HTMLButtonElement>) => void;
 }
 
@@ -1497,17 +1594,36 @@ function VirtualTreeRow({
   fileDraggable,
   dragging,
   dropTarget,
+  renaming,
+  renameValue,
   onSelect,
   onDoubleClick,
   onTwist,
   onPointerDown,
+  onRenameValueChange,
+  onRenameCommit,
+  onRenameCancel,
   onInsightMarkerActivate,
 }: VirtualTreeRowProps) {
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const { node, depth, directory, expandable } = row;
   const isRoot = depth === 0;
   const hint = listingHint(node);
   const showInsightMarker = directory && insightCount > 0 && onInsightMarkerActivate !== undefined;
   const markerCountText = insightMarkerCountLabel(insightCount);
+  const renameSelection = fileNameEditSelection(node.name);
+
+  useEffect(() => {
+    if (!renaming) {
+      return;
+    }
+    const input = renameInputRef.current;
+    if (input === null) {
+      return;
+    }
+    input.focus();
+    input.setSelectionRange(renameSelection.start, renameSelection.end);
+  }, [renaming, renameSelection.start, renameSelection.end]);
 
   let icon: ReactNode;
   if (directory) {
@@ -1573,9 +1689,34 @@ function VirtualTreeRow({
               )}
               {icon}
               {isRoot ? <span className="badge">Root</span> : null}
-              <span className={directory ? "name directory" : "name file"} title={node.name}>
-                {node.name}
-              </span>
+              {renaming ? (
+                <input
+                  ref={renameInputRef}
+                  className="tree-rename-input"
+                  value={renameValue}
+                  aria-label="Dateiname"
+                  onChange={(event) => onRenameValueChange(event.target.value)}
+                  onClick={(event) => event.stopPropagation()}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => {
+                    event.stopPropagation();
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      onRenameCommit();
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      onRenameCancel();
+                    }
+                  }}
+                  onBlur={onRenameCancel}
+                />
+              ) : (
+                <span className={directory ? "name directory" : "name file"} title={node.name}>
+                  {node.name}
+                </span>
+              )}
               {row.hasProblematicExistingWindowsName ? (
                 <span className="existing-name-badge" title={EXISTING_WINDOWS_NAME_TITLE}>
                   {EXISTING_WINDOWS_NAME_MARK}

@@ -1036,6 +1036,19 @@ button:disabled {
   flex: 1;
 }
 
+.tree-rename-input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  margin: 0;
+  padding: 0 4px;
+  border: 1px solid #1f4b99;
+  border-radius: 3px;
+  font: inherit;
+  color: inherit;
+  background: #fff;
+}
+
 .cell-empty {
   color: #8b949e;
 }
