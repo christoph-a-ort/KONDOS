@@ -16,7 +16,9 @@ pub mod execution_move;
 pub mod simulation_lock;
 pub mod scan_root_coordination;
 
-pub use content::{cancel_prepare_content, search_file_content, start_prepare_content};
+pub use content::{
+    cancel_prepare_content, inspect_document_text, search_file_content, start_prepare_content,
+};
 pub use explorer::{open_in_explorer, path_exists};
 pub use export::{copy_export, save_export, suggest_export_filename};
 pub use open::open_with_default;

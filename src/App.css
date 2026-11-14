@@ -1474,6 +1474,16 @@ button:disabled {
   max-height: min(70vh, 480px);
 }
 
+.name-suggest-dialog {
+  width: min(480px, 100%);
+}
+
+.name-suggest-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: 1fr;

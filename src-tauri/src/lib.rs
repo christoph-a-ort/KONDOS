@@ -23,7 +23,7 @@ use commands::{
     inspect_test_scan_root, approve_test_scan_root, execute_create_folder, execute_move_file,
     execute_workbench_move_file,
     inspect_storage_kind, inspect_storage_kinds,
-    search_file_content, start_prepare_content, start_scan, suggest_export_filename,
+    inspect_document_text, search_file_content, start_prepare_content, start_scan, suggest_export_filename,
 };
 use state::AppState;
 use tauri::{Manager, WindowEvent};
@@ -56,6 +56,7 @@ pub fn run() {
             start_prepare_content,
             cancel_prepare_content,
             search_file_content,
+            inspect_document_text,
             load_workbench_prefs,
             save_workbench_prefs,
             load_virtual_plan_draft,

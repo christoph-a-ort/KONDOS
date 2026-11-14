@@ -1,6 +1,8 @@
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::content::{run_prepare_content, ContentProgress, ContentSearchResult, CONTENT_PROGRESS_EVENT};
+use crate::content::{
+    run_prepare_content, ContentProgress, ContentSearchResult, DocumentTextView, CONTENT_PROGRESS_EVENT,
+};
 use crate::error::AppError;
 use crate::state::AppState;
 
@@ -60,6 +62,23 @@ pub async fn search_file_content(
     tauri::async_runtime::spawn_blocking(move || {
         let managed = work_app.state::<AppState>();
         crate::content::search_file_content(&managed, scan_id, &query)
+    })
+    .await
+    .map_err(|_| AppError::internal())?
+}
+
+#[tauri::command]
+pub async fn inspect_document_text(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    scan_id: u64,
+    node_id: String,
+) -> Result<DocumentTextView, AppError> {
+    state.ensure_content_search_allowed()?;
+    let work_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let managed = work_app.state::<AppState>();
+        crate::content::inspect_document_text(&managed, scan_id, &node_id)
     })
     .await
     .map_err(|_| AppError::internal())?

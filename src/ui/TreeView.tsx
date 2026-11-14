@@ -115,6 +115,8 @@ import {
   workbenchRenameRequest,
   type WorkbenchRenameRequest,
 } from "./treeWorkbenchRename";
+import { canSuggestWorkbenchFileName } from "./treeWorkbenchNameSuggest";
+import { NameSuggestDialog } from "./NameSuggestDialog";
 
 interface TreeViewProps {
   result: ScanResult | null;
@@ -210,6 +212,7 @@ export function TreeView({
           hasSelection={false}
           canOpenFile={false}
           canScanFromHere={false}
+          canSuggestName={false}
           disabled
           notice={null}
           noticeKind={null}
@@ -217,6 +220,7 @@ export function TreeView({
           onCopy={() => {}}
           onOpen={() => {}}
           onScanFromHere={() => {}}
+          onSuggestName={() => {}}
         />
         <TreeDetailsBar model={emptyNodeDetailModel()} />
       </section>
@@ -322,6 +326,8 @@ function PopulatedTreeView({
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [nameSuggestOpen, setNameSuggestOpen] = useState(false);
+  const [nameSuggestNode, setNameSuggestNode] = useState<FsNode | null>(null);
   const dragSessionRef = useRef<{
     sourceId: string;
     pointerId: number;
@@ -1497,6 +1503,12 @@ function PopulatedTreeView({
         hasSelection={selectedNode !== undefined}
         canOpenFile={canOpenFile}
         canScanFromHere={canScanFromHere(selectedNode) && !scanning && !contentSearch.preparing}
+        canSuggestName={
+          onWorkbenchFileRename !== undefined
+          && selectedNode !== undefined
+          && canSuggestWorkbenchFileName(selectedNode, occupancyIdle)
+          && renameId === null
+        }
         disabled={false}
         notice={pathNotice}
         noticeKind={pathNoticeKind}
@@ -1516,6 +1528,32 @@ function PopulatedTreeView({
             onScanFromHere(selectedNode.path);
           }
         }}
+        onSuggestName={() => {
+          if (
+            selectedNode !== undefined
+            && canSuggestWorkbenchFileName(selectedNode, occupancyIdle)
+            && onWorkbenchFileRename !== undefined
+          ) {
+            setNameSuggestNode(selectedNode);
+            setNameSuggestOpen(true);
+          }
+        }}
+      />
+      <NameSuggestDialog
+        open={nameSuggestOpen}
+        scanId={resultScanId}
+        scanRoot={result.root.path}
+        node={nameSuggestNode}
+        onClose={() => {
+          setNameSuggestOpen(false);
+          setNameSuggestNode(null);
+        }}
+        onApply={(request) => {
+          setNameSuggestOpen(false);
+          setNameSuggestNode(null);
+          onWorkbenchFileRename?.(request);
+        }}
+        onIssue={onWorkbenchRenameIssue}
       />
       <TreeDetailsBar model={detailModel} />
       {result.warnings.length > 0 ? (
@@ -1878,6 +1916,7 @@ interface TreePathBarProps {
   hasSelection: boolean;
   canOpenFile: boolean;
   canScanFromHere: boolean;
+  canSuggestName: boolean;
   disabled: boolean;
   notice: string | null;
   noticeKind: "ok" | "error" | null;
@@ -1885,6 +1924,7 @@ interface TreePathBarProps {
   onCopy: () => void;
   onOpen: () => void;
   onScanFromHere: () => void;
+  onSuggestName: () => void;
 }
 
 function TreePathBar({
@@ -1892,6 +1932,7 @@ function TreePathBar({
   hasSelection,
   canOpenFile,
   canScanFromHere,
+  canSuggestName,
   disabled,
   notice,
   noticeKind,
@@ -1899,10 +1940,17 @@ function TreePathBar({
   onCopy,
   onOpen,
   onScanFromHere,
+  onSuggestName,
 }: TreePathBarProps) {
   const actionsOff = disabled || !hasSelection;
   const openFileOff = disabled || !canOpenFile;
   const scanFromHereOff = disabled || !canScanFromHere;
+  const suggestOff = disabled || !canSuggestName;
+  const suggestTitle = !hasSelection
+    ? "Zuerst eine Datei auswählen"
+    : !canSuggestName
+      ? "Nur für Dateien verfügbar, und nur wenn keine Analyse, kein Export und keine Inhaltsvorbereitung läuft."
+      : "Dokumentinhalt lesen und einen Dateinamen nach JJJJ-MM-TT_Name vorschlagen";
   const openFileTitle = !hasSelection
     ? "Zuerst eine Datei auswählen"
     : !canOpenFile
@@ -1935,6 +1983,14 @@ function TreePathBar({
           onClick={onScanFromHere}
         >
           Ab hier einlesen
+        </button>
+        <button
+          type="button"
+          disabled={suggestOff}
+          title={suggestTitle}
+          onClick={onSuggestName}
+        >
+          Namensvorschlag
         </button>
         {notice !== null ? (
           <span className={noticeKind === "error" ? "tree-path-notice is-error" : "tree-path-notice is-ok"}>
