@@ -1157,6 +1157,7 @@ function App() {
             onCancelScan={() => {
               void handleCancelScan();
             }}
+            onIssue={setError}
           />
           <ProgressPanel scanning={scanning} progress={progress} />
           <ExportPanel

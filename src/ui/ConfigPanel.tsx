@@ -1,6 +1,7 @@
-import type { Dispatch, SetStateAction } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 
 import { MAX_DEPTH, MIN_DEPTH, type ScanConfig } from "../model";
+import { NamingRulesDialog } from "./NamingRulesDialog";
 
 interface ConfigPanelProps {
   config: ScanConfig;
@@ -12,6 +13,7 @@ interface ConfigPanelProps {
   onPickDirectory: () => void;
   onStartScan: () => void;
   onCancelScan: () => void;
+  onIssue?: (message: string) => void;
 }
 
 export function ConfigPanel({
@@ -24,7 +26,9 @@ export function ConfigPanel({
   onPickDirectory,
   onStartScan,
   onCancelScan,
+  onIssue,
 }: ConfigPanelProps) {
+  const [rulesOpen, setRulesOpen] = useState(false);
   const inputsLocked = scanning || locked;
   return (
     <section className="panel">
@@ -120,7 +124,11 @@ export function ConfigPanel({
         <button type="button" onClick={onCancelScan} disabled={!scanning}>
           Abbrechen
         </button>
+        <button type="button" onClick={() => setRulesOpen(true)}>
+          Benennungsregeln
+        </button>
       </div>
+      <NamingRulesDialog open={rulesOpen} onClose={() => setRulesOpen(false)} onIssue={onIssue} />
     </section>
   );
 }

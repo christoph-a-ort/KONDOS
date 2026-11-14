@@ -14,8 +14,8 @@ pub use commands::scan_root_coordination::run_lock_test_helper;
 
 use commands::{
     cancel_prepare_content, cancel_scan, classify_scan_root, copy_export,
-    export_inventory_report_pdf, export_inventory_report_xlsx, load_workbench_prefs,
-    open_in_explorer, open_with_default, path_exists, save_export, save_workbench_prefs,
+    export_inventory_report_pdf, export_inventory_report_xlsx, load_workbench_prefs, load_naming_rules,
+    open_in_explorer, open_with_default, path_exists, save_export, save_workbench_prefs, save_naming_rules,
     discard_virtual_plan_draft, list_virtual_plan_drafts, load_virtual_plan_draft, load_virtual_plan_preferences, save_virtual_plan_draft, save_virtual_plan_preferences,
     load_execution_journal, save_execution_journal,
     inspect_bound_execution, start_bound_execution, progress_bound_execution,
@@ -57,8 +57,10 @@ pub fn run() {
             cancel_prepare_content,
             search_file_content,
             inspect_document_text,
-            load_workbench_prefs,
-            save_workbench_prefs,
+    load_workbench_prefs,
+    save_workbench_prefs,
+    load_naming_rules,
+    save_naming_rules,
             load_virtual_plan_draft,
             list_virtual_plan_drafts,
             load_virtual_plan_preferences,

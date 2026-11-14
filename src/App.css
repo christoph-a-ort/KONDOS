@@ -1484,6 +1484,60 @@ button:disabled {
   gap: 6px;
 }
 
+.naming-rules-dialog {
+  width: min(640px, 100%);
+}
+
+.naming-rules-toolbar {
+  display: flex;
+  gap: 8px;
+}
+
+.naming-rules-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(28vh, 240px);
+  overflow: auto;
+}
+
+.naming-rules-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border: 1px solid #d5dbe3;
+  border-radius: 8px;
+}
+
+.naming-rules-list li.is-selected {
+  border-color: #7b8ea3;
+  background: #f4f7fa;
+}
+
+.naming-rules-select {
+  flex: 1;
+  text-align: left;
+}
+
+.naming-rules-order {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.naming-rule-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+}
+
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: 1fr;

@@ -24,13 +24,17 @@ pub fn save_workbench_prefs(app: AppHandle, prefs_json: String) -> Result<(), Ap
 }
 
 fn prefs_file_path(app: &AppHandle) -> Result<PathBuf, AppError> {
+    app_data_json_path(app, WORKBENCH_PREFS_FILE_NAME)
+}
+
+pub(crate) fn app_data_json_path(app: &AppHandle, file_name: &str) -> Result<PathBuf, AppError> {
     let dir = app.path().app_data_dir().map_err(|_| {
         AppError::new(
             AppErrorKind::Internal,
             "Das App-Datenverzeichnis konnte nicht ermittelt werden.",
         )
     })?;
-    Ok(workbench_prefs_path(&dir))
+    Ok(dir.join(file_name))
 }
 
 pub fn workbench_prefs_path(app_data_dir: &Path) -> PathBuf {
