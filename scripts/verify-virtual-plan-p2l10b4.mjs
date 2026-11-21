@@ -1,0 +1,24 @@
+// P2-L.10b.4: scan PDFs with no text layer must OCR before KI naming.
+import { register } from "node:module";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+register(pathToFileURL(join(root, "scripts/ts-resolve-hook.mjs")).href);
+const read = (file) => readFileSync(join(root, file), "utf8");
+const assert = (value, label) => { if (!value) throw new Error(label); };
+const ocr = read("src-tauri/src/content/ocr.rs");
+const inspect = read("src-tauri/src/content/inspect.rs");
+const helper = read("src/ui/localAi.ts");
+const check = read("src/ui/localAiCheck.ts");
+const dialog = read("src/ui/NameSuggestDialog.tsx");
+assert(ocr.includes("MIN_USABLE_LETTER_WORDS") && ocr.includes("letter_words"), "text-layer usability requires real words");
+assert(inspect.includes("cached_scan_pdf_garbage_does_not_block_ocr"), "unusable cache cannot skip OCR");
+assert(inspect.includes("ocr_file") && ocr.includes("Media::Ocr"), "existing OCR pipeline remains");
+assert(helper.includes("GEG-Beratungsnachweis"), "GEG certificate type is evidenced from text");
+assert(check.includes("assertScannedGegCertificate") && check.includes("2026-01-01_HGZ_GEG-Beratungsnachweis.pdf"), "GEG scan naming is tested");
+assert(dialog.includes("ocrAttempted") && dialog.includes("textChars"), "timings record OCR and character count, not document text");
+assert(!helper.toLowerCase().includes("hgz solutions"), "no HGZ special case beyond evidenced type catalog");
+const { runLocalAiCheck } = await import(pathToFileURL(join(root, "src/ui/localAiCheck.ts")).href);
+await runLocalAiCheck();
+console.log("virtual plan p2l10b4 checks passed");

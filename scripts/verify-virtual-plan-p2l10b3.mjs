@@ -1,0 +1,22 @@
+// P2-L.10b.3: sender is the issuer, not the signatory or clerk.
+import { register } from "node:module";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+register(pathToFileURL(join(root, "scripts/ts-resolve-hook.mjs")).href);
+const read = (file) => readFileSync(join(root, file), "utf8");
+const assert = (value, label) => { if (!value) throw new Error(label); };
+const helper = read("src/ui/localAi.ts");
+const check = read("src/ui/localAiCheck.ts");
+assert(helper.includes("resolvePlausibleAbsender"), "issuer plausibility is checked in Dotty");
+assert(helper.includes("Unterzeichner") && helper.includes("Sachbearbeiter"), "the prompt distinguishes issuer from signatory");
+assert(helper.includes("looksLikePersonName") && helper.includes("documentIssuerOrganisation"), "person names do not override a letterhead organisation");
+assert(!helper.toLowerCase().includes("eprimo"), "no eprimo special case in product code");
+assert(!helper.toLowerCase().includes("vattenfall"), "no Vattenfall special case");
+assert(helper.includes("clipTextForAi") && helper.includes("LOCAL_AI_PROMPT_HEAD_CHARS"), "short prompts remain");
+assert(check.includes("assertSenderNotSignatory") && check.includes("2019-12-22_eprimo_Stromrechnung.pdf"), "eprimo signatory case is tested");
+assert(check.includes("private letters may keep a personal sender"), "private senders remain allowed");
+const { runLocalAiCheck } = await import(pathToFileURL(join(root, "src/ui/localAiCheck.ts")).href);
+await runLocalAiCheck();
+console.log("virtual plan p2l10b3 checks passed");

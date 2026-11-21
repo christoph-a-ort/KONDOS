@@ -1,0 +1,28 @@
+// P2-L.10b.5: manual OCR/KI diagnosis without changing recognition or prompts.
+import { register } from "node:module";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+register(pathToFileURL(join(root, "scripts/ts-resolve-hook.mjs")).href);
+const read = (file) => readFileSync(join(root, file), "utf8");
+const assert = (value, label) => { if (!value) throw new Error(label); };
+const ocr = read("src-tauri/src/content/ocr.rs");
+const inspect = read("src-tauri/src/content/inspect.rs");
+const helper = read("src/ui/localAi.ts");
+const diagnose = read("src/ui/localAiDiagnose.ts");
+const dialog = read("src/ui/NameSuggestDialog.tsx");
+const rustLog = read("src-tauri/src/commands/local_ai.rs");
+assert(ocr.includes("RecognizeAsync") && ocr.includes("ocr_result_text"), "diagnose OCR still uses the existing RecognizeAsync pipeline");
+assert(inspect.includes("ocr_file") && inspect.includes("text_layer_is_usable"), "inspect OCR path is unchanged");
+assert(helper.includes("Du extrahierst strukturierte Angaben. Du bestimmst nicht den Dateinamen."), "KI prompt is unchanged");
+assert(helper.includes("function stripSignatureNoise"), "signature filter stays in existing helper");
+assert(diagnose.includes("runNameSuggestDiagnose") && diagnose.includes("buildLocalAiPrompt"), "diagnose reuses existing prompt/parse helpers");
+assert(dialog.includes("Text prüfen") && dialog.includes("runNameSuggestDiagnose"), "diagnose starts only from an explicit button");
+assert(!dialog.includes("logNameSuggestTimings(diagnose") && !diagnose.includes("logNameSuggestTimings"), "diagnose does not log document text");
+assert(rustLog.includes("log_name_suggest_timings") && rustLog.includes("[Namensvorschlag]"), "timing log remains timing-only");
+const { runLocalAiDiagnoseCheck } = await import(pathToFileURL(join(root, "src/ui/localAiDiagnoseCheck.ts")).href);
+await runLocalAiDiagnoseCheck();
+const { runLocalAiCheck } = await import(pathToFileURL(join(root, "src/ui/localAiCheck.ts")).href);
+await runLocalAiCheck();
+console.log("virtual plan p2l10b5 checks passed");

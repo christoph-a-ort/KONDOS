@@ -313,38 +313,63 @@ enum MoveBlock {
     StorageUnverifiable,
     MovedUnverified,
     Io,
+    Nt(i32),
     ForeignStreams,
     StreamUnverifiable,
 }
 
+fn nt_status_message(status: i32) -> String {
+    let code = status as u32;
+    let reason = match code {
+        0xC0000043 => {
+            "Die Datei wird gerade verwendet und kann nicht umbenannt werden. Bitte schließen Sie die Datei in anderen Programmen."
+        }
+        0xC0000022 => "Der Zugriff auf die Datei wurde verweigert.",
+        0xC0000121 => "Die Datei kann derzeit nicht gelöscht oder umbenannt werden.",
+        0xC0000056 => "Die Datei ist bereits zum Löschen vorgemerkt.",
+        0xC0000054 => "Die Datei ist gesperrt und kann nicht umbenannt werden.",
+        0xC000000D => "Die Umbenennung wurde vom Dateisystem mit ungültigen Parametern abgelehnt.",
+        0xC0000004 => "Die Umbenennungsangaben wurden vom Dateisystem als unvollständig abgelehnt.",
+        0xC0000033 => "Der neue Dateiname ist für das Dateisystem ungültig.",
+        0xC00000A2 => "Der Datenträger ist schreibgeschützt.",
+        0xC000007F => "Auf dem Datenträger ist nicht genug Speicherplatz.",
+        0xC000CF0D | 0xC000CF18 | 0xC000CF24 => {
+            "Die Datei liegt in einem Cloud-Ordner und konnte lokal nicht umbenannt werden. Bitte die Datei vollständig synchronisieren."
+        }
+        _ => "Die Dateiverschiebung ist fehlgeschlagen.",
+    };
+    format!("{reason} (NTSTATUS 0x{code:08X}).")
+}
+
 impl MoveBlock {
-    fn message(&self) -> &'static str {
+    fn message(&self) -> String {
         match self {
-            MoveBlock::Exists => "Das Ziel ist bereits belegt. Vorhandene Dateien werden nicht überschrieben.",
-            MoveBlock::SourceMissing => "Die erwartete Quelldatei fehlt.",
-            MoveBlock::ParentMissing => "Der Zielordner existiert nicht.",
-            MoveBlock::NotFile => "Die Quelle ist keine reguläre Datei. Ordner dürfen nicht verschoben werden.",
-            MoveBlock::Reparse => "Symlink, Junction oder anderer Reparse-Point blockiert die Operation.",
+            MoveBlock::Exists => "Das Ziel ist bereits belegt. Vorhandene Dateien werden nicht überschrieben.".to_string(),
+            MoveBlock::SourceMissing => "Die erwartete Quelldatei fehlt.".to_string(),
+            MoveBlock::ParentMissing => "Der Zielordner existiert nicht.".to_string(),
+            MoveBlock::NotFile => "Die Quelle ist keine reguläre Datei. Ordner dürfen nicht verschoben werden.".to_string(),
+            MoveBlock::Reparse => "Symlink, Junction oder anderer Reparse-Point blockiert die Operation.".to_string(),
             MoveBlock::ContentNotLocal => {
-                "Die Datei ist lokal nicht vollständig vorhanden. Nur vollständig synchronisierte Dateien können verschoben werden."
+                "Die Datei ist lokal nicht vollständig vorhanden. Nur vollständig synchronisierte Dateien können verschoben werden.".to_string()
             }
-            MoveBlock::OutsideRoot => "Quelle oder Ziel liegt außerhalb der freigegebenen Scanwurzel.",
-            MoveBlock::InvalidName => "Der Dateiname ist unzulässig.",
-            MoveBlock::Fingerprint => "Die Quelldatei hat sich seit der Planung verändert. Ablauf angehalten.",
-            MoveBlock::DifferentVolume => "Quelle und Ziel liegen nicht auf demselben Volume.",
-            MoveBlock::Unverifiable => "Der Dateisystemzustand ist nicht sicher verifizierbar.",
-            MoveBlock::NetworkStorage => StorageKind::Remote.real_operation_message().unwrap(),
-            MoveBlock::UnsupportedStorage => StorageKind::Unsupported.real_operation_message().unwrap(),
-            MoveBlock::StorageUnverifiable => StorageKind::Unverifiable.real_operation_message().unwrap(),
+            MoveBlock::OutsideRoot => "Quelle oder Ziel liegt außerhalb der freigegebenen Scanwurzel.".to_string(),
+            MoveBlock::InvalidName => "Der Dateiname ist unzulässig.".to_string(),
+            MoveBlock::Fingerprint => "Die Quelldatei hat sich seit der Planung verändert. Ablauf angehalten.".to_string(),
+            MoveBlock::DifferentVolume => "Quelle und Ziel liegen nicht auf demselben Volume.".to_string(),
+            MoveBlock::Unverifiable => "Der Dateisystemzustand ist nicht sicher verifizierbar.".to_string(),
+            MoveBlock::NetworkStorage => StorageKind::Remote.real_operation_message().unwrap().to_string(),
+            MoveBlock::UnsupportedStorage => StorageKind::Unsupported.real_operation_message().unwrap().to_string(),
+            MoveBlock::StorageUnverifiable => StorageKind::Unverifiable.real_operation_message().unwrap().to_string(),
             MoveBlock::MovedUnverified => {
-                "Die Verschiebung konnte nach der Änderung nicht sicher bestätigt werden. Keine automatische Wiederholung."
+                "Die Verschiebung konnte nach der Änderung nicht sicher bestätigt werden. Keine automatische Wiederholung.".to_string()
             }
-            MoveBlock::Io => "Die Dateiverschiebung ist fehlgeschlagen.",
+            MoveBlock::Io => "Die Dateiverschiebung ist fehlgeschlagen.".to_string(),
+            MoveBlock::Nt(status) => nt_status_message(*status),
             MoveBlock::ForeignStreams => {
-                "Die Datei enthält zusätzliche Alternate Data Streams. Echte Dateioperationen sind nicht zulässig."
+                "Die Datei enthält zusätzliche Alternate Data Streams. Echte Dateioperationen sind nicht zulässig.".to_string()
             }
             MoveBlock::StreamUnverifiable => {
-                "Die Alternate Data Streams der Datei konnten nicht zuverlässig überprüft werden."
+                "Die Alternate Data Streams der Datei konnten nicht zuverlässig überprüft werden.".to_string()
             }
         }
     }
@@ -743,7 +768,7 @@ mod win_move {
             return Err(MoveBlock::NotFile);
         }
         if status < 0 {
-            return Err(MoveBlock::Io);
+            return Err(MoveBlock::Nt(status));
         }
         Ok(unsafe { File::from_raw_handle(handle) })
     }
@@ -777,7 +802,7 @@ mod win_move {
         }
     }
 
-    fn rename_on_handle(source: &File, dest_parent: &File, name: &str) -> Result<(), MoveBlock> {
+    fn rename_on_handle(source: &File, dest_parent: Option<&File>, name: &str) -> Result<(), MoveBlock> {
         #[cfg(test)]
         {
             LAST_RENAME_HANDLE.with(|cell| cell.set(source.as_raw_handle() as isize));
@@ -789,10 +814,11 @@ mod win_move {
         let name_bytes = (wide.len() * 2) as u32;
         wide.push(0);
         // Native FILE_RENAME_INFORMATION: BOOLEAN + 7 pad, HANDLE, ULONG, WCHAR[] at offset 20.
+        // Same-folder rename uses RootDirectory = NULL and only the new file name.
         let mut buf = vec![0u8; 20 + wide.len() * 2];
         let replace_if_exists: u32 = 0;
         buf[0..4].copy_from_slice(&replace_if_exists.to_le_bytes());
-        let root = dest_parent.as_raw_handle() as u64;
+        let root = dest_parent.map(|parent| parent.as_raw_handle() as u64).unwrap_or(0);
         buf[8..16].copy_from_slice(&root.to_le_bytes());
         buf[16..20].copy_from_slice(&name_bytes.to_le_bytes());
         for (index, unit) in wide.iter().enumerate() {
@@ -819,7 +845,7 @@ mod win_move {
             return Err(MoveBlock::DifferentVolume);
         }
         if status < 0 {
-            return Err(MoveBlock::Io);
+            return Err(MoveBlock::Nt(status));
         }
         Ok(())
     }
@@ -908,7 +934,12 @@ mod win_move {
         move_stream_gate(classify_open_file_streams(&source))?;
         after_prepare(&identity)?;
         move_stream_gate(classify_open_file_streams(&source))?;
-        rename_on_handle(&source, &dest_dir, dest_name)?;
+        let same_folder = source_parents == dest_parents;
+        rename_on_handle(
+            &source,
+            if same_folder { None } else { Some(&dest_dir) },
+            dest_name,
+        )?;
         Ok(identity)
     }
 
@@ -1220,6 +1251,7 @@ fn execute_move_file_locked(
         }
         Err(block) => {
             if intent_written.get() {
+                let reason = block.message();
                 let failed = with_progress(
                     &intent_json.borrow(),
                     expected_revision + 1,
@@ -1231,8 +1263,8 @@ fn execute_move_file_locked(
                     &target,
                     scan_root,
                     None,
-                    Some(block.message()),
-                    &format!("Echte Dateiverschiebung fehlgeschlagen: {}", block.message()),
+                    Some(&reason),
+                    &format!("Echte Dateiverschiebung fehlgeschlagen: {reason}"),
                 )?;
                 let _ = progress_bound_run_locked(
                     app_data,
@@ -1567,6 +1599,9 @@ mod tests {
     use crate::commands::execution_binding::start_bound_run_at;
     use crate::commands::execution_test_root::approve_test_root_at;
     use crate::state::AppState;
+    use std::fs::OpenOptions;
+    #[cfg(windows)]
+    use std::os::windows::fs::OpenOptionsExt;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn dir() -> PathBuf {
@@ -1631,6 +1666,16 @@ mod tests {
             app, scan, "owner-a", "j1", expected, "op-file", kind, source, target, size, modified, confirm,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn nt_status_messages_name_the_concrete_cause() {
+        let sharing = nt_status_message(0xC000_0043u32 as i32);
+        assert!(sharing.contains("verwendet"), "{sharing}");
+        assert!(sharing.contains("0xC0000043"), "{sharing}");
+        let unknown = nt_status_message(0xC000_00ABu32 as i32);
+        assert!(unknown.contains("0xC00000AB"), "{unknown}");
+        assert!(unknown.contains("fehlgeschlagen"), "{unknown}");
     }
 
     #[test]
@@ -2921,6 +2966,68 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    fn workbench_rename_sharing_violation_explains_ntstatus() {
+        let (root, scan) = workbench_setup();
+        let source = format!("{scan}/a.txt");
+        let target = format!("{scan}/renamed.txt");
+        let (size, modified) = fingerprint(&root.join("a.txt"));
+        let _lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .share_mode(0)
+            .open(root.join("a.txt"))
+            .unwrap();
+        let result = workbench_execute(&root, &scan, &source, &target, size, modified);
+        assert_ne!(result.outcome, "moved", "{}", result.message);
+        assert!(!result.moved);
+        assert!(
+            result.message.contains("NTSTATUS") || result.message.contains("verwendet"),
+            "sharing or NT status must be visible: {}",
+            result.message
+        );
+        assert_ne!(
+            result.message, "Die Dateiverschiebung ist fehlgeschlagen.",
+            "generic IO must not hide the concrete status"
+        );
+        assert!(root.join("a.txt").is_file());
+        assert!(!root.join("renamed.txt").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_renames_geg_beratungsnachweis_temp_file() {
+        let (root, scan) = workbench_setup();
+        let source_name = "scan.pdf";
+        let target_name = "2026-01-01_HGZ_GEG-Beratungsnachweis.pdf";
+        fs::write(root.join(source_name), b"%PDF-1.4 testdata").unwrap();
+        let source = format!("{scan}/{source_name}");
+        let target = format!("{scan}/{target_name}");
+        let (size, modified) = fingerprint(&root.join(source_name));
+        let result = workbench_execute(&root, &scan, &source, &target, size, modified);
+        assert_eq!(result.outcome, "moved", "{}", result.message);
+        assert!(result.moved);
+        assert!(!root.join(source_name).exists());
+        assert!(root.join(target_name).is_file());
+        assert_eq!(fs::read(root.join(target_name)).unwrap(), b"%PDF-1.4 testdata");
+        assert_eq!(fs::read(root.join("keep.txt")).unwrap(), b"keep");
+        let collision = workbench_execute(
+            &root,
+            &scan,
+            &format!("{scan}/keep.txt"),
+            &target,
+            fingerprint(&root.join("keep.txt")).0,
+            fingerprint(&root.join("keep.txt")).1,
+        );
+        assert_eq!(collision.outcome, "blocked");
+        assert!(collision.message.contains("nicht überschrieben"));
+        assert!(root.join("keep.txt").is_file());
+        assert!(root.join(target_name).is_file());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn workbench_renames_file_in_same_folder() {
         let (root, scan) = workbench_setup();
         let source = format!("{scan}/a.txt");
@@ -2985,6 +3092,58 @@ mod tests {
         assert_eq!(result.outcome, "blocked");
         assert!(root.join("a.txt").is_file());
         assert!(!root.join("CON.txt").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_rename_fingerprint_mismatch_is_blocked() {
+        let (root, scan) = workbench_setup();
+        let source = format!("{scan}/a.txt");
+        let target = format!("{scan}/renamed.txt");
+        let (size, modified) = fingerprint(&root.join("a.txt"));
+        let result = workbench_execute(&root, &scan, &source, &target, size + 1, modified);
+        assert_eq!(result.outcome, "blocked");
+        assert!(result.message.contains("verändert"), "{}", result.message);
+        assert!(root.join("a.txt").is_file());
+        assert!(!root.join("renamed.txt").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_rename_outside_scan_root_is_blocked() {
+        let (root, scan) = workbench_setup();
+        let other = dir();
+        let other_scan = other.to_string_lossy().replace('\\', "/");
+        let source = format!("{scan}/a.txt");
+        let target = format!("{scan}/renamed.txt");
+        let (size, modified) = fingerprint(&root.join("a.txt"));
+        let result = workbench_execute(&other, &other_scan, &source, &target, size, modified);
+        assert_eq!(result.outcome, "blocked");
+        assert!(
+            result.message.contains("Scanwurzel") || result.message.contains("außerhalb"),
+            "{}",
+            result.message
+        );
+        assert!(root.join("a.txt").is_file());
+        assert!(!root.join("renamed.txt").exists());
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(other);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_rename_unsafe_scan_root_is_blocked() {
+        let (root, scan) = workbench_setup();
+        let source = format!("{scan}/a.txt");
+        let target = format!("{scan}/renamed.txt");
+        let (size, modified) = fingerprint(&root.join("a.txt"));
+        let result = workbench_execute(&root, "C:/Windows", &source, &target, size, modified);
+        assert_eq!(result.outcome, "blocked");
+        assert!(result.message.contains("kein zulässiger Pfad"), "{}", result.message);
+        assert!(root.join("a.txt").is_file());
+        assert!(!root.join("renamed.txt").exists());
         let _ = fs::remove_dir_all(root);
     }
 }

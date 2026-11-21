@@ -1,0 +1,26 @@
+// P2-L.10b.6: form OCR naming without inventing stamp senders or truncated JSON fields.
+import { register } from "node:module";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+register(pathToFileURL(join(root, "scripts/ts-resolve-hook.mjs")).href);
+const read = (file) => readFileSync(join(root, file), "utf8");
+const assert = (value, label) => { if (!value) throw new Error(label); };
+const helper = read("src/ui/localAi.ts");
+const rust = read("src-tauri/src/commands/local_ai.rs");
+const ocr = read("src-tauri/src/content/ocr.rs");
+const check = read("src/ui/localAiCheck.ts");
+assert(rust.includes("OLLAMA_NUM_PREDICT") && rust.includes("done_reason") && rust.includes("eval_count"), "Ollama done_reason and token count are evaluated");
+assert(rust.includes("num_predict\": OLLAMA_NUM_PREDICT") || rust.includes("OLLAMA_NUM_PREDICT"), "output cap stays explicit");
+assert(helper.includes("extractCompleteLocalAiJson") && helper.includes("localAiJsonLooksTruncated"), "incomplete JSON is not interpreted as fields");
+assert(helper.includes("informationspflicht") && helper.includes("gebaeudeenergiegesetz"), "GEG certificate evidence covers OCR wording");
+assert(helper.includes("isFormCaptionName") && helper.includes("FORM_CAPTION_TOKENS"), "form captions are not senders");
+assert(!helper.includes("`Datei: ${fileName}`"), "filename is not sent as KI evidence");
+assert(ocr.includes("result.Lines()") && ocr.includes("join_recognized_lines"), "OCR keeps line order from the same RecognizeAsync result");
+assert(check.includes("assertScannedGegFormFromDiagnose") && check.includes("2026-01-01_GEG-Beratungsnachweis.pdf"), "diagnose fixture naming is tested");
+const { runLocalAiCheck } = await import(pathToFileURL(join(root, "src/ui/localAiCheck.ts")).href);
+await runLocalAiCheck();
+const { runLocalAiDiagnoseCheck } = await import(pathToFileURL(join(root, "src/ui/localAiDiagnoseCheck.ts")).href);
+await runLocalAiDiagnoseCheck();
+console.log("virtual plan p2l10b6 checks passed");

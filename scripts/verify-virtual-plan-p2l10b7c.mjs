@@ -1,0 +1,27 @@
+// P2-L.10b.7c: concrete MOVE/rename engine errors must reach the name-suggest dialog.
+import { register } from "node:module";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+register(pathToFileURL(join(root, "scripts/ts-resolve-hook.mjs")).href);
+const read = (file) => readFileSync(join(root, file), "utf8");
+const assert = (value, label) => { if (!value) throw new Error(label); };
+const moveRs = read("src-tauri/src/commands/execution_move.rs");
+const dialog = read("src/ui/NameSuggestDialog.tsx");
+const apply = read("src/ui/nameSuggestApply.ts");
+const app = read("src/App.tsx");
+assert(moveRs.includes("fn nt_status_message") && moveRs.includes("MoveBlock::Nt"), "NTSTATUS from NtSetInformationFile/NtCreateFile is mapped");
+assert(moveRs.includes("0xC0000043") && moveRs.includes("wird gerade verwendet"), "sharing violation is a concrete dialog reason");
+assert(moveRs.includes("same_folder") && moveRs.includes("if same_folder { None }"), "same-folder rename uses RootDirectory NULL");
+assert(moveRs.includes("fn execute_workbench_move_file_locked"), "existing MOVE engine remains");
+assert(dialog.includes("applied.reason") && dialog.includes("prepareNameSuggestApply"), "dialog shows the engine reason");
+assert(apply.includes("workbenchNameSuggestRequest") && app.includes("executeWorkbenchMoveFile"), "apply still uses the existing MOVE wrapper");
+assert(!moveRs.includes("openai"), "no cloud AI in the MOVE engine");
+const { runNameSuggestApplyCheck } = await import(pathToFileURL(join(root, "src/ui/nameSuggestApplyCheck.ts")).href);
+runNameSuggestApplyCheck();
+const { runLearnedSendersCheck } = await import(pathToFileURL(join(root, "src/ui/learnedSendersCheck.ts")).href);
+await runLearnedSendersCheck();
+const { runTreeWorkbenchRenameCheck } = await import(pathToFileURL(join(root, "src/ui/treeWorkbenchRenameCheck.ts")).href);
+runTreeWorkbenchRenameCheck();
+console.log("virtual plan p2l10b7c checks passed");

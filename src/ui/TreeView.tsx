@@ -113,6 +113,7 @@ import {
   isWorkbenchRenameShortcut,
   isWorkbenchRenameTypingTarget,
   workbenchRenameRequest,
+  type WorkbenchRenameApplyResult,
   type WorkbenchRenameRequest,
 } from "./treeWorkbenchRename";
 import { canSuggestWorkbenchFileName } from "./treeWorkbenchNameSuggest";
@@ -141,7 +142,9 @@ interface TreeViewProps {
   /** P2-J-F: marker click → show insights for this folder location. */
   onInsightMarkerActivate?: (locationId: string) => void;
   onWorkbenchFileMove?: (request: WorkbenchMoveRequest) => void;
-  onWorkbenchFileRename?: (request: WorkbenchRenameRequest) => void;
+  onWorkbenchFileRename?: (
+    request: WorkbenchRenameRequest,
+  ) => Promise<WorkbenchRenameApplyResult> | WorkbenchRenameApplyResult | void;
   onWorkbenchRenameIssue?: (message: string) => void;
 }
 
@@ -274,7 +277,9 @@ interface PopulatedTreeViewProps {
   folderInsightIdsByLocation: ReadonlyMap<string, readonly string[]> | null;
   onInsightMarkerActivate?: (locationId: string) => void;
   onWorkbenchFileMove?: (request: WorkbenchMoveRequest) => void;
-  onWorkbenchFileRename?: (request: WorkbenchRenameRequest) => void;
+  onWorkbenchFileRename?: (
+    request: WorkbenchRenameRequest,
+  ) => Promise<WorkbenchRenameApplyResult> | WorkbenchRenameApplyResult | void;
   onWorkbenchRenameIssue?: (message: string) => void;
 }
 
@@ -1548,10 +1553,15 @@ function PopulatedTreeView({
           setNameSuggestOpen(false);
           setNameSuggestNode(null);
         }}
-        onApply={(request) => {
-          setNameSuggestOpen(false);
-          setNameSuggestNode(null);
-          onWorkbenchFileRename?.(request);
+        onApply={async (request) => {
+          if (onWorkbenchFileRename === undefined) {
+            return { ok: false, reason: "Die Umbenennung ist gerade nicht verfügbar." };
+          }
+          const applied = await onWorkbenchFileRename(request);
+          if (applied !== undefined && typeof applied === "object" && "ok" in applied) {
+            return applied;
+          }
+          return { ok: false, reason: "Die Umbenennung wurde nicht ausgeführt." };
         }}
         onIssue={onWorkbenchRenameIssue}
       />

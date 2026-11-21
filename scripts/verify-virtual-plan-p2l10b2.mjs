@@ -1,0 +1,25 @@
+// P2-L.10b.2: faster local AI name suggestions with timings, short prompts and result cache.
+import { register } from "node:module";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+register(pathToFileURL(join(root, "scripts/ts-resolve-hook.mjs")).href);
+const read = (file) => readFileSync(join(root, file), "utf8");
+const assert = (value, label) => { if (!value) throw new Error(label); };
+const helper = read("src/ui/localAi.ts");
+const dialog = read("src/ui/NameSuggestDialog.tsx");
+const rust = read("src-tauri/src/commands/local_ai.rs");
+const inspect = read("src-tauri/src/content/inspect.rs");
+assert(helper.includes("formatLocalAiTimings") && helper.includes("cacheHit"), "timings and cache are recorded");
+assert(helper.includes("clipTextForAi") && helper.includes("LOCAL_AI_PROMPT_HEAD_CHARS"), "KI prompts are clipped");
+assert(helper.includes("clearLocalAiResultCache"), "KI results can be reused in session");
+assert(dialog.includes("formatLocalAiTimings") && dialog.includes("Gespeicherter KI-Vorschlag"), "UI reports KI status and timings");
+assert(dialog.includes("name-suggest-timing") && dialog.includes("logNameSuggestTimings"), "timings are shown in the dialog and logged to the terminal");
+assert(rust.includes("keep_alive") && rust.includes("num_predict"), "Ollama keeps the model loaded and caps output");
+assert(rust.includes("prompt_eval_duration") && rust.includes("load_duration"), "Ollama timings are parsed");
+assert(inspect.includes("cache.entries.get") && inspect.includes("text_layer_is_usable"), "inspect still reuses ContentCache");
+assert(!helper.toLowerCase().includes("vattenfall"), "no Vattenfall special case");
+const { runLocalAiCheck } = await import(pathToFileURL(join(root, "src/ui/localAiCheck.ts")).href);
+await runLocalAiCheck();
+console.log("virtual plan p2l10b2 checks passed");

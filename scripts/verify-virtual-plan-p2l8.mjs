@@ -38,7 +38,11 @@ assert(tree.includes("isWorkbenchRenameShortcut"), "Ctrl+Shift+U remains");
 assert(!tree.includes('event.key === "F2"'), "F2 stays unused");
 assert(tree.includes("onPointerDown"), "drag-and-drop pointer path remains");
 assert(dialog.includes("Abbrechen") && dialog.includes("Übernehmen"), "apply and cancel exist");
-assert(dialog.includes("workbenchNameSuggestRequest"), "dialog apply uses the rename helper");
+const applyHelper = read("src/ui/nameSuggestApply.ts");
+assert(
+  dialog.includes("workbenchNameSuggestRequest") || applyHelper.includes("workbenchNameSuggestRequest"),
+  "dialog apply uses the rename helper",
+);
 assert(app.includes("executeWorkbenchMoveFile"), "existing MOVE/rename engine remains the apply path");
 assert(moveRs.includes("fn execute_workbench_move_file_locked"), "productive workbench MOVE command is unchanged");
 console.log("virtual plan p2l8 checks passed");

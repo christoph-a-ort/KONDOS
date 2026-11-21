@@ -6,6 +6,8 @@ pub mod report;
 pub mod scan;
 pub mod workbench_prefs;
 pub mod naming_rules;
+pub mod local_ai;
+pub mod learned_senders;
 pub mod virtual_plan;
 pub mod execution_journal;
 pub mod execution_binding;
@@ -27,6 +29,11 @@ pub use report::{export_inventory_report_pdf, export_inventory_report_xlsx};
 pub use scan::{cancel_scan, classify_scan_root, start_scan};
 pub use workbench_prefs::{load_workbench_prefs, save_workbench_prefs};
 pub use naming_rules::{load_naming_rules, save_naming_rules};
+pub use local_ai::{
+    generate_local_ollama, load_local_ai_prefs, log_name_suggest_timings, probe_local_ollama,
+    save_local_ai_prefs,
+};
+pub use learned_senders::{load_learned_senders, save_learned_senders};
 pub use virtual_plan::{discard_virtual_plan_draft, list_virtual_plan_drafts, load_virtual_plan_draft, load_virtual_plan_preferences, save_virtual_plan_draft, save_virtual_plan_preferences};
 pub use execution_journal::{load_execution_journal, save_execution_journal};
 pub use execution_binding::{

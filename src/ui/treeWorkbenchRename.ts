@@ -19,6 +19,23 @@ export interface WorkbenchRenameRequest {
   expectedModifiedAtMs: number;
 }
 
+export type WorkbenchRenameApplyResult =
+  | { ok: true }
+  | { ok: false; reason: string };
+
+export function workbenchRenameApplyFromMoveResult(
+  result: MoveFileResult,
+): WorkbenchRenameApplyResult {
+  if (result.moved && result.outcome === "moved") {
+    return { ok: true };
+  }
+  const reason = result.message.trim();
+  return {
+    ok: false,
+    reason: reason.length > 0 ? reason : "Die Umbenennung wurde nicht ausgeführt.",
+  };
+}
+
 export function fileNameEditSelection(name: string): { start: number; end: number } {
   const lastDot = name.lastIndexOf(".");
   if (lastDot <= 0) {

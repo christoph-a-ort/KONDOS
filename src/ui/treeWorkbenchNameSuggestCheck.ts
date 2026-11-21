@@ -69,6 +69,9 @@ export function runTreeWorkbenchNameSuggestCheck(): void {
 
   assert(parseUserDocumentDate("2026-10-28") === "2026-10-28", "user ISO date is accepted");
   assert(parseUserDocumentDate("28.10.2026") === "2026-10-28", "user German date is accepted");
+  assert(parseUserDocumentDate("01.01.2026") === "2026-01-01", "user German New Year date is accepted");
+  assert(parseUserDocumentDate("1.1.2026") === "2026-01-01", "unpadded German date is accepted");
+  assert(parseUserDocumentDate("31.02.2026") === null, "impossible calendar date is rejected");
   assert(parseUserDocumentDate("") === null, "empty user date is not filled");
   assert(parseUserDocumentDate("heute") === null, "today is not invented from text");
   assert(formatIsoDate(2026, 2, 29) === null, "invalid calendar date is rejected");

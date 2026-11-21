@@ -142,13 +142,22 @@ fn run_ocr(
                 Some("Text stammt aus lokaler Texterkennung und wurde nicht als zweifelsfrei übernommen.".into()),
             )
         }
-        Err(OcrError::Empty) => view_from_entry(
-            scan_id,
-            seed,
-            "ocr",
-            true,
-            Some("Die Texterkennung hat keinen Text gefunden.".into()),
-        ),
+        Err(OcrError::Empty) => {
+            let mut entry = seed;
+            if !text_layer_is_usable(entry.text.as_deref().unwrap_or("")) {
+                entry.status = ContentStatus::NoExtractableText;
+                entry.text = None;
+                entry.extracted_chars = 0;
+                let _ = state.insert_content_entry(scan_id, entry.clone());
+            }
+            view_from_entry(
+                scan_id,
+                entry,
+                "ocr",
+                true,
+                Some("Die Texterkennung hat keinen Text gefunden.".into()),
+            )
+        }
         Err(err) => {
             let message = err.user_message();
             let status = match err {
@@ -308,12 +317,25 @@ mod tests {
     }
 
     #[test]
+    fn cached_scan_pdf_garbage_does_not_block_ocr() {
+        let state = AppState::new();
+        let path = "C:\\root\\scan-geg.pdf";
+        state.store_snapshot(7, file_result(path, "scan-geg.pdf", path));
+        let mut entry = ContentEntry::new(path, "scan-geg.pdf", ContentFormat::Pdf, ContentStatus::Searchable);
+        entry.text = Some("cid cid cid cid cid cid cid cid cid cid".into());
+        state.insert_content_entry(7, entry).expect("cache");
+        let view = inspect_document_text(&state, 7, path).expect("inspect");
+        assert_ne!(view.source, "cache", "unusable extract must not be returned as a finished cache hit");
+        assert!(view.ocr_attempted, "scan PDF without a real text layer must try OCR");
+    }
+
+    #[test]
     fn cache_text_is_reused_without_inventing_a_date() {
         let state = AppState::new();
         let path = "C:\\root\\Rechnung.pdf";
         state.store_snapshot(3, file_result(path, "Rechnung.pdf", path));
         let mut entry = ContentEntry::new(path, "Rechnung.pdf", ContentFormat::Pdf, ContentStatus::Searchable);
-        entry.text = Some("Rechnungsdatum 28.10.2026\nZahlungsziel 11.11.2026".into());
+        entry.text = Some("Rechnung Mueller GmbH\nRechnungsdatum 28.10.2026\nZahlungsziel 11.11.2026".into());
         state.insert_content_entry(3, entry).expect("cache");
         let view = inspect_document_text(&state, 3, path).expect("cached");
         assert_eq!(view.source, "cache");

@@ -220,6 +220,10 @@ export async function runNamingRulesCheck(): Promise<void> {
     invoiceRule({ id: "rule-jpeg", formats: ["jpeg"], keywords: ["sichtbarem"], schema: "{datum}_{name}" }),
   ], { datum: "2026-10-28" });
   assert(ocrWithDate.suggestedName === "2026-10-28_bild.jpg", "user date completes the OCR rule");
+  const ocrWithGermanDate = planNameSuggestion("bild.jpg", jpegView, [
+    invoiceRule({ id: "rule-jpeg", formats: ["jpeg"], keywords: ["sichtbarem"], schema: "{datum}_{name}" }),
+  ], { datum: "01.01.2026" });
+  assert(ocrWithGermanDate.suggestedName === "2026-01-01_bild.jpg", "typed German date is stored as ISO in the rule name");
 
   assert(extractLabeledValue("Absender: Mueller GmbH", ["absender"]) === "Mueller GmbH", "sender label is read");
   assert(extractLabeledValue("Davon: keine Angabe", ["von"]) === null, "partial words are not treated as labels");

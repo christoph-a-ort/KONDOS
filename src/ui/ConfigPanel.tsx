@@ -1,6 +1,8 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
 
 import { MAX_DEPTH, MIN_DEPTH, type ScanConfig } from "../model";
+import { LearnedSendersPanel } from "./LearnedSendersPanel";
+import { LocalAiPanel } from "./LocalAiPanel";
 import { NamingRulesDialog } from "./NamingRulesDialog";
 
 interface ConfigPanelProps {
@@ -111,6 +113,9 @@ export function ConfigPanel({
           <span>Erstellungsdatum</span>
         </label>
       </fieldset>
+
+      <LocalAiPanel onIssue={onIssue} />
+      <LearnedSendersPanel onIssue={onIssue} />
 
       <div className="actions">
         <button

@@ -36,7 +36,11 @@ assert(helper.includes("isOcrTextSource"), "OCR results stay uncertain");
 assert(helper.includes(String.raw`(\d{1,2})\s*\.\s*(\d{1,2})\s*\.\s*(\d{4})`), "German OCR dates may have spaces around dots");
 assert(dialog.includes("Texterkennung"), "OCR status is shown");
 assert(dialog.includes("subscribeOcrProgress"), "OCR does not block without status");
-assert(dialog.includes("workbenchNameSuggestRequest"), "apply still uses the rename helper");
+const applyHelper = read("src/ui/nameSuggestApply.ts");
+assert(
+  dialog.includes("workbenchNameSuggestRequest") || applyHelper.includes("workbenchNameSuggestRequest"),
+  "apply still uses the rename helper",
+);
 assert(tree.includes("onPointerDown"), "drag-and-drop remains");
 assert(tree.includes("isWorkbenchRenameShortcut"), "Ctrl+Shift+U remains");
 console.log("virtual plan p2l9 checks passed");

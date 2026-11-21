@@ -1,0 +1,26 @@
+// P2-L.10b.7: confirmed local sender mappings, conservative reuse, no extra KI.
+import { register } from "node:module";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+register(pathToFileURL(join(root, "scripts/ts-resolve-hook.mjs")).href);
+const read = (file) => readFileSync(join(root, file), "utf8");
+const assert = (value, label) => { if (!value) throw new Error(label); };
+const helper = read("src/ui/learnedSenders.ts");
+const dialog = read("src/ui/NameSuggestDialog.tsx");
+const config = read("src/ui/ConfigPanel.tsx");
+const rust = read("src-tauri/src/commands/learned_senders.rs");
+assert(rust.includes("learned-senders.v1.json") && rust.includes("app_data_json_path"), "mappings persist in Tauri app data");
+assert(helper.includes("shouldPersistSenderMapping") && helper.includes("matchLearnedSender"), "confirm-only learning and conservative matching exist");
+assert(helper.includes("tokens.length >= 2") && helper.includes("fromKey"), "matches require an exact sender or a full token sequence");
+assert(dialog.includes("Absenderzuordnung für zukünftige Dokumente merken"), "learn checkbox is in the name dialog");
+assert(dialog.includes("Absender aus bestätigter Zuordnung"), "applied mappings are labeled");
+assert(dialog.includes("rememberSender") && dialog.includes("shouldPersistSenderMapping"), "learning runs only after a successful apply");
+assert(config.includes("LearnedSendersPanel"), "config hosts the learned-senders panel");
+assert(read("src/ui/LearnedSendersPanel.tsx").includes("Gelernte Absender") && read("src/ui/LearnedSendersPanel.tsx").includes("Löschen"), "learned senders can be listed and deleted");
+const { runLearnedSendersCheck } = await import(pathToFileURL(join(root, "src/ui/learnedSendersCheck.ts")).href);
+await runLearnedSendersCheck();
+const { runLocalAiCheck } = await import(pathToFileURL(join(root, "src/ui/localAiCheck.ts")).href);
+await runLocalAiCheck();
+console.log("virtual plan p2l10b7 checks passed");

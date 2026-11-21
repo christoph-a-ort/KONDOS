@@ -5,6 +5,7 @@ import { stemFromFilename } from "./inventoryFileNameSyntax";
 import {
   buildDatedFileName,
   foldDocumentLabel,
+  parseUserDocumentDate,
   preferredAskIso,
   resolveDocumentDateFromView,
   sanitizeSuggestedFileNamePart,
@@ -55,7 +56,7 @@ export interface NamingRuleStore {
 }
 
 export interface NameSuggestOutcome {
-  source: "rule" | "default";
+  source: "rule" | "default" | "ai";
   rule: NamingRule | null;
   resolution: DocumentDateResolution;
   values: Partial<Record<NamingPlaceholder, string>>;
@@ -390,9 +391,10 @@ function planDefaultSuggestion(
   resolution: DocumentDateResolution,
   overrides: Partial<Record<NamingPlaceholder, string>>,
 ): NameSuggestOutcome {
+  const overrideIso = hasValue(overrides.datum) ? parseUserDocumentDate(overrides.datum!) : null;
   const iso =
-    hasValue(overrides.datum)
-      ? overrides.datum!
+    overrideIso !== null
+      ? overrideIso
       : resolution.status === "confident"
         ? resolution.iso
         : preferredAskIso(resolution);
@@ -400,7 +402,26 @@ function planDefaultSuggestion(
   if (iso.length > 0) {
     values.datum = iso;
   }
-  const suggestedName = iso.length > 0 ? buildDatedFileName(fileName, iso) : null;
+  const dokumenttyp = hasValue(overrides.dokumenttyp) ? sanitizeSuggestedFileNamePart(overrides.dokumenttyp!) : "";
+  const absender = hasValue(overrides.absender) ? sanitizeSuggestedFileNamePart(overrides.absender!) : "";
+  const betreff = hasValue(overrides.betreff) ? sanitizeSuggestedFileNamePart(overrides.betreff!) : "";
+  if (dokumenttyp.length > 0) {
+    values.dokumenttyp = dokumenttyp;
+  }
+  if (absender.length > 0) {
+    values.absender = absender;
+  }
+  if (betreff.length > 0) {
+    values.betreff = betreff;
+  }
+  const stemParts = [absender, dokumenttyp].filter((part) => part.length > 0);
+  const namePart = stemParts.length > 0 ? stemParts.join("_") : betreff;
+  let suggestedName: string | null = null;
+  if (iso.length > 0 && namePart.length > 0) {
+    suggestedName = preserveOriginalFileExtension(fileName, `${iso}_${namePart}`);
+  } else if (iso.length > 0) {
+    suggestedName = buildDatedFileName(fileName, iso);
+  }
   const missing: NamingPlaceholder[] = iso.length > 0 ? [] : ["datum"];
   return {
     source: "default",
@@ -453,7 +474,14 @@ function applyOverrides(
   for (const key of NAMING_PLACEHOLDERS) {
     const override = overrides[key];
     if (typeof override === "string") {
-      const cleaned = key === "datum" ? override.trim() : sanitizeSuggestedFileNamePart(override);
+      if (key === "datum") {
+        const iso = parseUserDocumentDate(override);
+        if (iso !== null) {
+          next[key] = iso;
+        }
+        continue;
+      }
+      const cleaned = sanitizeSuggestedFileNamePart(override);
       if (cleaned.length > 0) {
         next[key] = cleaned;
       }

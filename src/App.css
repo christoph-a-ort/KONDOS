@@ -1478,10 +1478,78 @@ button:disabled {
   width: min(480px, 100%);
 }
 
+.name-suggest-date-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.name-suggest-date-row input[type="text"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.name-suggest-date-picker {
+  width: 2.6rem;
+  min-width: 2.6rem;
+  padding: 4px;
+}
+
+.name-suggest-dialog-diagnose {
+  width: min(720px, 100%);
+}
+
+.name-suggest-diagnose {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.name-suggest-diagnose > label {
+  font-weight: 600;
+}
+
+.name-suggest-diagnose-text {
+  width: 100%;
+  min-height: 16rem;
+  max-height: min(42vh, 360px);
+  resize: vertical;
+  font-family: Consolas, "Segoe UI Mono", monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
 .name-suggest-choices {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.learned-senders-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.learned-senders-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.learned-senders-list .field {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+.learned-senders-arrow {
+  padding-bottom: 8px;
+  color: #5b6b7a;
 }
 
 .naming-rules-dialog {
@@ -1536,6 +1604,10 @@ button:disabled {
   flex-direction: column;
   gap: 10px;
   padding-top: 4px;
+}
+
+.local-ai-panel select {
+  width: 100%;
 }
 
 @media (max-width: 900px) {

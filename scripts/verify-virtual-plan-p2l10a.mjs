@@ -40,8 +40,15 @@ assert(rulesDialog.includes("Neue Regel") && rulesDialog.includes("Löschen"), "
 assert(rulesDialog.includes("Regel aktiv") && rulesDialog.includes("Nach oben"), "rules can be toggled and reordered");
 assert(config.includes("Benennungsregeln"), "rule management is reachable from configuration");
 assert(dialog.includes("Regel:") && dialog.includes("Vorgeschlagener Dateiname"), "name suggestion shows the applied rule and filename");
-assert(dialog.includes("workbenchNameSuggestRequest"), "apply still uses the rename helper");
-assert(dialog.includes("applySuggestedFileName"), "typed names are applied independently of the rule schema");
+const applyHelper = read("src/ui/nameSuggestApply.ts");
+assert(
+  dialog.includes("workbenchNameSuggestRequest") || applyHelper.includes("workbenchNameSuggestRequest"),
+  "apply still uses the rename helper",
+);
+assert(
+  dialog.includes("applySuggestedFileName") || applyHelper.includes("applySuggestedFileName"),
+  "typed names are applied independently of the rule schema",
+);
 assert(!dialog.includes("plan.missing.length > 0"), "missing placeholders do not block a valid typed name");
 assert(!dialog.includes("function applyDate(iso: string) {\n    setNameTouched(false)"), "date choice does not overwrite a typed name");
 assert(dialog.includes("setNameTouched(true)"), "typed filename is marked manual");

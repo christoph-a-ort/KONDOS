@@ -51,12 +51,17 @@ import { VirtualPlanPreviewView } from "./ui/VirtualPlanPreviewView";
 import type { RealFileMoveWorkbenchEvent } from "./ui/virtualPlanExecution";
 import { executeWorkbenchMoveFile } from "./ui/virtualPlanExecutionApi";
 import {
+  nameSuggestApplyFromMoveResult,
+  workbenchRenameOccupancyBlockReason,
+} from "./ui/nameSuggestApply";
+import {
   pathForCurrentScan,
   workbenchMoveEventFromResult,
   type WorkbenchMoveRequest,
 } from "./ui/treeWorkbenchMove";
 import {
   workbenchRenameEventFromResult,
+  type WorkbenchRenameApplyResult,
   type WorkbenchRenameRequest,
 } from "./ui/treeWorkbenchRename";
 import {
@@ -1014,15 +1019,20 @@ function App() {
     }
   }
 
-  async function handleWorkbenchFileRename(request: WorkbenchRenameRequest) {
-    if (
-      workbenchMoveBusyRef.current ||
-      scanLockRef.current ||
-      scanningRef.current ||
-      exportBusyRef.current ||
-      preparingContentRef.current
-    ) {
-      return;
+  async function handleWorkbenchFileRename(
+    request: WorkbenchRenameRequest,
+  ): Promise<WorkbenchRenameApplyResult> {
+    const occupancyReason = workbenchRenameOccupancyBlockReason({
+      moveBusy: workbenchMoveBusyRef.current,
+      scanLocked: scanLockRef.current,
+      scanning: scanningRef.current,
+      exportBusy: exportBusyRef.current,
+      preparingContent: preparingContentRef.current,
+    });
+    if (occupancyReason !== null) {
+      setWorkbenchNotice(occupancyReason);
+      setWorkbenchNoticeKind("blocked");
+      return { ok: false, reason: occupancyReason };
     }
     workbenchMoveBusyRef.current = true;
     try {
@@ -1042,9 +1052,12 @@ function App() {
         pendingRevealNodeIdRef.current = pathForCurrentScan(request.scanRoot, result.targetPath);
         void handleStartScan();
       }
+      return nameSuggestApplyFromMoveResult(result);
     } catch (cause) {
-      setWorkbenchNotice(toUserError(cause));
+      const reason = toUserError(cause);
+      setWorkbenchNotice(reason);
       setWorkbenchNoticeKind("failed");
+      return { ok: false, reason };
     } finally {
       workbenchMoveBusyRef.current = false;
     }
@@ -1279,9 +1292,7 @@ function App() {
                 onWorkbenchFileMove={(request) => {
                   void handleWorkbenchFileMove(request);
                 }}
-                onWorkbenchFileRename={(request) => {
-                  void handleWorkbenchFileRename(request);
-                }}
+                onWorkbenchFileRename={(request) => handleWorkbenchFileRename(request)}
                 onWorkbenchRenameIssue={(message) => {
                   setWorkbenchNotice(message);
                   setWorkbenchNoticeKind("blocked");

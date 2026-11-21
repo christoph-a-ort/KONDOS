@@ -6,6 +6,7 @@ import {
   isUnchangedWorkbenchRename,
   isWorkbenchRenameShortcut,
   isWorkbenchRenameTypingTarget,
+  workbenchRenameApplyFromMoveResult,
   workbenchRenameEventFromResult,
   workbenchRenameRequest,
   workbenchRenameSuccessMessage,
@@ -139,7 +140,16 @@ export function runTreeWorkbenchRenameCheck(): void {
     const event = workbenchRenameEventFromResult(moved, prepared.request);
     assert(event.refreshWorkbench, "successful rename refreshes the tree");
     assert(event.message.includes("Rechnung_neu.pdf"), "success notice names the new file");
+    assert(workbenchRenameApplyFromMoveResult(moved).ok, "successful MOVE is an applied rename");
   }
+  const blockedMove: MoveFileResult = {
+    ...moved,
+    outcome: "blocked",
+    moved: false,
+    message: "Das Ziel ist bereits belegt. Vorhandene Dateien werden nicht überschrieben.",
+  };
+  const blockedApply = workbenchRenameApplyFromMoveResult(blockedMove);
+  assert(!blockedApply.ok && blockedApply.reason.includes("bereits belegt"), "blocked MOVE is not a silent success");
 
   assert(workbenchDropKind(source, dest) === "valid", "rename helpers do not change drop validity");
   const drag = workbenchMoveRequest(root.path, source, dest);

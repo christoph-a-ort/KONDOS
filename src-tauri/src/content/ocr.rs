@@ -10,6 +10,8 @@ use super::{ContentFormat, ContentStatus};
 pub const OCR_PROGRESS_EVENT: &str = "content://ocr-progress";
 pub const MAX_OCR_PAGES: u32 = 8;
 pub const MIN_USABLE_TEXT_ALNUM: usize = 24;
+pub const MIN_USABLE_LETTER_WORDS: usize = 4;
+pub const MIN_USABLE_DISTINCT_WORDS: usize = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -45,7 +47,40 @@ impl OcrError {
 }
 
 pub fn text_layer_is_usable(text: &str) -> bool {
-    text.chars().filter(|ch| ch.is_alphanumeric()).count() >= MIN_USABLE_TEXT_ALNUM
+    let letters = text.chars().filter(|ch| ch.is_alphabetic()).count();
+    if letters < MIN_USABLE_TEXT_ALNUM {
+        return false;
+    }
+    let words = letter_words(text);
+    if words.len() < MIN_USABLE_LETTER_WORDS {
+        return false;
+    }
+    let mut distinct = words;
+    distinct.sort();
+    distinct.dedup();
+    distinct.len() >= MIN_USABLE_DISTINCT_WORDS
+}
+
+fn letter_words(text: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let push_current = |words: &mut Vec<String>, current: &mut String| {
+        if current.chars().count() >= 3 {
+            words.push(current.to_lowercase());
+        }
+        current.clear();
+    };
+    for ch in text.chars() {
+        if ch.is_alphabetic() {
+            current.push(ch);
+        } else if !current.is_empty() {
+            push_current(&mut words, &mut current);
+        }
+    }
+    if !current.is_empty() {
+        push_current(&mut words, &mut current);
+    }
+    words
 }
 
 pub fn should_try_ocr(format: ContentFormat, status: ContentStatus, text: Option<&str>) -> bool {
@@ -347,12 +382,46 @@ fn recognize_image_bytes(
         .map_err(win_err)?
         .get()
         .map_err(win_err)?;
-    let text = result.Text().map_err(win_err)?.to_string();
+    let text = ocr_result_text(&result)?;
     if text.trim().is_empty() {
         Err(OcrError::Empty)
     } else {
         Ok(text)
     }
+}
+
+fn join_recognized_lines(lines: impl IntoIterator<Item = String>) -> Option<String> {
+    let parts: Vec<String> = lines
+        .into_iter()
+        .map(|line| line.trim_end().to_string())
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n"))
+    }
+}
+
+#[cfg(windows)]
+fn ocr_result_text(result: &windows::Media::Ocr::OcrResult) -> Result<String, OcrError> {
+    if let Ok(lines) = result.Lines() {
+        let count = lines.Size().unwrap_or(0);
+        if count > 0 {
+            let mut parts = Vec::new();
+            for index in 0..count {
+                let line = lines.GetAt(index).map_err(win_err)?;
+                let line_text = line.Text().map_err(win_err)?.to_string();
+                if !line_text.trim().is_empty() {
+                    parts.push(line_text);
+                }
+            }
+            if let Some(joined) = join_recognized_lines(parts) {
+                return Ok(joined);
+            }
+        }
+    }
+    result.Text().map_err(win_err).map(|text| text.to_string())
 }
 
 #[cfg(windows)]
@@ -410,10 +479,28 @@ mod tests {
     use crate::content::{ContentFormat, ContentStatus};
 
     #[test]
+    fn recognized_ocr_lines_keep_order_when_joined() {
+        let joined = super::join_recognized_lines([
+            "Nachweis Erfüllung Informationspflicht".into(),
+            "SHGZ KGZ GmbH".into(),
+            "Unterschrift fachkundige Person".into(),
+        ])
+        .expect("lines");
+        assert_eq!(
+            joined,
+            "Nachweis Erfüllung Informationspflicht\nSHGZ KGZ GmbH\nUnterschrift fachkundige Person"
+        );
+        assert!(super::join_recognized_lines(["   ".into(), "\t".into()]).is_none());
+    }
+
+    #[test]
     fn short_garbage_is_not_a_usable_text_layer() {
         assert!(!text_layer_is_usable(""));
         assert!(!text_layer_is_usable("   \n"));
         assert!(!text_layer_is_usable("iii"));
+        assert!(!text_layer_is_usable("cid cid cid cid cid cid cid cid"));
+        assert!(!text_layer_is_usable("123456789012345678901234567890"));
+        assert!(!text_layer_is_usable("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
     }
 
     #[test]
@@ -458,6 +545,11 @@ mod tests {
             ContentFormat::Pdf,
             ContentStatus::Searchable,
             Some("x")
+        ));
+        assert!(should_try_ocr(
+            ContentFormat::Pdf,
+            ContentStatus::Searchable,
+            Some("cid cid cid cid cid cid cid cid cid cid")
         ));
     }
 
