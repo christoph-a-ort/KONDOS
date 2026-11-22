@@ -6,13 +6,29 @@ import { inspectDocumentText } from "./documentTextApi";
 import { hydrateLearnedSenderStore, type LearnedSenderStore } from "./learnedSenders";
 import { loadLearnedSendersJson, saveLearnedSendersJson } from "./learnedSendersApi";
 import {
+  calendarInputValue,
+  commitCalendarDateInput,
+  commitNameSuggestDateInput,
+  formatGermanDocumentDate,
+} from "./nameSuggestForm";
+import {
   FOLDER_SUGGEST_ALREADY_HERE,
+  FOLDER_SUGGEST_DATE_HINT,
+  FOLDER_SUGGEST_NEW,
+  FOLDER_SUGGEST_NO_CREATE,
   FOLDER_SUGGEST_NO_MOVE,
-  FOLDER_SUGGEST_UNCLEAR,
+  FOLDER_SUGGEST_YEAR_UNKNOWN,
+  folderSuggestShowsDateField,
   planFolderSuggestions,
   type FolderSuggestOutcome,
+  type FolderSuggestion,
 } from "./treeWorkbenchFolderSuggest";
-import type { DocumentTextView } from "./treeWorkbenchNameSuggest";
+import {
+  isOcrTextSource,
+  preferredAskIso,
+  uniqueDocumentDateChoices,
+  type DocumentTextView,
+} from "./treeWorkbenchNameSuggest";
 import { isTauriRuntime } from "./workbenchPrefsApi";
 
 interface FolderSuggestDialogProps {
@@ -33,9 +49,15 @@ export function FolderSuggestDialog({
   onClose,
 }: FolderSuggestDialogProps) {
   const titleId = useId();
+  const dateId = useId();
   const [loading, setLoading] = useState(false);
   const [ocrStatus, setOcrStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<DocumentTextView | null>(null);
+  const [learned, setLearned] = useState<LearnedSenderStore | null>(null);
+  const [confirmedIso, setConfirmedIso] = useState<string | null>(null);
+  const [dateDraft, setDateDraft] = useState("");
+  const [dateError, setDateError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<FolderSuggestOutcome | null>(null);
 
   useEffect(() => {
@@ -43,6 +65,11 @@ export function FolderSuggestDialog({
       setLoading(false);
       setOcrStatus(null);
       setError(null);
+      setView(null);
+      setLearned(null);
+      setConfirmedIso(null);
+      setDateDraft("");
+      setDateError(null);
       setOutcome(null);
       return;
     }
@@ -51,6 +78,11 @@ export function FolderSuggestDialog({
     setLoading(true);
     setOcrStatus(null);
     setError(null);
+    setView(null);
+    setLearned(null);
+    setConfirmedIso(null);
+    setDateDraft("");
+    setDateError(null);
     setOutcome(null);
     void subscribeOcrProgress((progress) => {
       if (cancelled || progress.scanId !== scanId) {
@@ -72,19 +104,23 @@ export function FolderSuggestDialog({
       ? { load: () => loadLearnedSendersJson(), save: (json: string) => saveLearnedSendersJson(json) }
       : null;
     void Promise.all([inspectDocumentText(scanId, node.id), hydrateLearnedSenderStore(learnedJsonStore)])
-      .then(([view, learned]: [DocumentTextView, LearnedSenderStore]) => {
+      .then(([nextView, nextLearned]: [DocumentTextView, LearnedSenderStore]) => {
         if (cancelled) {
           return;
         }
-        setOutcome(
-          planFolderSuggestions({
-            scanRoot,
-            root,
-            source: node,
-            view,
-            learnedStore: learned,
-          }),
-        );
+        setView(nextView);
+        setLearned(nextLearned);
+        const planned = planFolderSuggestions({
+          scanRoot,
+          root,
+          source: node,
+          view: nextView,
+          learnedStore: nextLearned,
+          confirmedIso: null,
+        });
+        setOutcome(planned);
+        const offered = planned.cues.dateResolution === null ? "" : preferredAskIso(planned.cues.dateResolution);
+        setDateDraft(offered.length > 0 ? formatGermanDocumentDate(offered) : "");
       })
       .catch((cause) => {
         if (!cancelled) {
@@ -106,6 +142,36 @@ export function FolderSuggestDialog({
   if (!open || node === null || !isFile(node)) {
     return null;
   }
+  const source = node;
+
+  function applyConfirmedIso(iso: string | null) {
+    setConfirmedIso(iso);
+    if (view === null || learned === null) {
+      return;
+    }
+    setOutcome(
+      planFolderSuggestions({
+        scanRoot,
+        root,
+        source,
+        view,
+        learnedStore: learned,
+        confirmedIso: iso,
+      }),
+    );
+  }
+
+  function applyDateCommit(commit: ReturnType<typeof commitNameSuggestDateInput>) {
+    setDateDraft(commit.draft);
+    setDateError(commit.error);
+    if (commit.action === "keep") {
+      return;
+    }
+    applyConfirmedIso(commit.action === "set" ? commit.iso : null);
+  }
+
+  const showDateField = outcome !== null && folderSuggestShowsDateField(outcome);
+  const choices = outcome?.cues.dateResolution == null ? [] : uniqueDocumentDateChoices(outcome.cues.dateResolution.hits);
 
   return (
     <div className="report-dialog-backdrop folder-suggest-backdrop" onMouseDown={onClose}>
@@ -131,8 +197,54 @@ export function FolderSuggestDialog({
           </p>
         ) : null}
         {error !== null ? <p className="report-dialog-error">{error}</p> : null}
+        {!loading && error === null && outcome !== null ? <FolderSuggestCues outcome={outcome} view={view} /> : null}
+        {showDateField ? (
+          <div className="report-dialog-field">
+            <p className="muted">{FOLDER_SUGGEST_DATE_HINT}</p>
+            <label htmlFor={dateId}>Dokumentdatum</label>
+            <div className="name-suggest-date-row">
+              <input
+                id={dateId}
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                placeholder="TT.MM.JJJJ"
+                value={dateDraft}
+                onChange={(event) => applyDateCommit(commitNameSuggestDateInput(confirmedIso, event.target.value))}
+                spellCheck={false}
+              />
+              <input
+                className="name-suggest-date-picker"
+                type="date"
+                aria-label="Datum im Kalender wählen"
+                value={calendarInputValue(confirmedIso)}
+                onChange={(event) => applyDateCommit(commitCalendarDateInput(confirmedIso, event.target.value))}
+              />
+            </div>
+            {dateError !== null ? <p className="report-dialog-error">{dateError}</p> : null}
+            {choices.length > 0 ? (
+              <div className="name-suggest-choices">
+                {choices.map((choice) => (
+                  <button
+                    key={`${choice.iso}-${choice.startIndex}`}
+                    type="button"
+                    title={choice.snippet}
+                    onClick={() => {
+                      setDateDraft(formatGermanDocumentDate(choice.iso));
+                      setDateError(null);
+                      applyConfirmedIso(choice.iso);
+                    }}
+                  >
+                    {choice.iso}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         {!loading && error === null && outcome !== null ? <FolderSuggestBody outcome={outcome} /> : null}
         <p className="report-dialog-hint">{FOLDER_SUGGEST_NO_MOVE}</p>
+        {outcome?.status === "newFolder" ? <p className="report-dialog-hint">{FOLDER_SUGGEST_NO_CREATE}</p> : null}
         <div className="report-dialog-actions">
           <button type="button" onClick={onClose}>
             Schließen
@@ -143,7 +255,22 @@ export function FolderSuggestDialog({
   );
 }
 
-function FolderSuggestCues({ outcome }: { outcome: FolderSuggestOutcome }) {
+function FolderSuggestCues({
+  outcome,
+  view,
+}: {
+  outcome: FolderSuggestOutcome;
+  view: DocumentTextView | null;
+}) {
+  const resolution = outcome.cues.dateResolution;
+  const sourceLabel =
+    view === null
+      ? null
+      : view.format !== null
+        ? `${view.format.toUpperCase()} (${isOcrTextSource(view) ? "Texterkennung" : view.source})`
+        : isOcrTextSource(view)
+          ? "Texterkennung"
+          : view.source;
   return (
     <>
       {outcome.cues.dokumenttyp !== null ? <p className="muted">Dokumentart: {outcome.cues.dokumenttyp}</p> : null}
@@ -153,12 +280,23 @@ function FolderSuggestCues({ outcome }: { outcome: FolderSuggestOutcome }) {
           {outcome.cues.learnedAbsender ? " (gelernte Zuordnung)" : ""}
         </p>
       ) : null}
-      {outcome.cues.documentYear !== null ? <p className="muted">Dokumentjahr: {outcome.cues.documentYear}</p> : null}
+      {outcome.cues.documentYear !== null ? (
+        <p className="muted">
+          Dokumentjahr: {outcome.cues.documentYear}
+          {outcome.cues.documentDateStatus === "confirmed" ? " (bestätigt)" : ""}
+          {outcome.cues.documentDateStatus === "confident" ? " (sicher erkannt)" : ""}
+        </p>
+      ) : null}
+      {sourceLabel !== null ? <p className="muted">Quelle: {sourceLabel}</p> : null}
+      {resolution !== null && resolution.status === "ask" ? <p className="muted">{resolution.reason}</p> : null}
+      {resolution !== null && resolution.status === "confident" ? (
+        <p className="muted">Dokumentdatum {resolution.iso} aus Fundstelle: {resolution.evidence.snippet}</p>
+      ) : null}
     </>
   );
 }
 
-function FolderSuggestItem({ item }: { item: FolderSuggestOutcome["suggestions"][number] }) {
+function FolderSuggestItem({ item }: { item: FolderSuggestion }) {
   return (
     <li className="folder-suggest-item">
       <p className="folder-suggest-path" title={item.path}>
@@ -178,7 +316,6 @@ function FolderSuggestBody({ outcome }: { outcome: FolderSuggestOutcome }) {
   if (outcome.status === "alreadyHere") {
     return (
       <>
-        <FolderSuggestCues outcome={outcome} />
         <p className="folder-suggest-summary">{FOLDER_SUGGEST_ALREADY_HERE}</p>
         <ul className="folder-suggest-list">
           {outcome.suggestions.map((item) => (
@@ -188,23 +325,38 @@ function FolderSuggestBody({ outcome }: { outcome: FolderSuggestOutcome }) {
       </>
     );
   }
-  if (outcome.status !== "suggestions") {
+  if (outcome.status === "yearUnknown") {
+    return <p className="folder-suggest-summary">{FOLDER_SUGGEST_YEAR_UNKNOWN}</p>;
+  }
+  if (outcome.status === "newFolder") {
+    const proposal = outcome.newFolder;
     return (
       <>
-        <FolderSuggestCues outcome={outcome} />
-        <p className="report-dialog-error">{outcome.status === "unclear" ? FOLDER_SUGGEST_UNCLEAR : outcome.reason}</p>
+        <h3 className="folder-suggest-summary">{FOLDER_SUGGEST_NEW}</h3>
+        <p className="folder-suggest-new-note">Der Ordner existiert noch nicht.</p>
+        <div className="folder-suggest-item folder-suggest-new">
+          <p className="folder-suggest-meta">Elternordner: {proposal.parentPath}</p>
+          <p className="folder-suggest-meta">Neuer Ordnername: {proposal.folderName}</p>
+          <p className="folder-suggest-path" title={proposal.path}>
+            Zielpfad: {proposal.path}
+          </p>
+          <ul className="folder-suggest-reasons">
+            {proposal.reasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        </div>
       </>
     );
   }
+  if (outcome.status !== "suggestions") {
+    return <p className="report-dialog-error">{outcome.reason}</p>;
+  }
   return (
-    <>
-      <FolderSuggestCues outcome={outcome} />
-      <ul className="folder-suggest-list">
-        {outcome.suggestions.map((item) => (
-          <FolderSuggestItem key={item.path} item={item} />
-        ))}
-      </ul>
-    </>
+    <ul className="folder-suggest-list">
+      {outcome.suggestions.map((item) => (
+        <FolderSuggestItem key={item.path} item={item} />
+      ))}
+    </ul>
   );
 }
-

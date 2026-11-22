@@ -5,17 +5,32 @@ import {
   collectFolderCandidates,
   FOLDER_SUGGEST_ALREADY_HERE,
   FOLDER_SUGGEST_MAX,
+  FOLDER_SUGGEST_NEW,
+  FOLDER_SUGGEST_NEW_UNCLEAR,
   FOLDER_SUGGEST_UNCLEAR,
+  FOLDER_SUGGEST_YEAR_UNKNOWN,
   folderIsInsideScanRoot,
   folderSuggestCues,
+  folderSuggestShowsDateField,
+  isAcceptableNewFolderName,
   planFolderSuggestions,
+  stripFolderStatusSuffix,
+  type FolderSuggestOutcome,
 } from "./treeWorkbenchFolderSuggest";
-import type { DocumentTextView } from "./treeWorkbenchNameSuggest";
+import { preferredAskIso, type DocumentTextView } from "./treeWorkbenchNameSuggest";
 
 function assert(condition: boolean, label: string): void {
   if (!condition) {
     throw new Error(label);
   }
+}
+
+function asNewFolder(outcome: FolderSuggestOutcome, label: string): Extract<FolderSuggestOutcome, { status: "newFolder" }> {
+  assert(outcome.status === "newFolder", label);
+  if (outcome.status !== "newFolder") {
+    throw new Error(label);
+  }
+  return outcome;
 }
 
 function file(path: string, name: string): FileNode {
@@ -223,6 +238,9 @@ export function runTreeWorkbenchFolderSuggestCheck(): void {
   assert(JSON.stringify(root) === snapshot, "folder suggestion does not change the scanned tree");
 
   runHierarchyFolderSuggestCheck();
+  runNewFolderSuggestCheck();
+  runYearPatternParentFixCheck();
+  runFolderDateConfirmCheck();
 }
 
 function hammInvoice(withDate: boolean, name = "2022-07-14_Verbrauchsabrechnung.pdf"): DocumentTextView {
@@ -485,6 +503,444 @@ function runSubtreeFolderSuggestCheck(): void {
   assert(rival.suggestions.every((item) => !item.path.includes("Vattenfall")), "H: Stadtwerke Hamm is not assigned to Vattenfall");
 }
 
+function hammInvoiceForYear(year: string, name = "scan.pdf"): DocumentTextView {
+  return view(`Stadtwerke Hamm\nRechnungsdatum: 14.07.${year}\nStromrechnung\nVerbrauchsabrechnung`, name);
+}
+
+function addYearFolder(parent: DirectoryNode, year: string): void {
+  parent.children.push(
+    dir(`${parent.path}/${year}`, year, [
+      file(`${parent.path}/${year}/${year}_Platzhalter.pdf`, `${year}_Platzhalter.pdf`),
+    ]),
+  );
+}
+
+function typePatternTree(): DirectoryNode {
+  return dir("C:/Dotty-Test/Themenablage", "Themenablage", [
+    dir("C:/Dotty-Test/Themenablage/Inbox", "Inbox", [
+      file("C:/Dotty-Test/Themenablage/Inbox/zaehler.pdf", "zaehler.pdf"),
+    ]),
+    dir("C:/Dotty-Test/Themenablage/Unterlagen", "Unterlagen", [
+      dir("C:/Dotty-Test/Themenablage/Unterlagen/Rechnungen", "Rechnungen", [
+        file("C:/Dotty-Test/Themenablage/Unterlagen/Rechnungen/alt.pdf", "alt.pdf"),
+      ]),
+      dir("C:/Dotty-Test/Themenablage/Unterlagen/Vertrag", "Vertrag", [
+        file("C:/Dotty-Test/Themenablage/Unterlagen/Vertrag/vertrag.pdf", "vertrag.pdf"),
+      ]),
+    ]),
+  ]);
+}
+
+function ambiguousYearTree(): DirectoryNode {
+  const years = (parent: string) => [
+    dir(`${parent}/2023`, "2023", [file(`${parent}/2023/2023.pdf`, "2023.pdf")]),
+    dir(`${parent}/2024`, "2024", [file(`${parent}/2024/2024.pdf`, "2024.pdf")]),
+  ];
+  return dir("C:/Dotty-Test/Ambivalent", "Ambivalent", [
+    dir("C:/Dotty-Test/Ambivalent/Inbox", "Inbox", [
+      file("C:/Dotty-Test/Ambivalent/Inbox/scan.pdf", "scan.pdf"),
+    ]),
+    dir("C:/Dotty-Test/Ambivalent/Strom+Gas", "Strom+Gas", [
+      dir("C:/Dotty-Test/Ambivalent/Strom+Gas/SW Hamm_Strom", "SW Hamm_Strom", years("C:/Dotty-Test/Ambivalent/Strom+Gas/SW Hamm_Strom")),
+      dir("C:/Dotty-Test/Ambivalent/Strom+Gas/SW Hamm_Strom-Alt", "SW Hamm_Strom-Alt", years("C:/Dotty-Test/Ambivalent/Strom+Gas/SW Hamm_Strom-Alt")),
+    ]),
+  ]);
+}
+
+function runNewFolderSuggestCheck(): void {
+  const root = hierarchyTree();
+  const scanRoot = root.path;
+  const inboxInvoice = source(root, "C:/Dotty-Test/Ablage/Inbox/2022-07-14_Verbrauchsabrechnung.pdf");
+  const placedInvoice = source(
+    root,
+    "C:/Dotty-Test/Ablage/Strom+Gas/SW Hamm_Strom/2022/2022-07-14_Verbrauchsabrechnung.pdf",
+  );
+  const hammPath = "C:/Dotty-Test/Ablage/Strom+Gas/SW Hamm_Strom";
+  const hamm2026 = `${hammPath}/2026`;
+  const year2026 = hammInvoiceForYear("2026");
+
+  const missingYear = asNewFolder(
+    planFolderSuggestions({ scanRoot, root, source: inboxInvoice, view: year2026 }),
+    "A: a missing year folder is proposed",
+  );
+  assert(missingYear.cues.documentYear === "2026", "A: the confirmed document year is 2026");
+  assert(missingYear.newFolder.folderName === "2026", "A: the proposed name is 2026");
+  assert(missingYear.newFolder.parentPath === hammPath, "A: the parent is the existing vendor folder");
+  assert(missingYear.newFolder.path === hamm2026, "A: the future path is SW Hamm_Strom\\2026");
+  assert(missingYear.newFolder.pattern === "year", "A: the pattern is a year folder");
+  assert(
+    missingYear.newFolder.reasons.some((reason) => reason.includes("nach Jahren"))
+      && missingYear.newFolder.reasons.some((reason) => reason.includes("2026 fehlt")),
+    "A: the reason names the missing year folder",
+  );
+  assert(
+    !collectFolderCandidates(root).some((candidate) => candidate.path === hamm2026),
+    "A: 2026 does not exist in the scanned tree",
+  );
+
+  const with2026 = hierarchyTree();
+  const hammDir = findDirectory(with2026, hammPath);
+  assert(hammDir !== null, "B: vendor folder exists");
+  addYearFolder(hammDir!, "2026");
+  const existingYear = planFolderSuggestions({
+    scanRoot,
+    root: with2026,
+    source: source(with2026, inboxInvoice.path),
+    view: year2026,
+  });
+  assert(existingYear.status === "suggestions", "B: an existing 2026 folder is used");
+  assert(existingYear.suggestions[0]?.path === hamm2026, "B: the existing year folder ranks first");
+  assert(existingYear.status !== "newFolder", "B: no new folder is proposed when 2026 exists");
+
+  const unknownYear = planFolderSuggestions({ scanRoot, root, source: inboxInvoice, view: hammInvoice(false) });
+  assert(unknownYear.cues.documentYear === null, "C: a filename date is not a confirmed document year");
+  assert(unknownYear.status !== "newFolder", "C: no year folder is invented without a confirmed year");
+  assert(
+    unknownYear.status === "suggestions"
+      && unknownYear.suggestions.every((item) => !item.path.endsWith("/2026")),
+    "C: 2026 is not suggested as an existing folder either",
+  );
+
+  const eprimoView = view(
+    "Eprimo GmbH\nStromrechnung\nRechnungsdatum: 12.03.2024\nVerbrauchsabrechnung",
+    "eprimo.pdf",
+  );
+  const newVendor = asNewFolder(
+    planFolderSuggestions({ scanRoot, root, source: inboxInvoice, view: eprimoView }),
+    "D: a new vendor folder is proposed inside the existing structure",
+  );
+  assert(newVendor.newFolder.pattern === "vendor", "D: the pattern is a vendor folder");
+  assert(newVendor.newFolder.parentPath === "C:/Dotty-Test/Ablage/Strom+Gas", "D: the parent is the theme folder Strom+Gas");
+  assert(newVendor.newFolder.folderName === "Eprimo_Strom", "D: the name follows the sibling _Strom convention");
+  assert(!newVendor.newFolder.folderName.toLowerCase().includes("beendet"), "D: status suffixes such as - beendet are not copied");
+  assert(
+    stripFolderStatusSuffix("Vattenfall_Strom - beendet") === "Vattenfall_Strom",
+    "D: existing closed-vendor labels are stripped only for pattern learning",
+  );
+  assert(newVendor.newFolder.path === "C:/Dotty-Test/Ablage/Strom+Gas/Eprimo_Strom", "D: the future path stays under Strom+Gas");
+
+  const types = typePatternTree();
+  const meter = asNewFolder(
+    planFolderSuggestions({
+      scanRoot: types.path,
+      root: types,
+      source: source(types, "C:/Dotty-Test/Themenablage/Inbox/zaehler.pdf"),
+      view: view("Zählerstandsmeldung\nZählerstand am 14.03.2025", "zaehler.pdf"),
+    }),
+    "E: a new document-type folder is proposed when the pattern is clear",
+  );
+  assert(meter.newFolder.pattern === "documentType", "E: the pattern is a document-type folder");
+  assert(meter.newFolder.parentPath === "C:/Dotty-Test/Themenablage/Unterlagen", "E: the parent is the existing type-group folder");
+  assert(meter.newFolder.folderName === "Zählerstandsmeldung", "E: the name comes from the recognized document type");
+  assert(meter.newFolder.path === "C:/Dotty-Test/Themenablage/Unterlagen/Zählerstandsmeldung", "E: one missing folder, not a new tree");
+
+  const ambiguousRoot = ambiguousYearTree();
+  const ambiguous = planFolderSuggestions({
+    scanRoot: ambiguousRoot.path,
+    root: ambiguousRoot,
+    source: source(ambiguousRoot, "C:/Dotty-Test/Ambivalent/Inbox/scan.pdf"),
+    view: hammInvoiceForYear("2026"),
+  });
+  assert(ambiguous.status === "unclear", "F: two equally matching year structures stay unclear");
+  assert(ambiguous.reason === FOLDER_SUGGEST_NEW_UNCLEAR, "F: no unique new folder is invented");
+
+  const already = planFolderSuggestions({ scanRoot, root, source: placedInvoice, view: hammInvoice(true) });
+  assert(already.status === "alreadyHere", "G: a correctly filed file is not a new-folder case");
+  assert(already.reason === FOLDER_SUGGEST_ALREADY_HERE, "G: already-here remains the outcome");
+
+  const hamm = findDirectory(root, hammPath);
+  assert(hamm !== null, "H: vendor subtree exists");
+  const besideYears = source(root, "C:/Dotty-Test/Ablage/Strom+Gas/SW Hamm_Strom/offen.pdf");
+  const smallRoot = asNewFolder(
+    planFolderSuggestions({
+      scanRoot: hamm!.path,
+      root: hamm!,
+      source: besideYears,
+      view: year2026,
+    }),
+    "H: a small scan root can still propose the missing year",
+  );
+  assert(smallRoot.newFolder.parentPath === hamm!.path, "H: the parent stays inside the scan root");
+  assert(folderIsInsideScanRoot(hamm!.path, smallRoot.newFolder.path), "H: the future path stays inside the scan root");
+  assert(!smallRoot.newFolder.parentPath.includes("Ablage/Strom+Gas") || smallRoot.newFolder.parentPath.endsWith("SW Hamm_Strom"), "H: no parent outside the scanned vendor root");
+
+  assert(!isAcceptableNewFolderName("CON"), "I: reserved device name CON is rejected");
+  assert(!isAcceptableNewFolderName("NUL"), "I: reserved device name NUL is rejected");
+  assert(!isAcceptableNewFolderName("a|b"), "I: forbidden characters are rejected");
+  assert(!isAcceptableNewFolderName("ordner."), "I: trailing dots are rejected");
+  assert(isAcceptableNewFolderName("2026"), "I: a year name remains allowed");
+  assert(isAcceptableNewFolderName("Eprimo_Strom"), "I: a conventional vendor name remains allowed");
+  for (const outcome of [missingYear, newVendor, meter, smallRoot]) {
+    assert(isAcceptableNewFolderName(outcome.newFolder.folderName), "I: proposed names pass the Windows rules");
+  }
+
+  const before = JSON.stringify(root);
+  planFolderSuggestions({ scanRoot, root, source: inboxInvoice, view: year2026 });
+  planFolderSuggestions({ scanRoot, root, source: inboxInvoice, view: eprimoView });
+  assert(JSON.stringify(root) === before, "J: proposing a folder does not change the file system tree");
+  assert(FOLDER_SUGGEST_NEW === "Neuen Ordner vorschlagen", "dialog copy for a new folder is stable");
+}
+
 function isYearLeaf(path: string): boolean {
   return /\/(19|20)\d{2}$/.test(path.replace(/\\/g, "/"));
+}
+
+function praxisMissingYearTree(): DirectoryNode {
+  const hamm = "C:/Dotty-Test/Strom+Gas/SW Hamm_Strom";
+  const vattenfall = "C:/Dotty-Test/Strom+Gas/Vattenfall_Strom - beendet";
+  return dir("C:/Dotty-Test/Strom+Gas", "Strom+Gas", [
+    dir(hamm, "SW Hamm_Strom", [
+      dir(`${hamm}/2020`, "2020", [file(`${hamm}/2020/2020_SWHamm_Stromrechnung.pdf`, "2020_SWHamm_Stromrechnung.pdf")]),
+      dir(`${hamm}/2021`, "2021", [file(`${hamm}/2021/2021_SWHamm_Stromrechnung.pdf`, "2021_SWHamm_Stromrechnung.pdf")]),
+      file(`${hamm}/2022-07-14_Verbrauchsabrechnung.pdf`, "2022-07-14_Verbrauchsabrechnung.pdf"),
+    ]),
+    dir(vattenfall, "Vattenfall_Strom - beendet", [
+      dir(`${vattenfall}/2020`, "2020", [file(`${vattenfall}/2020/2020_Vattenfall_Stromrechnung.pdf`, "2020_Vattenfall_Stromrechnung.pdf")]),
+      dir(`${vattenfall}/2021`, "2021", [file(`${vattenfall}/2021/2021_Vattenfall_Stromrechnung.pdf`, "2021_Vattenfall_Stromrechnung.pdf")]),
+    ]),
+  ]);
+}
+
+function vendorWithoutYearsTree(): DirectoryNode {
+  const hamm = "C:/Dotty-Test/OhneJahre/SW Hamm_Strom";
+  return dir("C:/Dotty-Test/OhneJahre", "OhneJahre", [
+    dir(hamm, "SW Hamm_Strom", [
+      file(`${hamm}/2022-07-14_Verbrauchsabrechnung.pdf`, "2022-07-14_Verbrauchsabrechnung.pdf"),
+    ]),
+  ]);
+}
+
+function runYearPatternParentFixCheck(): void {
+  const root = praxisMissingYearTree();
+  const hammPath = "C:/Dotty-Test/Strom+Gas/SW Hamm_Strom";
+  const hamm = findDirectory(root, hammPath);
+  assert(hamm !== null, "praxis vendor folder exists");
+  const loose = source(root, `${hammPath}/2022-07-14_Verbrauchsabrechnung.pdf`);
+  const year2022 = hammInvoice(true, loose.name);
+  const unknownYear = hammInvoice(false, loose.name);
+  const hammCandidates = collectFolderCandidates(hamm!);
+  const hammRoot = hammCandidates.find((candidate) => candidate.isScanRoot);
+  assert(hammRoot !== undefined, "A: the vendor scan root is collected");
+  assert(
+    hammRoot!.childFolderNames.includes("2020") && hammRoot!.childFolderNames.includes("2021"),
+    "A: the year pattern 2020/2021 is visible on the parent",
+  );
+  assert(!hammRoot!.childFolderNames.includes("2022"), "A: 2022 is not yet a child folder");
+
+  const missing = asNewFolder(
+    planFolderSuggestions({
+      scanRoot: hamm!.path,
+      root: hamm!,
+      source: loose,
+      view: year2022,
+    }),
+    "A: a confirmed 2022 date proposes the missing year folder",
+  );
+  assert(missing.cues.documentYear === "2022", "A: the document year is the confirmed document date");
+  assert(missing.cues.documentDateStatus === "confident", "A: the date status is confident, not a filename guess");
+  assert(missing.newFolder.folderName === "2022", "A: the proposed name is 2022");
+  assert(missing.newFolder.parentPath === hammPath, "A: the parent is SW Hamm_Strom");
+  assert(missing.newFolder.path === `${hammPath}/2022`, "A: the future path is SW Hamm_Strom\\2022");
+
+  const fromTheme = asNewFolder(
+    planFolderSuggestions({ scanRoot: root.path, root, source: loose, view: year2022 }),
+    "A: the same missing year is proposed from the theme scan root",
+  );
+  assert(fromTheme.newFolder.path === `${hammPath}/2022`, "A: theme scan root still targets SW Hamm_Strom\\2022");
+
+  const unclearYear = planFolderSuggestions({
+    scanRoot: hamm!.path,
+    root: hamm!,
+    source: loose,
+    view: unknownYear,
+  });
+  assert(unclearYear.cues.documentYear === null, "B: a filename date is not a confirmed document year");
+  assert(unclearYear.cues.documentDateStatus === "ask", "B: the date remains unconfirmed");
+  assert(unclearYear.status === "yearUnknown", "B: the year pattern is reported instead of alreadyHere");
+  assert(unclearYear.reason === FOLDER_SUGGEST_YEAR_UNKNOWN, "B: the year-unknown sentence is used");
+  assert(unclearYear.status !== "alreadyHere", "B: the vendor parent is not called the correct folder");
+  assert(unclearYear.status !== "newFolder", "B: 2022 is not invented without a confirmed year");
+
+  const with2022 = praxisMissingYearTree();
+  const hammWith2022 = findDirectory(with2022, hammPath);
+  assert(hammWith2022 !== null, "C: vendor folder exists");
+  addYearFolder(hammWith2022!, "2022");
+  const existing = planFolderSuggestions({
+    scanRoot: hammWith2022!.path,
+    root: hammWith2022!,
+    source: source(with2022, loose.path),
+    view: year2022,
+  });
+  assert(existing.status === "suggestions", "C: an existing 2022 folder is recommended");
+  assert(existing.suggestions[0]?.path === `${hammPath}/2022`, "C: the existing year folder ranks first");
+  assert(existing.status !== "alreadyHere", "C: a file still sitting in the vendor parent is not already here");
+  assert(existing.status !== "newFolder", "C: no new folder is proposed when 2022 exists");
+
+  const placedTree = praxisMissingYearTree();
+  const hammPlaced = findDirectory(placedTree, hammPath);
+  assert(hammPlaced !== null, "D: vendor folder exists");
+  addYearFolder(hammPlaced!, "2022");
+  const inYear = source(placedTree, `${hammPath}/2022/2022_Platzhalter.pdf`);
+  const already = planFolderSuggestions({
+    scanRoot: hammPlaced!.path,
+    root: hammPlaced!,
+    source: inYear,
+    view: hammInvoice(true, inYear.name),
+  });
+  assert(already.status === "alreadyHere", "D: a file already in 2022 is correctly filed");
+  assert(already.suggestions[0]?.path === `${hammPath}/2022`, "D: the current year folder remains the match");
+
+  const noYears = vendorWithoutYearsTree();
+  const vendorRoot = findDirectory(noYears, "C:/Dotty-Test/OhneJahre/SW Hamm_Strom");
+  assert(vendorRoot !== null, "E: vendor folder without years exists");
+  const vendorFile = source(noYears, "C:/Dotty-Test/OhneJahre/SW Hamm_Strom/2022-07-14_Verbrauchsabrechnung.pdf");
+  const noYearPattern = planFolderSuggestions({
+    scanRoot: vendorRoot!.path,
+    root: vendorRoot!,
+    source: vendorFile,
+    view: year2022,
+  });
+  assert(noYearPattern.status === "alreadyHere", "E: a vendor folder without year children stays a valid final folder");
+  assert(noYearPattern.suggestions[0]?.path === vendorRoot!.path, "E: the current vendor folder remains the match");
+  assert(noYearPattern.status !== "newFolder", "E: no year folder is invented without a year pattern");
+
+  const rival = asNewFolder(
+    planFolderSuggestions({ scanRoot: root.path, root, source: loose, view: year2022 }),
+    "F: Stadtwerke Hamm still gets a Hamm target",
+  );
+  assert(!rival.newFolder.path.includes("Vattenfall"), "F: the missing year is not created under a rival vendor");
+  assert(rival.newFolder.parentPath === hammPath, "F: the parent stays SW Hamm_Strom");
+}
+
+function ocrView(text: string, name: string): DocumentTextView {
+  return { ...view(text, name), source: "ocr", ocrAttempted: true };
+}
+
+function runFolderDateConfirmCheck(): void {
+  const root = praxisMissingYearTree();
+  const hammPath = "C:/Dotty-Test/Strom+Gas/SW Hamm_Strom";
+  const hamm = findDirectory(root, hammPath);
+  assert(hamm !== null, "date-confirm vendor folder exists");
+  const loose = source(root, `${hammPath}/2022-07-14_Verbrauchsabrechnung.pdf`);
+  const extractDated = hammInvoice(true, loose.name);
+  const ocrDated = ocrView(
+    "Stadtwerke Hamm\nRechnungsdatum: 14.07.2022\nStromrechnung\nVerbrauchsabrechnung",
+    loose.name,
+  );
+  const ocrEmpty = ocrView("Stadtwerke Hamm\nStromrechnung\nVerbrauchsabrechnung", loose.name);
+
+  const secure = asNewFolder(
+    planFolderSuggestions({ scanRoot: hamm!.path, root: hamm!, source: loose, view: extractDated }),
+    "A: a confident PDF text-layer date proposes 2022",
+  );
+  assert(secure.cues.documentDateStatus === "confident", "A: extract dates stay confident");
+  assert(secure.cues.documentYear === "2022", "A: the year 2022 is used without a confirmation");
+  assert(secure.newFolder.path === `${hammPath}/2022`, "A: the missing year folder is proposed");
+  assert(!folderSuggestShowsDateField(secure), "A: a confident date does not open the confirmation field");
+
+  const unsure = planFolderSuggestions({
+    scanRoot: hamm!.path,
+    root: hamm!,
+    source: loose,
+    view: ocrDated,
+  });
+  assert(unsure.status === "yearUnknown", "B: an OCR date is not used silently");
+  assert(unsure.cues.documentDateStatus === "ask", "B: OCR dates stay unconfirmed");
+  assert(unsure.cues.documentYear === null, "B: the folder engine does not take the OCR year on its own");
+  assert(unsure.cues.dateResolution !== null && unsure.cues.dateResolution.status === "ask", "B: the ask-resolution is passed to the dialog");
+  assert(preferredAskIso(unsure.cues.dateResolution!) === "2022-07-14", "B: the unique OCR invoice date is offered");
+  assert(folderSuggestShowsDateField(unsure), "B: the date field is shown for confirmation");
+  assert(unsure.cues.dateResolution!.hits.length > 0, "B: date candidates are not dropped");
+
+  const confirmed = asNewFolder(
+    planFolderSuggestions({
+      scanRoot: hamm!.path,
+      root: hamm!,
+      source: loose,
+      view: ocrDated,
+      confirmedIso: "2022-07-14",
+    }),
+    "C: confirming the OCR date re-runs folder placement",
+  );
+  assert(confirmed.cues.documentDateStatus === "confirmed", "C: the confirmation is session-only and marked as confirmed");
+  assert(confirmed.cues.documentYear === "2022", "C: the confirmed year is 2022");
+  assert(confirmed.newFolder.folderName === "2022", "C: SW Hamm_Strom\\2022 is proposed");
+  assert(confirmed.newFolder.parentPath === hammPath, "C: the parent remains the vendor folder");
+  assert(folderSuggestShowsDateField(confirmed), "C: the date can still be corrected after confirmation");
+
+  const corrected = asNewFolder(
+    planFolderSuggestions({
+      scanRoot: hamm!.path,
+      root: hamm!,
+      source: loose,
+      view: ocrDated,
+      confirmedIso: "15.03.2023",
+    }),
+    "D: a corrected date is used",
+  );
+  assert(corrected.cues.documentYear === "2023", "D: the corrected year is 2023");
+  assert(corrected.newFolder.folderName === "2023", "D: the new folder name follows the corrected year");
+
+  const manual = asNewFolder(
+    planFolderSuggestions({
+      scanRoot: hamm!.path,
+      root: hamm!,
+      source: loose,
+      view: ocrEmpty,
+      confirmedIso: "14.07.2022",
+    }),
+    "E: a typed date can supply a missing document year",
+  );
+  assert(manual.cues.dateResolution !== null && manual.cues.dateResolution.hits.length === 0, "E: no invented candidate is shown");
+  assert(manual.cues.documentYear === "2022", "E: the typed date becomes the year");
+  assert(manual.newFolder.path === `${hammPath}/2022`, "E: the missing 2022 folder is proposed");
+
+  const invalid = planFolderSuggestions({
+    scanRoot: hamm!.path,
+    root: hamm!,
+    source: loose,
+    view: ocrEmpty,
+    confirmedIso: "nicht-datum",
+  });
+  assert(invalid.status === "yearUnknown", "F: an invalid date does not assign a year");
+  assert(invalid.cues.documentYear === null, "F: the year stays unknown");
+  assert(invalid.cues.confirmedIso === null, "F: the invalid value is not stored as a confirmation");
+
+  const with2022 = praxisMissingYearTree();
+  const hammWith2022 = findDirectory(with2022, hammPath);
+  assert(hammWith2022 !== null, "G: vendor folder exists");
+  addYearFolder(hammWith2022!, "2022");
+  const existing = planFolderSuggestions({
+    scanRoot: hammWith2022!.path,
+    root: hammWith2022!,
+    source: source(with2022, loose.path),
+    view: ocrDated,
+    confirmedIso: "2022-07-14",
+  });
+  assert(existing.status === "suggestions", "G: an existing 2022 folder is recommended after confirmation");
+  assert(existing.suggestions[0]?.path === `${hammPath}/2022`, "G: the existing year folder ranks first");
+  assert(existing.status !== "newFolder", "G: no new folder is proposed when 2022 exists");
+
+  const placedTree = praxisMissingYearTree();
+  const hammPlaced = findDirectory(placedTree, hammPath);
+  assert(hammPlaced !== null, "H: vendor folder exists");
+  addYearFolder(hammPlaced!, "2022");
+  const inYear = source(placedTree, `${hammPath}/2022/2022_Platzhalter.pdf`);
+  const already = planFolderSuggestions({
+    scanRoot: hammPlaced!.path,
+    root: hammPlaced!,
+    source: inYear,
+    view: extractDated,
+  });
+  assert(already.status === "alreadyHere", "H: a file already in 2022 is not reorganized");
+  assert(already.suggestions[0]?.path === `${hammPath}/2022`, "H: the current year folder remains the match");
+
+  const filenameOnly = planFolderSuggestions({
+    scanRoot: hamm!.path,
+    root: hamm!,
+    source: loose,
+    view: hammInvoice(false, loose.name),
+  });
+  assert(filenameOnly.cues.documentYear === null, "no silent year from the file name 2022-07-14");
+  assert(filenameOnly.status === "yearUnknown", "filename dates still require confirmation or a typed date");
 }

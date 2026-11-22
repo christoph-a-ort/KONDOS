@@ -1,4 +1,4 @@
-/** P2-L.11a: rule-based target-folder suggestions. No extra KI, no MOVE, no new folders. */
+/** P2-L.11a–11c: rule-based target-folder suggestions. No extra KI, no MOVE, no folder creation. */
 import { isDirectory, isFile, type DirectoryNode, type FsNode } from "../model";
 import {
   applyLearnedSender,
@@ -7,20 +7,28 @@ import {
 } from "./learnedSenders";
 import { enrichLocalAiFields, resolveDocumentType, type LocalAiNameFields } from "./localAi";
 import { stemFromFilename } from "./inventoryFileNameSyntax";
-import { parentDirectoryPath, sameDirectoryPath } from "./treeWorkbenchMove";
+import { joinScanPath, parentDirectoryPath, sameDirectoryPath } from "./treeWorkbenchMove";
 import {
   canSuggestWorkbenchFileName,
   foldDocumentLabel,
+  parseUserDocumentDate,
   resolveDocumentDateFromView,
   sanitizeSuggestedFileNamePart,
   stripLeadingDatePrefix,
+  type DocumentDateResolution,
   type DocumentTextView,
 } from "./treeWorkbenchNameSuggest";
+import { isAllowedWindowsComponent } from "./windowsPathRules";
 
 export const FOLDER_SUGGEST_UNCLEAR = "Kein eindeutiger Zielordner";
 export const FOLDER_SUGGEST_NO_MOVE = "In dieser Stufe wird die Datei nicht verschoben.";
 export const FOLDER_SUGGEST_ALREADY_HERE =
   "Datei liegt bereits im passenden Ordner. Keine Verschiebung erforderlich.";
+export const FOLDER_SUGGEST_NEW = "Neuen Ordner vorschlagen";
+export const FOLDER_SUGGEST_NEW_UNCLEAR = "Kein eindeutiger Vorschlag für einen neuen Ordner.";
+export const FOLDER_SUGGEST_YEAR_UNKNOWN = "Jahresablage erkannt. Dokumentjahr nicht sicher bestimmt.";
+export const FOLDER_SUGGEST_DATE_HINT = "Bitte das Dokumentdatum bestätigen oder korrigieren.";
+export const FOLDER_SUGGEST_NO_CREATE = "In dieser Stufe wird der Ordner nicht angelegt.";
 export const FOLDER_SUGGEST_MAX = 3;
 
 const EMPTY_FIELDS: LocalAiNameFields = {
@@ -123,6 +131,9 @@ export interface FolderSuggestCue {
   absender: string | null;
   betreff: string | null;
   documentYear: string | null;
+  documentDateStatus: "confident" | "confirmed" | "ask" | "none";
+  dateResolution: DocumentDateResolution | null;
+  confirmedIso: string | null;
   learnedAbsender: boolean;
   tokens: string[];
 }
@@ -148,11 +159,35 @@ export interface FolderSuggestion {
   reasons: string[];
 }
 
+export type NewFolderPattern = "year" | "vendor" | "documentType";
+
+export interface NewFolderProposal {
+  parentPath: string;
+  parentName: string;
+  folderName: string;
+  path: string;
+  pattern: NewFolderPattern;
+  reasons: string[];
+  summary: string;
+}
+
 export type FolderSuggestOutcome =
   | { status: "blocked"; reason: string; cues: FolderSuggestCue; suggestions: FolderSuggestion[] }
   | { status: "unclear"; reason: string; cues: FolderSuggestCue; suggestions: FolderSuggestion[] }
   | { status: "alreadyHere"; reason: string; cues: FolderSuggestCue; suggestions: FolderSuggestion[] }
-  | { status: "suggestions"; reason: null; cues: FolderSuggestCue; suggestions: FolderSuggestion[] };
+  | { status: "suggestions"; reason: null; cues: FolderSuggestCue; suggestions: FolderSuggestion[] }
+  | {
+      status: "newFolder";
+      reason: string;
+      cues: FolderSuggestCue;
+      suggestions: FolderSuggestion[];
+      newFolder: NewFolderProposal;
+    }
+  | { status: "yearUnknown"; reason: string; cues: FolderSuggestCue; suggestions: FolderSuggestion[] };
+
+export function isAcceptableNewFolderName(name: string): boolean {
+  return isAllowedWindowsComponent(name);
+}
 
 export function canSuggestWorkbenchFolder(node: FsNode, occupancyIdle: boolean): boolean {
   return canSuggestWorkbenchFileName(node, occupancyIdle);
@@ -175,6 +210,7 @@ export function folderSuggestCues(
   fileName: string,
   view: DocumentTextView | null,
   learnedStore: LearnedSenderStore = emptyLearnedSenderStore(),
+  confirmedIso: string | null = null,
 ): FolderSuggestCue {
   const text = view?.text ?? "";
   const fromText = enrichLocalAiFields(text, EMPTY_FIELDS);
@@ -188,7 +224,7 @@ export function folderSuggestCues(
     placementSenderFromText(text),
   );
   const betreff = firstFilled(extractLabeledBetreff(text), subjectFromFileName(fileName, dokumenttyp, absender));
-  const documentYear = documentYearFromView(view);
+  const dated = documentDateFromView(view, confirmedIso);
   const tokens = uniqueTokens([
     ...placementTokens(dokumenttyp ?? ""),
     ...placementTokens(absender ?? ""),
@@ -199,10 +235,17 @@ export function folderSuggestCues(
     dokumenttyp,
     absender,
     betreff,
-    documentYear,
+    documentYear: dated.year,
+    documentDateStatus: dated.status,
+    dateResolution: dated.resolution,
+    confirmedIso: dated.confirmedIso,
     learnedAbsender: learned.learned,
     tokens,
   };
+}
+
+export function folderSuggestShowsDateField(outcome: FolderSuggestOutcome): boolean {
+  return outcome.status === "yearUnknown" || outcome.cues.confirmedIso !== null;
 }
 
 export function planFolderSuggestions(options: {
@@ -211,8 +254,14 @@ export function planFolderSuggestions(options: {
   source: FsNode;
   view: DocumentTextView | null;
   learnedStore?: LearnedSenderStore;
+  confirmedIso?: string | null;
 }): FolderSuggestOutcome {
-  const cues = folderSuggestCues(options.source.name, options.view, options.learnedStore ?? emptyLearnedSenderStore());
+  const cues = folderSuggestCues(
+    options.source.name,
+    options.view,
+    options.learnedStore ?? emptyLearnedSenderStore(),
+    options.confirmedIso ?? null,
+  );
   if (!isFile(options.source)) {
     return {
       status: "blocked",
@@ -230,35 +279,64 @@ export function planFolderSuggestions(options: {
     };
   }
   const currentFolder = parentDirectoryPath(options.source.path);
-  const ranked = rankFolderSuggestions(
-    collectFolderCandidates(options.root, options.source.path).filter((candidate) =>
-      folderIsInsideScanRoot(options.scanRoot, candidate.path),
-    ),
-    cues,
-    currentFolder,
+  const candidates = collectFolderCandidates(options.root, options.source.path).filter((candidate) =>
+    folderIsInsideScanRoot(options.scanRoot, candidate.path),
   );
-  const suggestions = ranked.slice(0, FOLDER_SUGGEST_MAX).map((item) => ({
+  const ranked = rankFolderSuggestions(candidates, cues, currentFolder);
+  const suitable = ranked.filter((item) => isSuitableExistingTarget(item, candidates, cues));
+  const suggestions = suitable.slice(0, FOLDER_SUGGEST_MAX).map((item) => ({
     ...item,
     summary: suggestionSummary(item),
   }));
-  if (suggestions.length === 0) {
+  const currentYearParent = yearPatternParentAt(candidates, currentFolder);
+  const incompleteYearHome =
+    suggestions[0]?.alreadyHere === true
+    && currentYearParent !== undefined
+    && sameDirectoryPath(suggestions[0].path, currentYearParent.path);
+  if (suggestions.length > 0 && !incompleteYearHome) {
+    const best = suggestions[0]!;
+    if (best.alreadyHere) {
+      return {
+        status: "alreadyHere",
+        reason: FOLDER_SUGGEST_ALREADY_HERE,
+        cues,
+        suggestions: [{ ...best, summary: FOLDER_SUGGEST_ALREADY_HERE }],
+      };
+    }
+    return { status: "suggestions", reason: null, cues, suggestions };
+  }
+  const created = proposeNewFolder(candidates, cues, options.scanRoot);
+  if (created === "ambiguous") {
     return {
       status: "unclear",
-      reason: FOLDER_SUGGEST_UNCLEAR,
+      reason: FOLDER_SUGGEST_NEW_UNCLEAR,
       cues,
       suggestions: [],
     };
   }
-  const best = suggestions[0]!;
-  if (best.alreadyHere) {
+  if (created !== null) {
     return {
-      status: "alreadyHere",
-      reason: FOLDER_SUGGEST_ALREADY_HERE,
+      status: "newFolder",
+      reason: FOLDER_SUGGEST_NEW,
       cues,
-      suggestions: [{ ...best, summary: FOLDER_SUGGEST_ALREADY_HERE }],
+      suggestions: [],
+      newFolder: created,
     };
   }
-  return { status: "suggestions", reason: null, cues, suggestions };
+  if (currentYearParent !== undefined && cues.documentYear === null) {
+    return {
+      status: "yearUnknown",
+      reason: FOLDER_SUGGEST_YEAR_UNKNOWN,
+      cues,
+      suggestions: [],
+    };
+  }
+  return {
+    status: "unclear",
+    reason: FOLDER_SUGGEST_UNCLEAR,
+    cues,
+    suggestions: [],
+  };
 }
 
 function walkFolders(
@@ -339,6 +417,386 @@ function dropAncestorSuggestions(suggestions: FolderSuggestion[]): FolderSuggest
       !suggestions.some(
         (other, otherIndex) => otherIndex !== index && isAncestorPath(candidate.path, other.path),
       ),
+  );
+}
+
+function isYearPatternParent(candidate: FolderCandidate): boolean {
+  return hasYearPattern(candidate.childFolderNames) && !isYearFolderName(candidate.name);
+}
+
+function yearPatternParentAt(candidates: FolderCandidate[], folderPath: string): FolderCandidate | undefined {
+  return candidates.find(
+    (candidate) => sameDirectoryPath(candidate.path, folderPath) && isYearPatternParent(candidate),
+  );
+}
+
+function isSuitableExistingTarget(
+  suggestion: FolderSuggestion,
+  candidates: FolderCandidate[],
+  cues: FolderSuggestCue,
+): boolean {
+  const candidate = candidates.find((item) => sameDirectoryPath(item.path, suggestion.path));
+  if (candidate === undefined) {
+    return false;
+  }
+  if (
+    cues.documentYear !== null
+    && hasYearPattern(candidate.childFolderNames)
+    && !candidate.childFolderNames.includes(cues.documentYear)
+  ) {
+    return false;
+  }
+  const typeTokens = expandedTypeTokens(cues.dokumenttyp ?? "");
+  if (cues.absender !== null && !pathHasSender(candidate, cues) && vendorIdentityOnPath(candidate, typeTokens)) {
+    return false;
+  }
+  if (cues.absender !== null && !pathHasSender(candidate, cues) && hasVendorFolderPattern(candidate, typeTokens)) {
+    return false;
+  }
+  return true;
+}
+
+type NewFolderPlan = NewFolderProposal | "ambiguous" | null;
+
+function proposeNewFolder(
+  candidates: FolderCandidate[],
+  cues: FolderSuggestCue,
+  scanRoot: string,
+): NewFolderPlan {
+  const year = proposeYearFolder(candidates, cues, scanRoot);
+  if (year === "ambiguous") {
+    return "ambiguous";
+  }
+  if (year !== null) {
+    return year;
+  }
+  const vendor = proposeVendorFolder(candidates, cues, scanRoot);
+  const type = proposeTypeFolder(candidates, cues, scanRoot);
+  if (vendor === "ambiguous" || type === "ambiguous") {
+    return "ambiguous";
+  }
+  if (vendor !== null && type !== null) {
+    return "ambiguous";
+  }
+  return vendor ?? type;
+}
+
+function proposeYearFolder(
+  candidates: FolderCandidate[],
+  cues: FolderSuggestCue,
+  scanRoot: string,
+): NewFolderPlan {
+  if (cues.documentYear === null) {
+    return null;
+  }
+  const year = cues.documentYear;
+  const parents = uniqueDeepestFolders(
+    candidates.filter((candidate) => isMissingYearParent(candidate, cues)),
+  );
+  if (parents.length === 0) {
+    return null;
+  }
+  if (parents.length > 1) {
+    return "ambiguous";
+  }
+  const parent = parents[0]!;
+  return buildNewFolderProposal({
+    parent,
+    folderName: year,
+    scanRoot,
+    candidates,
+    pattern: "year",
+    reasons: [
+      `Die Ablage in „${parent.name}“ erfolgt nach Jahren.`,
+      `Der Jahresordner ${year} fehlt.`,
+    ],
+  });
+}
+
+function proposeVendorFolder(
+  candidates: FolderCandidate[],
+  cues: FolderSuggestCue,
+  scanRoot: string,
+): NewFolderPlan {
+  if (cues.absender === null) {
+    return null;
+  }
+  if (candidates.some((candidate) => pathHasSender(candidate, cues))) {
+    return null;
+  }
+  const typeTokens = expandedTypeTokens(cues.dokumenttyp ?? "");
+  const parents = uniqueDeepestFolders(
+    candidates.filter(
+      (candidate) =>
+        hasVendorFolderPattern(candidate, typeTokens)
+        && (pathHasType(candidate, cues) || candidate.isScanRoot),
+    ),
+  );
+  if (parents.length === 0) {
+    return null;
+  }
+  if (parents.length > 1) {
+    return "ambiguous";
+  }
+  const parent = parents[0]!;
+  const vendorKids = vendorSiblingNames(parent.childFolderNames, typeTokens);
+  const folderName = vendorFolderNameFromSender(cues.absender, vendorKids);
+  if (folderName === null) {
+    return null;
+  }
+  if (parent.childFolderNames.some((name) => stripFolderStatusSuffix(name).toLowerCase() === folderName.toLowerCase())) {
+    return null;
+  }
+  return buildNewFolderProposal({
+    parent,
+    folderName,
+    scanRoot,
+    candidates,
+    pattern: "vendor",
+    reasons: [
+      `Unter „${parent.name}“ werden Anbieter in eigenen Ordnern abgelegt.`,
+      `Ein Ordner für „${cues.absender}“ fehlt.`,
+    ],
+  });
+}
+
+function proposeTypeFolder(
+  candidates: FolderCandidate[],
+  cues: FolderSuggestCue,
+  scanRoot: string,
+): NewFolderPlan {
+  if (cues.dokumenttyp === null) {
+    return null;
+  }
+  if (candidates.some((candidate) => folderMatchesDocumentType(candidate, cues.dokumenttyp!))) {
+    return null;
+  }
+  const parents = uniqueDeepestFolders(
+    candidates.filter((candidate) => candidate.childFolderNames.filter((name) => isTypeFolderName(name)).length >= 2),
+  );
+  if (parents.length === 0) {
+    return null;
+  }
+  if (parents.length > 1) {
+    return "ambiguous";
+  }
+  const parent = parents[0]!;
+  const folderName = sanitizeSuggestedFileNamePart(cues.dokumenttyp).trim();
+  if (folderName.length < 2) {
+    return null;
+  }
+  return buildNewFolderProposal({
+    parent,
+    folderName,
+    scanRoot,
+    candidates,
+    pattern: "documentType",
+    reasons: [
+      `Unter „${parent.name}“ werden Dokumentarten in eigenen Ordnern abgelegt.`,
+      `Ein Ordner für „${cues.dokumenttyp}“ fehlt.`,
+    ],
+  });
+}
+
+function buildNewFolderProposal(options: {
+  parent: FolderCandidate;
+  folderName: string;
+  scanRoot: string;
+  candidates: FolderCandidate[];
+  pattern: NewFolderPattern;
+  reasons: string[];
+}): NewFolderProposal | null {
+  if (!isAcceptableNewFolderName(options.folderName)) {
+    return null;
+  }
+  const path = joinScanPath(options.parent.path, options.folderName);
+  if (!folderIsInsideScanRoot(options.scanRoot, path)) {
+    return null;
+  }
+  if (options.candidates.some((candidate) => sameDirectoryPath(candidate.path, path))) {
+    return null;
+  }
+  if (options.parent.childFolderNames.some((name) => name.toLowerCase() === options.folderName.toLowerCase())) {
+    return null;
+  }
+  return {
+    parentPath: options.parent.path,
+    parentName: options.parent.name,
+    folderName: options.folderName,
+    path,
+    pattern: options.pattern,
+    reasons: options.reasons,
+    summary: FOLDER_SUGGEST_NEW,
+  };
+}
+
+function isMissingYearParent(candidate: FolderCandidate, cues: FolderSuggestCue): boolean {
+  if (cues.documentYear === null || !hasYearPattern(candidate.childFolderNames)) {
+    return false;
+  }
+  if (candidate.childFolderNames.includes(cues.documentYear)) {
+    return false;
+  }
+  const typeTokens = expandedTypeTokens(cues.dokumenttyp ?? "");
+  if (isVendorLikeFolder(candidate.name, typeTokens)) {
+    return pathHasSender(candidate, cues);
+  }
+  return candidate.isScanRoot || pathHasType(candidate, cues);
+}
+
+function pathHasSender(candidate: FolderCandidate, cues: FolderSuggestCue): boolean {
+  if (cues.absender === null) {
+    return false;
+  }
+  const senderTokens = placementTokens(cues.absender);
+  if (senderTokens.length === 0) {
+    return false;
+  }
+  return candidate.relativeNames.some((segment) => {
+    if (isYearFolderName(segment)) {
+      return false;
+    }
+    return overlappingTokens(placementTokens(segment), senderTokens).length > 0;
+  });
+}
+
+function pathHasType(candidate: FolderCandidate, cues: FolderSuggestCue): boolean {
+  if (cues.dokumenttyp === null) {
+    return false;
+  }
+  const typeTokens = expandedTypeTokens(cues.dokumenttyp);
+  if (typeTokens.length === 0) {
+    return false;
+  }
+  const folderType = resolveDocumentType(candidate.name, null);
+  if (folderType !== null && folderType === cues.dokumenttyp) {
+    return true;
+  }
+  return candidate.relativeNames.some((segment) => {
+    if (isYearFolderName(segment)) {
+      return false;
+    }
+    return overlappingTokens(placementTokens(segment), typeTokens).length > 0;
+  });
+}
+
+function folderMatchesDocumentType(candidate: FolderCandidate, dokumenttyp: string): boolean {
+  const folderType = resolveDocumentType(candidate.name, null);
+  if (folderType !== null && folderType === dokumenttyp) {
+    return true;
+  }
+  const typeTokens = expandedTypeTokens(dokumenttyp);
+  const nameTokens = placementTokens(candidate.name);
+  return isTypeFolderName(candidate.name) && overlappingTokens(nameTokens, typeTokens).length > 0;
+}
+
+function vendorIdentityOnPath(candidate: FolderCandidate, typeTokens: readonly string[]): boolean {
+  if (isVendorLikeFolder(candidate.name, typeTokens)) {
+    return true;
+  }
+  for (let index = candidate.relativeNames.length - 1; index >= 0; index -= 1) {
+    const segment = candidate.relativeNames[index]!;
+    if (isYearFolderName(segment)) {
+      continue;
+    }
+    if (isVendorLikeFolder(segment, typeTokens)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasVendorFolderPattern(candidate: FolderCandidate, typeTokens: readonly string[]): boolean {
+  return vendorSiblingNames(candidate.childFolderNames, typeTokens).length >= 2;
+}
+
+function vendorSiblingNames(childNames: readonly string[], typeTokens: readonly string[]): string[] {
+  return childNames.filter((name) => isVendorLikeFolder(name, typeTokens));
+}
+
+function isVendorLikeFolder(name: string, typeTokens: readonly string[]): boolean {
+  if (isYearFolderName(name)) {
+    return false;
+  }
+  const stripped = stripFolderStatusSuffix(name);
+  const identity = competingIdentityFromName(stripped, typeTokens);
+  if (identity.length === 0) {
+    return false;
+  }
+  const nameTokens = placementTokens(stripped);
+  return (
+    overlappingTokens(nameTokens, typeTokens).length > 0
+    || TYPE_STEMS.some((stem) => nameTokens.some((token) => token === stem || token.includes(stem)))
+  );
+}
+
+function isTypeFolderName(name: string): boolean {
+  if (isYearFolderName(name)) {
+    return false;
+  }
+  if (resolveDocumentType(name, null) !== null) {
+    return competingIdentityFromName(name, expandedTypeTokens(name)).length === 0;
+  }
+  const tokens = placementTokens(name);
+  if (tokens.length === 0) {
+    return false;
+  }
+  const typeLike = TYPE_STEMS.some((stem) =>
+    tokens.some((token) => token === stem || token.includes(stem) || stem.startsWith(token)),
+  );
+  if (!typeLike) {
+    return false;
+  }
+  return competingIdentityFromName(name, expandedTypeTokens(name)).length === 0;
+}
+
+function competingIdentityFromName(name: string, typeTokens: readonly string[]): string[] {
+  return placementTokens(name).filter((token) => overlappingTokens([token], typeTokens).length === 0);
+}
+
+function vendorFolderNameFromSender(absender: string, siblingNames: readonly string[]): string | null {
+  const base = vendorBaseFromSender(absender);
+  if (base.length < 2) {
+    return null;
+  }
+  const suffix = sharedVendorSuffix(siblingNames);
+  const folderName =
+    suffix.length > 0 && !base.toLowerCase().endsWith(suffix.toLowerCase()) ? `${base}${suffix}` : base;
+  return isAcceptableNewFolderName(folderName) ? folderName : null;
+}
+
+function vendorBaseFromSender(absender: string): string {
+  const withoutLegal = absender
+    .replace(/\b(?:AG|GmbH|UG|SE|KG|OHG|e\.V\.|GbR|Ltd|Inc|Co|mbH)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const source = withoutLegal.length >= 2 ? withoutLegal : absender;
+  return sanitizeSuggestedFileNamePart(source).trim();
+}
+
+function sharedVendorSuffix(names: readonly string[]): string {
+  const stripped = names.map((name) => stripFolderStatusSuffix(name)).filter((name) => name.length > 0);
+  if (stripped.length < 2) {
+    return "";
+  }
+  const tails = stripped.map((name) => {
+    const index = name.lastIndexOf("_");
+    return index > 0 ? name.slice(index) : "";
+  });
+  const first = tails[0] ?? "";
+  if (first.length >= 2 && tails.every((tail) => tail === first)) {
+    return first;
+  }
+  return "";
+}
+
+export function stripFolderStatusSuffix(name: string): string {
+  return name.replace(/\s+[-–—]\s+.+$/u, "").trim();
+}
+
+function uniqueDeepestFolders(candidates: FolderCandidate[]): FolderCandidate[] {
+  return candidates.filter(
+    (candidate) => !candidates.some((other) => other !== candidate && isAncestorPath(candidate.path, other.path)),
   );
 }
 
@@ -505,15 +963,31 @@ function suggestionSummary(item: FolderSuggestion): string {
   return item.reasons[0] ?? "Der Ordner erscheint nach Ordnernamen und Dokumentmerkmalen passend.";
 }
 
-function documentYearFromView(view: DocumentTextView | null): string | null {
-  if (view === null) {
-    return null;
+function documentDateFromView(
+  view: DocumentTextView | null,
+  confirmedIso: string | null = null,
+): {
+  year: string | null;
+  status: FolderSuggestCue["documentDateStatus"];
+  resolution: DocumentDateResolution | null;
+  confirmedIso: string | null;
+} {
+  const confirmed = parseUserDocumentDate(confirmedIso ?? "");
+  const resolution = view === null ? null : resolveDocumentDateFromView(view);
+  if (confirmed !== null) {
+    return { year: confirmed.slice(0, 4), status: "confirmed", resolution, confirmedIso: confirmed };
   }
-  const resolved = resolveDocumentDateFromView(view);
-  if (resolved.status !== "confident") {
-    return null;
+  if (view === null || resolution === null) {
+    return { year: null, status: "none", resolution: null, confirmedIso: null };
   }
-  return resolved.iso.slice(0, 4);
+  if (resolution.status !== "confident") {
+    return { year: null, status: "ask", resolution, confirmedIso: null };
+  }
+  return { year: resolution.iso.slice(0, 4), status: "confident", resolution, confirmedIso: null };
+}
+
+export function documentYearFromView(view: DocumentTextView | null): string | null {
+  return documentDateFromView(view).year;
 }
 
 export function isYearFolderName(name: string): boolean {

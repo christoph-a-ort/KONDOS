@@ -1568,6 +1568,22 @@ button:disabled {
   margin: 0 0 2px;
 }
 
+.folder-suggest-new {
+  border-style: dashed;
+  border-color: #c4a35a;
+  background: #fff8e8;
+}
+
+.folder-suggest-new-note {
+  margin: 0 0 8px;
+  font-weight: 600;
+  color: #7a5a12;
+}
+
+.folder-suggest-meta {
+  margin: 0 0 4px;
+}
+
 .learned-senders-list {
   list-style: none;
   margin: 0;
