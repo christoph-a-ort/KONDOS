@@ -1526,6 +1526,48 @@ button:disabled {
   gap: 6px;
 }
 
+.folder-suggest-dialog {
+  width: min(560px, 100%);
+}
+
+.folder-suggest-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.folder-suggest-item {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid #d5dbe3;
+  border-radius: 8px;
+  background: #f7f9fc;
+}
+
+.folder-suggest-path {
+  margin: 0 0 4px;
+  font-family: Consolas, "Segoe UI Mono", monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.folder-suggest-summary {
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+
+.folder-suggest-reasons {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.folder-suggest-reasons li {
+  margin: 0 0 2px;
+}
+
 .learned-senders-list {
   list-style: none;
   margin: 0;

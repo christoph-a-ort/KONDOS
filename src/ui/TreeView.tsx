@@ -117,6 +117,8 @@ import {
   type WorkbenchRenameRequest,
 } from "./treeWorkbenchRename";
 import { canSuggestWorkbenchFileName } from "./treeWorkbenchNameSuggest";
+import { canSuggestWorkbenchFolder } from "./treeWorkbenchFolderSuggest";
+import { FolderSuggestDialog } from "./FolderSuggestDialog";
 import { NameSuggestDialog } from "./NameSuggestDialog";
 
 interface TreeViewProps {
@@ -216,6 +218,7 @@ export function TreeView({
           canOpenFile={false}
           canScanFromHere={false}
           canSuggestName={false}
+          canSuggestFolder={false}
           disabled
           notice={null}
           noticeKind={null}
@@ -224,6 +227,7 @@ export function TreeView({
           onOpen={() => {}}
           onScanFromHere={() => {}}
           onSuggestName={() => {}}
+          onSuggestFolder={() => {}}
         />
         <TreeDetailsBar model={emptyNodeDetailModel()} />
       </section>
@@ -333,6 +337,8 @@ function PopulatedTreeView({
   const [renameDraft, setRenameDraft] = useState("");
   const [nameSuggestOpen, setNameSuggestOpen] = useState(false);
   const [nameSuggestNode, setNameSuggestNode] = useState<FsNode | null>(null);
+  const [folderSuggestOpen, setFolderSuggestOpen] = useState(false);
+  const [folderSuggestNode, setFolderSuggestNode] = useState<FsNode | null>(null);
   const dragSessionRef = useRef<{
     sourceId: string;
     pointerId: number;
@@ -1514,6 +1520,12 @@ function PopulatedTreeView({
           && canSuggestWorkbenchFileName(selectedNode, occupancyIdle)
           && renameId === null
         }
+        canSuggestFolder={
+          resultScanId !== null
+          && selectedNode !== undefined
+          && canSuggestWorkbenchFolder(selectedNode, occupancyIdle)
+          && renameId === null
+        }
         disabled={false}
         notice={pathNotice}
         noticeKind={pathNoticeKind}
@@ -1543,6 +1555,16 @@ function PopulatedTreeView({
             setNameSuggestOpen(true);
           }
         }}
+        onSuggestFolder={() => {
+          if (
+            selectedNode !== undefined
+            && resultScanId !== null
+            && canSuggestWorkbenchFolder(selectedNode, occupancyIdle)
+          ) {
+            setFolderSuggestNode(selectedNode);
+            setFolderSuggestOpen(true);
+          }
+        }}
       />
       <NameSuggestDialog
         open={nameSuggestOpen}
@@ -1564,6 +1586,17 @@ function PopulatedTreeView({
           return { ok: false, reason: "Die Umbenennung wurde nicht ausgeführt." };
         }}
         onIssue={onWorkbenchRenameIssue}
+      />
+      <FolderSuggestDialog
+        open={folderSuggestOpen}
+        scanId={resultScanId}
+        scanRoot={result.root.path}
+        root={result.root}
+        node={folderSuggestNode}
+        onClose={() => {
+          setFolderSuggestOpen(false);
+          setFolderSuggestNode(null);
+        }}
       />
       <TreeDetailsBar model={detailModel} />
       {result.warnings.length > 0 ? (
@@ -1927,6 +1960,7 @@ interface TreePathBarProps {
   canOpenFile: boolean;
   canScanFromHere: boolean;
   canSuggestName: boolean;
+  canSuggestFolder: boolean;
   disabled: boolean;
   notice: string | null;
   noticeKind: "ok" | "error" | null;
@@ -1935,6 +1969,7 @@ interface TreePathBarProps {
   onOpen: () => void;
   onScanFromHere: () => void;
   onSuggestName: () => void;
+  onSuggestFolder: () => void;
 }
 
 function TreePathBar({
@@ -1943,6 +1978,7 @@ function TreePathBar({
   canOpenFile,
   canScanFromHere,
   canSuggestName,
+  canSuggestFolder,
   disabled,
   notice,
   noticeKind,
@@ -1951,16 +1987,23 @@ function TreePathBar({
   onOpen,
   onScanFromHere,
   onSuggestName,
+  onSuggestFolder,
 }: TreePathBarProps) {
   const actionsOff = disabled || !hasSelection;
   const openFileOff = disabled || !canOpenFile;
   const scanFromHereOff = disabled || !canScanFromHere;
   const suggestOff = disabled || !canSuggestName;
+  const folderSuggestOff = disabled || !canSuggestFolder;
   const suggestTitle = !hasSelection
     ? "Zuerst eine Datei auswählen"
     : !canSuggestName
       ? "Nur für Dateien verfügbar, und nur wenn keine Analyse, kein Export und keine Inhaltsvorbereitung läuft."
       : "Dokumentinhalt lesen und einen Dateinamen nach JJJJ-MM-TT_Name vorschlagen";
+  const folderSuggestTitle = !hasSelection
+    ? "Zuerst eine Datei auswählen"
+    : !canSuggestFolder
+      ? "Nur für Dateien verfügbar, und nur wenn keine Analyse, kein Export und keine Inhaltsvorbereitung läuft."
+      : "Passende vorhandene Zielordner in der eingelesenen Struktur vorschlagen. Die Datei wird nicht verschoben.";
   const openFileTitle = !hasSelection
     ? "Zuerst eine Datei auswählen"
     : !canOpenFile
@@ -2001,6 +2044,14 @@ function TreePathBar({
           onClick={onSuggestName}
         >
           Namensvorschlag
+        </button>
+        <button
+          type="button"
+          disabled={folderSuggestOff}
+          title={folderSuggestTitle}
+          onClick={onSuggestFolder}
+        >
+          Ordner vorschlagen
         </button>
         {notice !== null ? (
           <span className={noticeKind === "error" ? "tree-path-notice is-error" : "tree-path-notice is-ok"}>
