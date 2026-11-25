@@ -1370,7 +1370,7 @@ fn workbench_intent_file(app_data: &Path) -> PathBuf {
     app_data.join(WORKBENCH_MOVE_DIR).join("active.json")
 }
 
-fn unfinished_workbench_move(app_data: &Path) -> Option<String> {
+pub(crate) fn unfinished_workbench_move(app_data: &Path) -> Option<String> {
     let raw = fs::read_to_string(workbench_intent_file(app_data)).ok()?;
     let value: Value = serde_json::from_str(&raw).ok()?;
     let phase = value.get("phase").and_then(Value::as_str)?;

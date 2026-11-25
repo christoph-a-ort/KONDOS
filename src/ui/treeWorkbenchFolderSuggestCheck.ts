@@ -18,6 +18,7 @@ import {
   type FolderSuggestOutcome,
 } from "./treeWorkbenchFolderSuggest";
 import { preferredAskIso, type DocumentTextView } from "./treeWorkbenchNameSuggest";
+import { runTreeWorkbenchFolderSuggestApplyCheck } from "./treeWorkbenchFolderSuggestApplyCheck";
 
 function assert(condition: boolean, label: string): void {
   if (!condition) {
@@ -241,6 +242,7 @@ export function runTreeWorkbenchFolderSuggestCheck(): void {
   runNewFolderSuggestCheck();
   runYearPatternParentFixCheck();
   runFolderDateConfirmCheck();
+  runTreeWorkbenchFolderSuggestApplyCheck();
 }
 
 function hammInvoice(withDate: boolean, name = "2022-07-14_Verbrauchsabrechnung.pdf"): DocumentTextView {

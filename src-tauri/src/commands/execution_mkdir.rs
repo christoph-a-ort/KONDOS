@@ -18,7 +18,8 @@ use super::execution_journal::{
     journal, journal_status_blocks_real_ops, journal_store, load_at, success_journal_status,
 };
 use super::execution_preflight::{path_has_parent_dir, within_scan_root};
-use super::execution_test_root::require_approved_test_root;
+use super::execution_move::unfinished_workbench_move;
+use super::execution_test_root::{require_approved_test_root, scan_root_is_unsafe_for_real_ops};
 use super::scan_root_coordination::acquire_at;
 
 const REAL_CHANGE_NOTICE: &str =
@@ -920,6 +921,130 @@ pub fn execute_create_folder(
     )
 }
 
+const WORKBENCH_CREATED_MESSAGE: &str = "Der Ordner wurde angelegt.";
+const WORKBENCH_EXISTS_MESSAGE: &str = "Der Zielordner existiert bereits.";
+const WORKBENCH_TARGET_OCCUPIED: &str =
+    "Das Ziel ist bereits belegt. Vorhandene Dateien werden nicht überschrieben.";
+
+fn execute_workbench_create_folder_locked(
+    app_data: &Path,
+    scan_root: &str,
+    target: &str,
+) -> Result<CreateFolderResult, AppError> {
+    if scan_root_is_unsafe_for_real_ops(scan_root) {
+        return Ok(blocked_result(
+            target,
+            "Diese Scanwurzel ist kein zulässiger Pfad für echte Dateioperationen.",
+            empty_view(),
+        ));
+    }
+    if let Some(reason) = unfinished_workbench_move(app_data) {
+        return Ok(blocked_result(target, reason, empty_view()));
+    }
+    let components = match relative_components(scan_root, target) {
+        Ok(value) => value,
+        Err(error) => return Ok(blocked_result(target, error.message, empty_view())),
+    };
+    match precheck_target(scan_root, target, &components) {
+        Err(MkdirBlock::Exists) => {
+            return Ok(workbench_existing_target(target));
+        }
+        Err(block) => return Ok(blocked_result(target, block.message(), empty_view())),
+        Ok(()) => {}
+    }
+    let Some(new_name) = last_relative_component(target) else {
+        return Ok(blocked_result(
+            target,
+            "Neue Zielkomponenten sind nicht sicher bestimmbar.",
+            empty_view(),
+        ));
+    };
+    if let Some(reason) = target_length_blocks_real_operation(
+        target,
+        &[new_name.as_str()],
+        maximum_component_length_for_path(scan_root),
+    ) {
+        return Ok(blocked_result(target, reason, empty_view()));
+    }
+    if let Err(block) = mkdir_storage_gate(classify_opened_path(scan_root)) {
+        return Ok(blocked_result(target, block.message(), empty_view()));
+    }
+
+    match win_mkdir::create_single_folder(scan_root, &components) {
+        Ok(()) => Ok(CreateFolderResult {
+            outcome: "created".to_string(),
+            target_path: target.to_string(),
+            message: WORKBENCH_CREATED_MESSAGE.to_string(),
+            created: true,
+            halted: false,
+            binding_status: String::new(),
+            journal_json: None,
+            reminder: REAL_CHANGE_NOTICE.to_string(),
+        }),
+        Err(MkdirBlock::Exists) => Ok(workbench_existing_target(target)),
+        Err(MkdirBlock::CreatedUnverified) => Ok(CreateFolderResult {
+            outcome: "unverified".to_string(),
+            target_path: target.to_string(),
+            message: MkdirBlock::CreatedUnverified.message().to_string(),
+            created: false,
+            halted: true,
+            binding_status: String::new(),
+            journal_json: None,
+            reminder: REAL_CHANGE_NOTICE.to_string(),
+        }),
+        Err(block) => Ok(CreateFolderResult {
+            outcome: "failed".to_string(),
+            target_path: target.to_string(),
+            message: block.message().to_string(),
+            created: false,
+            halted: true,
+            binding_status: String::new(),
+            journal_json: None,
+            reminder: REAL_CHANGE_NOTICE.to_string(),
+        }),
+    }
+}
+
+fn workbench_existing_target(target: &str) -> CreateFolderResult {
+    match fs::symlink_metadata(target.replace('/', "\\")) {
+        Ok(metadata)
+            if metadata.is_dir() && !path_blocks_as_reparse(target).unwrap_or(true) =>
+        {
+            CreateFolderResult {
+                outcome: "exists".to_string(),
+                target_path: target.to_string(),
+                message: WORKBENCH_EXISTS_MESSAGE.to_string(),
+                created: false,
+                halted: false,
+                binding_status: String::new(),
+                journal_json: None,
+                reminder: REAL_CHANGE_NOTICE.to_string(),
+            }
+        }
+        _ => blocked_result(target, WORKBENCH_TARGET_OCCUPIED, empty_view()),
+    }
+}
+
+pub(crate) fn execute_workbench_create_folder_at(
+    app_data: &Path,
+    scan_root: &str,
+    target_path: &str,
+) -> Result<CreateFolderResult, AppError> {
+    let _guard = acquire_at(app_data, scan_root)?;
+    execute_workbench_create_folder_locked(app_data, scan_root, target_path)
+}
+
+#[tauri::command]
+pub fn execute_workbench_create_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    scan_root: String,
+    target_path: String,
+) -> Result<CreateFolderResult, AppError> {
+    let _occupancy = state.try_begin_execution()?;
+    execute_workbench_create_folder_at(&app_data(&app)?, &scan_root, &target_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1287,6 +1412,194 @@ mod tests {
         assert!(!root.join("neu").exists());
         let stored_after = load_at(&journal(&journal_store(&root), "j1").unwrap(), "j1").unwrap().unwrap();
         assert!(stored_after.contains("\"op-folder\":\"pending\""));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn workbench_setup() -> (PathBuf, String) {
+        let root = dir();
+        fs::create_dir(root.join("SW Hamm_Strom")).unwrap();
+        fs::create_dir(root.join("SW Hamm_Strom").join("2020")).unwrap();
+        fs::create_dir(root.join("SW Hamm_Strom").join("2021")).unwrap();
+        fs::write(
+            root.join("SW Hamm_Strom").join("2022-07-14_Verbrauchsabrechnung.pdf"),
+            b"invoice",
+        )
+        .unwrap();
+        let scan = root.to_string_lossy().replace('\\', "/");
+        (root, scan)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_creates_missing_year_folder_without_plan() {
+        let (root, scan) = workbench_setup();
+        let target = format!("{scan}/SW Hamm_Strom/2022");
+        let result = execute_workbench_create_folder_at(&root, &scan, &target).unwrap();
+        assert_eq!(result.outcome, "created", "{}", result.message);
+        assert!(result.created);
+        assert!(root.join("SW Hamm_Strom").join("2022").is_dir());
+        assert!(root
+            .join("SW Hamm_Strom")
+            .join("2022-07-14_Verbrauchsabrechnung.pdf")
+            .is_file());
+        let retry = execute_workbench_create_folder_at(&root, &scan, &target).unwrap();
+        assert_eq!(retry.outcome, "exists");
+        assert!(!retry.created);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_existing_directory_is_not_recreated() {
+        let (root, scan) = workbench_setup();
+        fs::create_dir(root.join("SW Hamm_Strom").join("2022")).unwrap();
+        let result = execute_workbench_create_folder_at(
+            &root,
+            &scan,
+            &format!("{scan}/SW Hamm_Strom/2022"),
+        )
+        .unwrap();
+        assert_eq!(result.outcome, "exists");
+        assert!(!result.created);
+        assert!(root.join("SW Hamm_Strom").join("2022").is_dir());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_file_at_target_is_not_overwritten() {
+        let (root, scan) = workbench_setup();
+        fs::write(root.join("SW Hamm_Strom").join("2022"), b"not-a-folder").unwrap();
+        let result = execute_workbench_create_folder_at(
+            &root,
+            &scan,
+            &format!("{scan}/SW Hamm_Strom/2022"),
+        )
+        .unwrap();
+        assert_eq!(result.outcome, "blocked");
+        assert_eq!(
+            fs::read(root.join("SW Hamm_Strom").join("2022")).unwrap(),
+            b"not-a-folder"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_missing_parent_is_blocked() {
+        let (root, scan) = workbench_setup();
+        let result = execute_workbench_create_folder_at(
+            &root,
+            &scan,
+            &format!("{scan}/fehlt/2022"),
+        )
+        .unwrap();
+        assert_eq!(result.outcome, "blocked");
+        assert!(!root.join("fehlt").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_reserved_folder_name_is_blocked() {
+        let (root, scan) = workbench_setup();
+        let result = execute_workbench_create_folder_at(&root, &scan, &format!("{scan}/CON")).unwrap();
+        assert_eq!(result.outcome, "blocked");
+        assert!(!root.join("CON").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_outside_scan_root_is_blocked() {
+        let (root, scan) = workbench_setup();
+        let outside = std::env::temp_dir().join(format!("dotty-outside-wb-mkdir-{}", std::process::id()));
+        let result = execute_workbench_create_folder_at(
+            &root,
+            &scan,
+            &outside.to_string_lossy().replace('\\', "/"),
+        )
+        .unwrap();
+        assert_eq!(result.outcome, "blocked");
+        assert!(!outside.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn fingerprint(path: &Path) -> (u64, u64) {
+        let metadata = fs::symlink_metadata(path).unwrap();
+        let modified = metadata
+            .modified()
+            .unwrap()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        (metadata.len(), modified)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_creates_year_folder_then_moves_file() {
+        let (root, scan) = workbench_setup();
+        let folder = format!("{scan}/SW Hamm_Strom/2022");
+        let source_rel = root.join("SW Hamm_Strom").join("2022-07-14_Verbrauchsabrechnung.pdf");
+        let source = format!("{scan}/SW Hamm_Strom/2022-07-14_Verbrauchsabrechnung.pdf");
+        let target = format!("{folder}/2022-07-14_Verbrauchsabrechnung.pdf");
+        let mkdir = execute_workbench_create_folder_at(&root, &scan, &folder).unwrap();
+        assert_eq!(mkdir.outcome, "created", "{}", mkdir.message);
+        assert!(root.join("SW Hamm_Strom").join("2022").is_dir());
+        assert!(source_rel.is_file());
+        let (size, modified) = fingerprint(&source_rel);
+        let moved = crate::commands::execution_move::execute_workbench_move_file_at(
+            &root, &scan, &source, &target, size, modified,
+        )
+        .unwrap();
+        assert_eq!(moved.outcome, "moved", "{}", moved.message);
+        assert!(moved.moved);
+        assert!(!source_rel.exists());
+        assert!(root
+            .join("SW Hamm_Strom")
+            .join("2022")
+            .join("2022-07-14_Verbrauchsabrechnung.pdf")
+            .is_file());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workbench_mkdir_success_keeps_folder_when_move_is_blocked() {
+        let (root, scan) = workbench_setup();
+        let folder = format!("{scan}/SW Hamm_Strom/2022");
+        fs::create_dir(root.join("SW Hamm_Strom").join("2022")).unwrap();
+        fs::write(
+            root.join("SW Hamm_Strom")
+                .join("2022")
+                .join("2022-07-14_Verbrauchsabrechnung.pdf"),
+            b"other",
+        )
+        .unwrap();
+        let mkdir = execute_workbench_create_folder_at(&root, &scan, &folder).unwrap();
+        assert_eq!(mkdir.outcome, "exists");
+        let source_rel = root.join("SW Hamm_Strom").join("2022-07-14_Verbrauchsabrechnung.pdf");
+        let source = format!("{scan}/SW Hamm_Strom/2022-07-14_Verbrauchsabrechnung.pdf");
+        let target = format!("{folder}/2022-07-14_Verbrauchsabrechnung.pdf");
+        let (size, modified) = fingerprint(&source_rel);
+        let moved = crate::commands::execution_move::execute_workbench_move_file_at(
+            &root, &scan, &source, &target, size, modified,
+        )
+        .unwrap();
+        assert_eq!(moved.outcome, "blocked");
+        assert!(!moved.moved);
+        assert_eq!(fs::read(&source_rel).unwrap(), b"invoice");
+        assert_eq!(
+            fs::read(
+                root.join("SW Hamm_Strom")
+                    .join("2022")
+                    .join("2022-07-14_Verbrauchsabrechnung.pdf")
+            )
+            .unwrap(),
+            b"other"
+        );
+        assert!(root.join("SW Hamm_Strom").join("2022").is_dir());
         let _ = fs::remove_dir_all(root);
     }
 }

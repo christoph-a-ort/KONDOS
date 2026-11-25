@@ -118,6 +118,7 @@ import {
 } from "./treeWorkbenchRename";
 import { canSuggestWorkbenchFileName } from "./treeWorkbenchNameSuggest";
 import { canSuggestWorkbenchFolder } from "./treeWorkbenchFolderSuggest";
+import type { FolderSuggestApplyResult, FolderSuggestExecutePlan } from "./treeWorkbenchFolderSuggestApply";
 import { FolderSuggestDialog } from "./FolderSuggestDialog";
 import { NameSuggestDialog } from "./NameSuggestDialog";
 
@@ -148,6 +149,10 @@ interface TreeViewProps {
     request: WorkbenchRenameRequest,
   ) => Promise<WorkbenchRenameApplyResult> | WorkbenchRenameApplyResult | void;
   onWorkbenchRenameIssue?: (message: string) => void;
+  onWorkbenchFolderSuggestApply?: (
+    plan: FolderSuggestExecutePlan,
+    source: FsNode,
+  ) => Promise<FolderSuggestApplyResult>;
 }
 
 export function TreeView({
@@ -172,6 +177,7 @@ export function TreeView({
   onWorkbenchFileMove,
   onWorkbenchFileRename,
   onWorkbenchRenameIssue,
+  onWorkbenchFolderSuggestApply,
 }: TreeViewProps) {
   if (result === null) {
     return (
@@ -257,6 +263,7 @@ export function TreeView({
       onWorkbenchFileMove={onWorkbenchFileMove}
       onWorkbenchFileRename={onWorkbenchFileRename}
       onWorkbenchRenameIssue={onWorkbenchRenameIssue}
+      onWorkbenchFolderSuggestApply={onWorkbenchFolderSuggestApply}
     />
   );
 }
@@ -285,6 +292,10 @@ interface PopulatedTreeViewProps {
     request: WorkbenchRenameRequest,
   ) => Promise<WorkbenchRenameApplyResult> | WorkbenchRenameApplyResult | void;
   onWorkbenchRenameIssue?: (message: string) => void;
+  onWorkbenchFolderSuggestApply?: (
+    plan: FolderSuggestExecutePlan,
+    source: FsNode,
+  ) => Promise<FolderSuggestApplyResult>;
 }
 
 function PopulatedTreeView({
@@ -309,6 +320,7 @@ function PopulatedTreeView({
   onWorkbenchFileMove,
   onWorkbenchFileRename,
   onWorkbenchRenameIssue,
+  onWorkbenchFolderSuggestApply,
 }: PopulatedTreeViewProps) {
   const [expandedIds, setExpandedIds] = useState(() => defaultExpandedIds(result.root.id));
   const [activeResult, setActiveResult] = useState(result);
@@ -1597,6 +1609,7 @@ function PopulatedTreeView({
           setFolderSuggestOpen(false);
           setFolderSuggestNode(null);
         }}
+        onApply={onWorkbenchFolderSuggestApply}
       />
       <TreeDetailsBar model={detailModel} />
       {result.warnings.length > 0 ? (

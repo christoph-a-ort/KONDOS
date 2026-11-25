@@ -1547,6 +1547,19 @@ button:disabled {
   background: #f7f9fc;
 }
 
+.folder-suggest-item-selectable {
+  cursor: pointer;
+}
+
+.folder-suggest-item-selected {
+  border-color: #3b6ea5;
+  background: #e8f0fa;
+}
+
+.folder-suggest-target {
+  margin: 10px 0 0;
+}
+
 .folder-suggest-path {
   margin: 0 0 4px;
   font-family: Consolas, "Segoe UI Mono", monospace;

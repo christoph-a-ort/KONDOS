@@ -21,14 +21,14 @@ import {
 import { isAllowedWindowsComponent } from "./windowsPathRules";
 
 export const FOLDER_SUGGEST_UNCLEAR = "Kein eindeutiger Zielordner";
-export const FOLDER_SUGGEST_NO_MOVE = "In dieser Stufe wird die Datei nicht verschoben.";
+export const FOLDER_SUGGEST_NO_MOVE = "Für diese Zuordnung wird keine Verschiebeaktion angeboten.";
 export const FOLDER_SUGGEST_ALREADY_HERE =
   "Datei liegt bereits im passenden Ordner. Keine Verschiebung erforderlich.";
 export const FOLDER_SUGGEST_NEW = "Neuen Ordner vorschlagen";
 export const FOLDER_SUGGEST_NEW_UNCLEAR = "Kein eindeutiger Vorschlag für einen neuen Ordner.";
 export const FOLDER_SUGGEST_YEAR_UNKNOWN = "Jahresablage erkannt. Dokumentjahr nicht sicher bestimmt.";
 export const FOLDER_SUGGEST_DATE_HINT = "Bitte das Dokumentdatum bestätigen oder korrigieren.";
-export const FOLDER_SUGGEST_NO_CREATE = "In dieser Stufe wird der Ordner nicht angelegt.";
+export const FOLDER_SUGGEST_NO_CREATE = "Es wird kein neuer Ordner angelegt.";
 export const FOLDER_SUGGEST_MAX = 3;
 
 const EMPTY_FIELDS: LocalAiNameFields = {

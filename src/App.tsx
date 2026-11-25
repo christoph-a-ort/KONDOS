@@ -4,7 +4,9 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 import { parseExtensionInput } from "./filter";
 import {
+  isFile,
   type ExportFormat,
+  type FsNode,
   type ScanConfig,
   type ScanProgress,
   type ScanResult,
@@ -49,7 +51,13 @@ import {
 } from "./ui/StructureInsightsView";
 import { VirtualPlanPreviewView } from "./ui/VirtualPlanPreviewView";
 import type { RealFileMoveWorkbenchEvent } from "./ui/virtualPlanExecution";
-import { executeWorkbenchMoveFile } from "./ui/virtualPlanExecutionApi";
+import {
+  folderSuggestApplyFromResults,
+  workbenchMoveRequestForFolderPlan,
+  type FolderSuggestApplyResult,
+  type FolderSuggestExecutePlan,
+} from "./ui/treeWorkbenchFolderSuggestApply";
+import { executeWorkbenchCreateFolder, executeWorkbenchMoveFile } from "./ui/virtualPlanExecutionApi";
 import {
   nameSuggestApplyFromMoveResult,
   workbenchRenameOccupancyBlockReason,
@@ -1019,6 +1027,73 @@ function App() {
     }
   }
 
+  async function handleWorkbenchFolderSuggestApply(
+    plan: FolderSuggestExecutePlan,
+    source: FsNode,
+  ): Promise<FolderSuggestApplyResult> {
+    const occupancyReason = workbenchRenameOccupancyBlockReason({
+      moveBusy: workbenchMoveBusyRef.current,
+      scanLocked: scanLockRef.current,
+      scanning: scanningRef.current,
+      exportBusy: exportBusyRef.current,
+      preparingContent: preparingContentRef.current,
+    });
+    if (occupancyReason !== null) {
+      const reason =
+        "Die Arbeitsfläche ist gerade beschäftigt. Die Ordnerzuordnung wurde nicht ausgeführt.";
+      setWorkbenchNotice(reason);
+      setWorkbenchNoticeKind("blocked");
+      return { ok: false, created: false, moved: false, reason };
+    }
+    if (!isFile(source)) {
+      return { ok: false, created: false, moved: false, reason: "Nur einzelne Dateien können verschoben werden." };
+    }
+    workbenchMoveBusyRef.current = true;
+    try {
+      let mkdir = null;
+      if (plan.createFolder) {
+        mkdir = await executeWorkbenchCreateFolder({
+          scanRoot: plan.scanRoot,
+          targetPath: plan.folderPath,
+        });
+        if (mkdir.outcome !== "created" && mkdir.outcome !== "exists") {
+          const applied = folderSuggestApplyFromResults(mkdir, null, plan, source.name);
+          if (!applied.ok) {
+            setWorkbenchNotice(applied.reason);
+            setWorkbenchNoticeKind("failed");
+          }
+          return applied;
+        }
+      }
+      const request = workbenchMoveRequestForFolderPlan(plan.scanRoot, source, plan);
+      const move = await executeWorkbenchMoveFile({
+        scanRoot: request.scanRoot,
+        sourcePath: request.sourcePath,
+        targetPath: request.targetPath,
+        expectedSizeBytes: request.expectedSizeBytes,
+        expectedModifiedAtMs: request.expectedModifiedAtMs,
+      });
+      const applied = folderSuggestApplyFromResults(mkdir, move, plan, source.name);
+      if (applied.ok) {
+        setWorkbenchNotice(applied.message);
+        setWorkbenchNoticeKind("success");
+        pendingRevealNodeIdRef.current = pathForCurrentScan(request.scanRoot, applied.targetPath);
+        void handleStartScan();
+      } else {
+        setWorkbenchNotice(applied.reason);
+        setWorkbenchNoticeKind(applied.created ? "blocked" : "failed");
+      }
+      return applied;
+    } catch (cause) {
+      const reason = toUserError(cause);
+      setWorkbenchNotice(reason);
+      setWorkbenchNoticeKind("failed");
+      return { ok: false, created: false, moved: false, reason };
+    } finally {
+      workbenchMoveBusyRef.current = false;
+    }
+  }
+
   async function handleWorkbenchFileRename(
     request: WorkbenchRenameRequest,
   ): Promise<WorkbenchRenameApplyResult> {
@@ -1297,6 +1372,7 @@ function App() {
                   setWorkbenchNotice(message);
                   setWorkbenchNoticeKind("blocked");
                 }}
+                onWorkbenchFolderSuggestApply={handleWorkbenchFolderSuggestApply}
               />
             </div>
             {insightsSelectable ? (

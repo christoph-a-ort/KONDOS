@@ -7,7 +7,7 @@ export interface TestRootApprovalView {
 }
 
 export interface CreateFolderResult {
-  outcome: "created" | "blocked" | "failed" | "unverified";
+  outcome: "created" | "exists" | "blocked" | "failed" | "unverified";
   targetPath: string;
   message: string;
   created: boolean;
@@ -48,6 +48,13 @@ export function executeCreateFolder(options: {
   explicitConfirm: boolean;
 }): Promise<CreateFolderResult> {
   return invoke<CreateFolderResult>("execute_create_folder", options);
+}
+
+export function executeWorkbenchCreateFolder(options: {
+  scanRoot: string;
+  targetPath: string;
+}): Promise<CreateFolderResult> {
+  return invoke<CreateFolderResult>("execute_workbench_create_folder", options);
 }
 
 export function executeWorkbenchMoveFile(options: {

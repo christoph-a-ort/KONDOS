@@ -24,6 +24,14 @@ import {
   type FolderSuggestion,
 } from "./treeWorkbenchFolderSuggest";
 import {
+  FOLDER_SUGGEST_PICK_TARGET,
+  folderSuggestDestCollision,
+  folderSuggestExecutePlan,
+  folderSuggestNeedsTargetChoice,
+  type FolderSuggestApplyResult,
+  type FolderSuggestExecutePlan,
+} from "./treeWorkbenchFolderSuggestApply";
+import {
   isOcrTextSource,
   preferredAskIso,
   uniqueDocumentDateChoices,
@@ -38,6 +46,7 @@ interface FolderSuggestDialogProps {
   root: DirectoryNode;
   node: FsNode | null;
   onClose: () => void;
+  onApply?: (plan: FolderSuggestExecutePlan, source: FsNode) => Promise<FolderSuggestApplyResult>;
 }
 
 export function FolderSuggestDialog({
@@ -47,6 +56,7 @@ export function FolderSuggestDialog({
   root,
   node,
   onClose,
+  onApply,
 }: FolderSuggestDialogProps) {
   const titleId = useId();
   const dateId = useId();
@@ -59,6 +69,9 @@ export function FolderSuggestDialog({
   const [dateDraft, setDateDraft] = useState("");
   const [dateError, setDateError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<FolderSuggestOutcome | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [applyBusy, setApplyBusy] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || node === null || !isFile(node) || scanId === null) {
@@ -71,6 +84,9 @@ export function FolderSuggestDialog({
       setDateDraft("");
       setDateError(null);
       setOutcome(null);
+      setSelectedPath(null);
+      setApplyBusy(false);
+      setApplyError(null);
       return;
     }
     let cancelled = false;
@@ -84,6 +100,9 @@ export function FolderSuggestDialog({
     setDateDraft("");
     setDateError(null);
     setOutcome(null);
+    setSelectedPath(null);
+    setApplyBusy(false);
+    setApplyError(null);
     void subscribeOcrProgress((progress) => {
       if (cancelled || progress.scanId !== scanId) {
         return;
@@ -119,6 +138,9 @@ export function FolderSuggestDialog({
           confirmedIso: null,
         });
         setOutcome(planned);
+        setSelectedPath(
+          planned.status === "suggestions" && planned.suggestions.length === 1 ? planned.suggestions[0]!.path : null,
+        );
         const offered = planned.cues.dateResolution === null ? "" : preferredAskIso(planned.cues.dateResolution);
         setDateDraft(offered.length > 0 ? formatGermanDocumentDate(offered) : "");
       })
@@ -149,16 +171,53 @@ export function FolderSuggestDialog({
     if (view === null || learned === null) {
       return;
     }
-    setOutcome(
-      planFolderSuggestions({
-        scanRoot,
-        root,
-        source,
-        view,
-        learnedStore: learned,
-        confirmedIso: iso,
-      }),
+    const planned = planFolderSuggestions({
+      scanRoot,
+      root,
+      source,
+      view,
+      learnedStore: learned,
+      confirmedIso: iso,
+    });
+    setOutcome(planned);
+    setSelectedPath(
+      planned.status === "suggestions" && planned.suggestions.length === 1 ? planned.suggestions[0]!.path : null,
     );
+    setApplyError(null);
+  }
+
+  async function handleApply() {
+    if (applyBusy || onApply === undefined || outcome === null) {
+      return;
+    }
+    const prepared = folderSuggestExecutePlan({
+      outcome,
+      source,
+      scanRoot,
+      selectedFolderPath: selectedPath,
+    });
+    if (!prepared.ok) {
+      setApplyError(prepared.reason);
+      return;
+    }
+    if (folderSuggestDestCollision(root, prepared.plan.fileTargetPath)) {
+      setApplyError("Das Ziel ist bereits belegt. Vorhandene Dateien werden nicht überschrieben.");
+      return;
+    }
+    setApplyBusy(true);
+    setApplyError(null);
+    try {
+      const applied = await onApply(prepared.plan, source);
+      if (applied.ok) {
+        onClose();
+        return;
+      }
+      setApplyError(applied.reason);
+    } catch (cause) {
+      setApplyError(toUserError(cause));
+    } finally {
+      setApplyBusy(false);
+    }
   }
 
   function applyDateCommit(commit: ReturnType<typeof commitNameSuggestDateInput>) {
@@ -172,9 +231,29 @@ export function FolderSuggestDialog({
 
   const showDateField = outcome !== null && folderSuggestShowsDateField(outcome);
   const choices = outcome?.cues.dateResolution == null ? [] : uniqueDocumentDateChoices(outcome.cues.dateResolution.hits);
+  const executePlan =
+    outcome === null
+      ? { ok: false as const, reason: null }
+      : folderSuggestExecutePlan({
+          outcome,
+          source,
+          scanRoot,
+          selectedFolderPath: selectedPath,
+        });
+  const waitingForTarget = !executePlan.ok && executePlan.reason === FOLDER_SUGGEST_PICK_TARGET;
+  const canShowExecute = onApply !== undefined && executePlan.ok && !loading;
+  const showNoMoveHint =
+    !loading && error === null && outcome !== null && !executePlan.ok && !waitingForTarget;
 
   return (
-    <div className="report-dialog-backdrop folder-suggest-backdrop" onMouseDown={onClose}>
+    <div
+      className="report-dialog-backdrop folder-suggest-backdrop"
+      onMouseDown={() => {
+        if (!applyBusy) {
+          onClose();
+        }
+      }}
+    >
       <div
         className="report-dialog folder-suggest-dialog"
         role="dialog"
@@ -185,7 +264,9 @@ export function FolderSuggestDialog({
           event.stopPropagation();
           if (event.key === "Escape") {
             event.preventDefault();
-            onClose();
+            if (!applyBusy) {
+              onClose();
+            }
           }
         }}
       >
@@ -210,6 +291,7 @@ export function FolderSuggestDialog({
                 autoComplete="off"
                 placeholder="TT.MM.JJJJ"
                 value={dateDraft}
+                disabled={applyBusy}
                 onChange={(event) => applyDateCommit(commitNameSuggestDateInput(confirmedIso, event.target.value))}
                 spellCheck={false}
               />
@@ -218,6 +300,7 @@ export function FolderSuggestDialog({
                 type="date"
                 aria-label="Datum im Kalender wählen"
                 value={calendarInputValue(confirmedIso)}
+                disabled={applyBusy}
                 onChange={(event) => applyDateCommit(commitCalendarDateInput(confirmedIso, event.target.value))}
               />
             </div>
@@ -229,6 +312,7 @@ export function FolderSuggestDialog({
                     key={`${choice.iso}-${choice.startIndex}`}
                     type="button"
                     title={choice.snippet}
+                    disabled={applyBusy}
                     onClick={() => {
                       setDateDraft(formatGermanDocumentDate(choice.iso));
                       setDateError(null);
@@ -242,13 +326,37 @@ export function FolderSuggestDialog({
             ) : null}
           </div>
         ) : null}
-        {!loading && error === null && outcome !== null ? <FolderSuggestBody outcome={outcome} /> : null}
-        <p className="report-dialog-hint">{FOLDER_SUGGEST_NO_MOVE}</p>
-        {outcome?.status === "newFolder" ? <p className="report-dialog-hint">{FOLDER_SUGGEST_NO_CREATE}</p> : null}
+        {!loading && error === null && outcome !== null ? (
+          <FolderSuggestBody
+            outcome={outcome}
+            selectedPath={selectedPath}
+            selectable={!applyBusy && folderSuggestNeedsTargetChoice(outcome)}
+            onSelect={setSelectedPath}
+          />
+        ) : null}
+        {executePlan.ok ? (
+          <p className="folder-suggest-path folder-suggest-target" title={executePlan.plan.fileTargetPath}>
+            Zielpfad: {executePlan.plan.fileTargetPath}
+          </p>
+        ) : null}
+        {!executePlan.ok && executePlan.reason !== null && outcome?.status === "suggestions" ? (
+          <p className="muted">{executePlan.reason}</p>
+        ) : null}
+        {applyError !== null ? <p className="report-dialog-error">{applyError}</p> : null}
+        {applyBusy ? <p className="muted">Die Dateioperation wird ausgeführt…</p> : null}
+        {showNoMoveHint ? <p className="report-dialog-hint">{FOLDER_SUGGEST_NO_MOVE}</p> : null}
+        {showNoMoveHint && outcome?.status === "newFolder" ? (
+          <p className="report-dialog-hint">{FOLDER_SUGGEST_NO_CREATE}</p>
+        ) : null}
         <div className="report-dialog-actions">
-          <button type="button" onClick={onClose}>
+          <button type="button" onClick={onClose} disabled={applyBusy}>
             Schließen
           </button>
+          {canShowExecute && executePlan.ok ? (
+            <button type="button" onClick={() => void handleApply()} disabled={applyBusy}>
+              {executePlan.plan.label}
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
@@ -296,9 +404,24 @@ function FolderSuggestCues({
   );
 }
 
-function FolderSuggestItem({ item }: { item: FolderSuggestion }) {
+function FolderSuggestItem({
+  item,
+  selected,
+  selectable,
+  onSelect,
+}: {
+  item: FolderSuggestion;
+  selected: boolean;
+  selectable: boolean;
+  onSelect?: (path: string) => void;
+}) {
+  const className = selected ? "folder-suggest-item folder-suggest-item-selected" : "folder-suggest-item";
   return (
-    <li className="folder-suggest-item">
+    <li
+      className={selectable ? `${className} folder-suggest-item-selectable` : className}
+      aria-pressed={selectable ? selected : undefined}
+      onClick={selectable && onSelect !== undefined ? () => onSelect(item.path) : undefined}
+    >
       <p className="folder-suggest-path" title={item.path}>
         {item.path}
       </p>
@@ -312,14 +435,29 @@ function FolderSuggestItem({ item }: { item: FolderSuggestion }) {
   );
 }
 
-function FolderSuggestBody({ outcome }: { outcome: FolderSuggestOutcome }) {
+function FolderSuggestBody({
+  outcome,
+  selectedPath,
+  selectable,
+  onSelect,
+}: {
+  outcome: FolderSuggestOutcome;
+  selectedPath: string | null;
+  selectable: boolean;
+  onSelect: (path: string) => void;
+}) {
   if (outcome.status === "alreadyHere") {
     return (
       <>
         <p className="folder-suggest-summary">{FOLDER_SUGGEST_ALREADY_HERE}</p>
         <ul className="folder-suggest-list">
           {outcome.suggestions.map((item) => (
-            <FolderSuggestItem key={item.path} item={item} />
+            <FolderSuggestItem
+              key={item.path}
+              item={item}
+              selected={selectedPath !== null && item.path === selectedPath}
+              selectable={false}
+            />
           ))}
         </ul>
       </>
@@ -355,7 +493,13 @@ function FolderSuggestBody({ outcome }: { outcome: FolderSuggestOutcome }) {
   return (
     <ul className="folder-suggest-list">
       {outcome.suggestions.map((item) => (
-        <FolderSuggestItem key={item.path} item={item} />
+        <FolderSuggestItem
+          key={item.path}
+          item={item}
+          selected={selectedPath !== null && item.path === selectedPath}
+          selectable={selectable}
+          onSelect={onSelect}
+        />
       ))}
     </ul>
   );
