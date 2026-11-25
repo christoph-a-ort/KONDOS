@@ -933,6 +933,8 @@ button:disabled {
 
 .tree-data-row {
   cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .tree-data-row.file-draggable {
@@ -1047,6 +1049,8 @@ button:disabled {
   font: inherit;
   color: inherit;
   background: #fff;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .cell-empty {
@@ -1597,6 +1601,143 @@ button:disabled {
   margin: 0 0 4px;
 }
 
+.batch-analysis-progress-banner {
+  flex-shrink: 0;
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border: 1px solid #c5d4e8;
+  border-radius: 8px;
+  background: #eef4fb;
+}
+
+.batch-analysis-progress-banner h2 {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+}
+
+.batch-analysis-progress-banner p {
+  margin: 2px 0;
+}
+
+.batch-analysis-progress-banner progress {
+  display: block;
+  width: 100%;
+  height: 8px;
+  margin: 4px 0;
+}
+
+.batch-analysis-progress-banner .batch-analysis-current {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-analysis-progress-banner .batch-analysis-actions {
+  margin-top: 6px;
+}
+
+.batch-analysis-progress-banner button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.batch-analysis-panel {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border: 1px solid #d5dbe3;
+  border-radius: 8px;
+  background: #f7f9fc;
+}
+
+.batch-analysis-header,
+.batch-analysis-summary,
+.batch-analysis-skips,
+.batch-analysis-actions {
+  flex-shrink: 0;
+}
+
+.batch-analysis-header h2 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.batch-analysis-current {
+  margin: 4px 0;
+  font-weight: 600;
+}
+
+.batch-analysis-table-wrap {
+  flex: 1 1 auto;
+  min-height: 8rem;
+  max-height: none;
+  overflow: auto;
+  margin: 8px 0;
+}
+
+.batch-analysis-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.batch-analysis-table th,
+.batch-analysis-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 4px 6px;
+  border-bottom: 1px solid #e4e8ee;
+}
+
+.batch-analysis-error {
+  color: #8a1f11;
+}
+
+.batch-analysis-skips {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+
+.batch-analysis-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.tree-context-menu {
+  position: fixed;
+  z-index: 40;
+  min-width: 16rem;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid #c5ccd6;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(20, 30, 50, 0.18);
+}
+
+.tree-context-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+
+.tree-context-menu button:hover:not(:disabled) {
+  background: #e8f0fa;
+}
+
+.tree-context-menu button:disabled {
+  color: #888;
+}
+
 .learned-senders-list {
   list-style: none;
   margin: 0;
@@ -1692,8 +1833,7 @@ button:disabled {
 .main-workbench {
   min-width: 0;
   min-height: 0;
-  height: auto;
-  max-height: none;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
@@ -1763,6 +1903,7 @@ button:disabled {
   flex: 1;
   min-height: 0;
   min-width: 0;
+  overflow: hidden;
   position: relative;
 }
 
@@ -1786,6 +1927,12 @@ button:disabled {
   height: 100%;
   max-height: none;
   margin-bottom: 0;
+}
+
+.main-workbench .main-view-panel > .tree-panel {
+  height: auto;
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .insight-view-header h2 {

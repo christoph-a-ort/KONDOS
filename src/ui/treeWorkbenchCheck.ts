@@ -37,6 +37,8 @@ import { runVirtualPlanEditorCheck } from "./virtualPlanEditorCheck";
 import { runVirtualPlanDryRunCheck } from "./virtualPlanDryRunCheck";
 import { runVirtualPlanExecutionCheck } from "./virtualPlanExecutionCheck";
 import { runTreeWorkbenchMoveCheck } from "./treeWorkbenchMoveCheck";
+import { runTreeMultiSelectCheck } from "./treeMultiSelectCheck";
+import { runBatchAnalysisCheck } from "./batchAnalysisCheck";
 import { runTreeWorkbenchRenameCheck } from "./treeWorkbenchRenameCheck";
 import { runScanIdentityMetadataCheck } from "./scanIdentityMetadataCheck";
 import { runVirtualPlanReservationAdminCheck } from "./virtualPlanReservationAdminCheck";
@@ -493,4 +495,7 @@ function runTreeSearchCheck(nested: DirectoryNode): void {
     visibleIds(searchRoot, [...revealed]).includes("C:/Hausverwaltung/Herrsching/Notiz.txt"),
     "revealed match becomes visible",
   );
+
+  runTreeMultiSelectCheck();
+  runBatchAnalysisCheck();
 }

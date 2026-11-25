@@ -34,6 +34,26 @@ import { ExportPanel } from "./ui/ExportPanel";
 import { ProgressPanel } from "./ui/ProgressPanel";
 import { withScanRootPath } from "./ui/displayFilter";
 import { TreeView } from "./ui/TreeView";
+import { BatchAnalysisPanel, BatchAnalysisProgress } from "./ui/BatchAnalysisPanel";
+import {
+  BATCH_STEP_CANCELLING,
+  captureBatchSelection,
+  completeBatchResults,
+  waitingResult,
+  type BatchDocumentResult,
+  type BatchProgress,
+  type BatchSkip,
+} from "./ui/batchAnalysis";
+import type { LogicalDocument } from "./ui/batchDocument";
+import { runBatchAnalysis } from "./ui/batchAnalysisRun";
+import { inspectDocumentText } from "./ui/documentTextApi";
+import { hydrateLearnedSenderStore } from "./ui/learnedSenders";
+import { loadLearnedSendersJson, saveLearnedSendersJson } from "./ui/learnedSendersApi";
+import { createLocalAiClient, loadLocalAiPrefsJson, saveLocalAiPrefsJson } from "./ui/localAiApi";
+import { hydrateLocalAiPrefs } from "./ui/localAi";
+import { hydrateNamingRuleStore } from "./ui/namingRules";
+import { loadNamingRulesJson, saveNamingRulesJson } from "./ui/namingRulesApi";
+import { findNodeById } from "./ui/treeRows";
 import {
   StructureInsightsView,
   AUTOSORT_NAV_LABEL,
@@ -266,6 +286,16 @@ function App() {
   }, []);
   const pendingRevealNodeIdRef = useRef<string | null>(null);
   const workbenchMoveBusyRef = useRef(false);
+  const batchBusyRef = useRef(false);
+  const batchRunIdRef = useRef(0);
+  const batchCancelRef = useRef(false);
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchPanelOpen, setBatchPanelOpen] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null);
+  const [batchResults, setBatchResults] = useState<BatchDocumentResult[]>([]);
+  const [batchSkipped, setBatchSkipped] = useState<BatchSkip[]>([]);
+  const [batchDocuments, setBatchDocuments] = useState<LogicalDocument[]>([]);
+  const [batchListRunId, setBatchListRunId] = useState(0);
   const lastAutosortViewRef = useRef<MainView>("insights");
   const navRequestIdRef = useRef(0);
   const handleDroppedPathsRef = useRef<(paths: string[]) => void>(() => {});
@@ -751,7 +781,8 @@ function App() {
       scanLockRef.current ||
       exportBusyRef.current ||
       scanningRef.current ||
-      preparingContentRef.current
+      preparingContentRef.current ||
+      batchBusyRef.current
     ) {
       return;
     }
@@ -997,7 +1028,8 @@ function App() {
       scanLockRef.current ||
       scanningRef.current ||
       exportBusyRef.current ||
-      preparingContentRef.current
+      preparingContentRef.current ||
+      batchBusyRef.current
     ) {
       return;
     }
@@ -1027,6 +1059,124 @@ function App() {
     }
   }
 
+  async function handleBatchAnalyze(nodes: FsNode[]) {
+    if (
+      batchBusyRef.current ||
+      result === null ||
+      resultScanId === null ||
+      scanLockRef.current ||
+      scanningRef.current ||
+      exportBusyRef.current ||
+      preparingContentRef.current ||
+      workbenchMoveBusyRef.current
+    ) {
+      return;
+    }
+    const runId = batchRunIdRef.current + 1;
+    batchRunIdRef.current = runId;
+    batchCancelRef.current = false;
+    const capture = captureBatchSelection(runId, nodes);
+    batchBusyRef.current = capture.documents.length > 0;
+    setBatchBusy(capture.documents.length > 0);
+    setBatchPanelOpen(true);
+    setBatchSkipped(capture.skipped);
+    setBatchDocuments(capture.documents);
+    setBatchListRunId(runId);
+    setBatchResults(capture.documents.map((document) => waitingResult(runId, document)));
+    setBatchProgress(
+      capture.documents.length === 0
+        ? null
+        : {
+            runId,
+            total: capture.documents.length,
+            processed: 0,
+            currentName: capture.documents[0]?.file.name ?? null,
+            step: "Dokumentinhalt wird gelesen …",
+            cancelling: false,
+          },
+    );
+    if (capture.documents.length === 0) {
+      return;
+    }
+    const scanRoot = result.root.path;
+    const root = result.root;
+    const scanId = resultScanId;
+    const namingStore = isTauriRuntime()
+      ? { load: () => loadNamingRulesJson(), save: (json: string) => saveNamingRulesJson(json) }
+      : null;
+    const learnedStore = isTauriRuntime()
+      ? { load: () => loadLearnedSendersJson(), save: (json: string) => saveLearnedSendersJson(json) }
+      : null;
+    const prefsStore = isTauriRuntime()
+      ? { load: () => loadLocalAiPrefsJson(), save: (json: string) => saveLocalAiPrefsJson(json) }
+      : null;
+    try {
+      const [rules, learned, aiPrefs] = await Promise.all([
+        hydrateNamingRuleStore(namingStore),
+        hydrateLearnedSenderStore(learnedStore),
+        hydrateLocalAiPrefs(prefsStore),
+      ]);
+      if (runId !== batchRunIdRef.current) {
+        return;
+      }
+      let next: BatchDocumentResult[] = [];
+      next = await runBatchAnalysis({
+        runId,
+        documents: capture.documents,
+        skipped: capture.skipped,
+        scanRoot,
+        root,
+        deps: {
+          inspect: (nodeId) => inspectDocumentText(scanId, nodeId),
+          findNode: (nodeId) => findNodeById(root, nodeId),
+          rules: rules.rules,
+          learned,
+          aiPrefs,
+          aiClient: isTauriRuntime() ? createLocalAiClient() : null,
+        },
+        shouldStop: () => batchCancelRef.current || runId !== batchRunIdRef.current,
+        isCurrentRun: (id) => id === batchRunIdRef.current,
+        onProgress: (progress) => {
+          if (progress.runId !== batchRunIdRef.current) {
+            return;
+          }
+          setBatchProgress(
+            batchCancelRef.current
+              ? { ...progress, cancelling: true, step: BATCH_STEP_CANCELLING }
+              : progress,
+          );
+        },
+      });
+      if (runId !== batchRunIdRef.current) {
+        return;
+      }
+      setBatchResults(completeBatchResults(runId, capture.documents, next));
+    } catch (cause) {
+      if (runId !== batchRunIdRef.current) {
+        return;
+      }
+      setBatchResults(completeBatchResults(runId, capture.documents, []));
+      setWorkbenchNotice(toUserError(cause));
+      setWorkbenchNoticeKind("failed");
+    } finally {
+      if (runId === batchRunIdRef.current) {
+        batchBusyRef.current = false;
+        setBatchBusy(false);
+        setBatchProgress(null);
+      }
+    }
+  }
+
+  function requestBatchCancel() {
+    if (!batchBusyRef.current || batchCancelRef.current) {
+      return;
+    }
+    batchCancelRef.current = true;
+    setBatchProgress((current) =>
+      current === null ? current : { ...current, cancelling: true, step: BATCH_STEP_CANCELLING },
+    );
+  }
+
   async function handleWorkbenchFolderSuggestApply(
     plan: FolderSuggestExecutePlan,
     source: FsNode,
@@ -1036,7 +1186,7 @@ function App() {
       scanLocked: scanLockRef.current,
       scanning: scanningRef.current,
       exportBusy: exportBusyRef.current,
-      preparingContent: preparingContentRef.current,
+      preparingContent: preparingContentRef.current || batchBusyRef.current,
     });
     if (occupancyReason !== null) {
       const reason =
@@ -1102,7 +1252,7 @@ function App() {
       scanLocked: scanLockRef.current,
       scanning: scanningRef.current,
       exportBusy: exportBusyRef.current,
-      preparingContent: preparingContentRef.current,
+      preparingContent: preparingContentRef.current || batchBusyRef.current,
     });
     if (occupancyReason !== null) {
       setWorkbenchNotice(occupancyReason);
@@ -1233,7 +1383,7 @@ function App() {
             config={config}
             extensionInput={extensionInput}
             scanning={scanning}
-            locked={exportBusy || preparingContent}
+            locked={exportBusy || preparingContent || batchBusy}
             onConfigChange={setConfig}
             onExtensionInputChange={setExtensionInput}
             onPickDirectory={() => {
@@ -1250,7 +1400,7 @@ function App() {
           <ProgressPanel scanning={scanning} progress={progress} />
           <ExportPanel
             format={exportFormat}
-            disabled={result === null || resultScanId === null || scanning || preparingContent}
+            disabled={result === null || resultScanId === null || scanning || preparingContent || batchBusy}
             busy={exportBusy}
             onFormatChange={setExportFormat}
             onCopy={() => {
@@ -1335,6 +1485,11 @@ function App() {
               </button>
             </div>
           ) : null}
+          <BatchAnalysisProgress
+            busy={batchBusy}
+            progress={batchProgress}
+            onCancel={requestBatchCancel}
+          />
           <div className="main-view-panels">
             <div
               className={
@@ -1373,6 +1528,22 @@ function App() {
                   setWorkbenchNoticeKind("blocked");
                 }}
                 onWorkbenchFolderSuggestApply={handleWorkbenchFolderSuggestApply}
+                batchAnalysisBusy={batchBusy}
+                onBatchAnalyze={(nodes) => {
+                  void handleBatchAnalyze(nodes);
+                }}
+              />
+              <BatchAnalysisPanel
+                open={batchPanelOpen && !batchBusy}
+                runId={batchListRunId}
+                documents={batchDocuments}
+                results={batchResults}
+                skipped={batchSkipped}
+                onClose={() => {
+                  if (!batchBusyRef.current) {
+                    setBatchPanelOpen(false);
+                  }
+                }}
               />
             </div>
             {insightsSelectable ? (

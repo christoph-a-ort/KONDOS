@@ -121,6 +121,14 @@ import { canSuggestWorkbenchFolder } from "./treeWorkbenchFolderSuggest";
 import type { FolderSuggestApplyResult, FolderSuggestExecutePlan } from "./treeWorkbenchFolderSuggestApply";
 import { FolderSuggestDialog } from "./FolderSuggestDialog";
 import { NameSuggestDialog } from "./NameSuggestDialog";
+import { BATCH_ACTION_LABEL } from "./batchAnalysis";
+import { isSupportedBatchFileName } from "./batchDocument";
+import {
+  emptyTreeSelection,
+  nextTreeSelection,
+  singleTreeSelection,
+  type TreeSelectionState,
+} from "./treeMultiSelect";
 
 interface TreeViewProps {
   result: ScanResult | null;
@@ -153,6 +161,8 @@ interface TreeViewProps {
     plan: FolderSuggestExecutePlan,
     source: FsNode,
   ) => Promise<FolderSuggestApplyResult>;
+  batchAnalysisBusy?: boolean;
+  onBatchAnalyze?: (nodes: FsNode[]) => void;
 }
 
 export function TreeView({
@@ -178,6 +188,8 @@ export function TreeView({
   onWorkbenchFileRename,
   onWorkbenchRenameIssue,
   onWorkbenchFolderSuggestApply,
+  batchAnalysisBusy = false,
+  onBatchAnalyze,
 }: TreeViewProps) {
   if (result === null) {
     return (
@@ -264,6 +276,8 @@ export function TreeView({
       onWorkbenchFileRename={onWorkbenchFileRename}
       onWorkbenchRenameIssue={onWorkbenchRenameIssue}
       onWorkbenchFolderSuggestApply={onWorkbenchFolderSuggestApply}
+      batchAnalysisBusy={batchAnalysisBusy}
+      onBatchAnalyze={onBatchAnalyze}
     />
   );
 }
@@ -296,6 +310,8 @@ interface PopulatedTreeViewProps {
     plan: FolderSuggestExecutePlan,
     source: FsNode,
   ) => Promise<FolderSuggestApplyResult>;
+  batchAnalysisBusy?: boolean;
+  onBatchAnalyze?: (nodes: FsNode[]) => void;
 }
 
 function PopulatedTreeView({
@@ -321,10 +337,14 @@ function PopulatedTreeView({
   onWorkbenchFileRename,
   onWorkbenchRenameIssue,
   onWorkbenchFolderSuggestApply,
+  batchAnalysisBusy = false,
+  onBatchAnalyze,
 }: PopulatedTreeViewProps) {
   const [expandedIds, setExpandedIds] = useState(() => defaultExpandedIds(result.root.id));
   const [activeResult, setActiveResult] = useState(result);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selection, setSelection] = useState<TreeSelectionState>(emptyTreeSelection);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(0);
@@ -379,6 +399,8 @@ function PopulatedTreeView({
     setActiveResult(result);
     setExpandedIds(defaultExpandedIds(result.root.id));
     setSelectedId(null);
+    setSelection(emptyTreeSelection());
+    setContextMenu(null);
     setScrollTop(0);
     setMenuOpen(false);
     setSearchQuery(emptySearchQuery());
@@ -527,7 +549,7 @@ function PopulatedTreeView({
       return;
     }
     if (viewRoot === null || !nodeVisibleInDisplayTree(viewRoot, selectedId)) {
-      setSelectedId(null);
+      applySingleSelection(null);
     }
   }, [viewRoot, selectedId]);
 
@@ -539,7 +561,7 @@ function PopulatedTreeView({
   const occupancyIdle = isOccupancyIdle({
     scanning,
     exportBusy,
-    preparingContent: contentSearch.preparing,
+    preparingContent: contentSearch.preparing || batchAnalysisBusy,
   });
   const canOpenFile = canOpenWithDefault({
     hasCurrentScan: resultScanId !== null,
@@ -547,6 +569,28 @@ function PopulatedTreeView({
     occupancyIdle,
   });
   occupancyIdleRef.current = occupancyIdle;
+
+  useEffect(() => {
+    if (contextMenu === null) {
+      return;
+    }
+    function closeMenu() {
+      setContextMenu(null);
+    }
+    function onKey(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        closeMenu();
+      }
+    }
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [contextMenu]);
   onWorkbenchFileMoveRef.current = onWorkbenchFileMove;
   treeRootRef.current = viewRoot ?? result.root;
   scanRootPathRef.current = result.root.path;
@@ -638,6 +682,9 @@ function PopulatedTreeView({
     if (event.button !== 0) {
       return;
     }
+    if (event.ctrlKey || event.metaKey || event.shiftKey) {
+      return;
+    }
     if (renameId !== null) {
       return;
     }
@@ -673,7 +720,7 @@ function PopulatedTreeView({
     dragSessionRef.current = null;
     setDraggingId(null);
     setDropTargetId(null);
-    setSelectedId(node.id);
+    applySingleSelection(node.id);
     setRenameId(node.id);
     setRenameDraft(node.name);
   }
@@ -743,19 +790,61 @@ function PopulatedTreeView({
     toggleExpanded(id);
   }
 
+  function applySingleSelection(id: string | null) {
+    setSelectedId(id);
+    setSelection(id === null ? emptyTreeSelection() : singleTreeSelection(id));
+    setContextMenu(null);
+  }
+
   function clearSelectionFromPointer() {
-    setSelectedId(null);
+    applySingleSelection(null);
     setWarningNotice(null);
     setWarningOfferReset(false);
   }
 
-  function handleRowClick(row: VisibleTreeRow) {
+  function handleRowClick(row: VisibleTreeRow, event: MouseEvent<HTMLDivElement>) {
     if (renameId !== null && renameId !== row.id) {
       cancelFileRename();
     }
-    setSelectedId(row.id);
+    const next = nextTreeSelection({
+      rowIds: rows.map((item) => item.id),
+      selectedIds: selection.selectedIds,
+      anchorId: selection.anchorId,
+      clickedId: row.id,
+      ctrlKey: event.ctrlKey || event.metaKey,
+      shiftKey: event.shiftKey,
+    });
+    setSelection(next);
+    setSelectedId(
+      next.selectedIds.includes(row.id) ? row.id : next.selectedIds[next.selectedIds.length - 1] ?? null,
+    );
+    setContextMenu(null);
     setWarningNotice(null);
     setWarningOfferReset(false);
+  }
+
+  function handleRowContextMenu(row: VisibleTreeRow, event: MouseEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (renameId !== null) {
+      return;
+    }
+    if (!selection.selectedIds.includes(row.id)) {
+      applySingleSelection(row.id);
+    }
+    setContextMenu({ x: event.clientX, y: event.clientY });
+  }
+
+  function selectedNodesForBatch(): FsNode[] {
+    const ids = selection.selectedIds.length > 0 ? selection.selectedIds : selectedId === null ? [] : [selectedId];
+    const nodes: FsNode[] = [];
+    for (const id of ids) {
+      const node = findNodeById(result.root, id);
+      if (node !== undefined) {
+        nodes.push(node);
+      }
+    }
+    return nodes;
   }
 
   function handleRowDoubleClick(row: VisibleTreeRow) {
@@ -796,7 +885,7 @@ function PopulatedTreeView({
 
   function handleCollapseAll() {
     setExpandedIds(collapseAllExpandedIds());
-    setSelectedId(selectedIdAfterCollapseAll(result.root.id));
+    applySingleSelection(selectedIdAfterCollapseAll(result.root.id));
     queueMicrotask(() => scrollRowIntoView(result.root.id));
   }
 
@@ -833,7 +922,7 @@ function PopulatedTreeView({
       selectedId !== null &&
       (nextView.tree === null || !nodeVisibleInDisplayTree(nextView.tree, selectedId))
     ) {
-      setSelectedId(null);
+      applySingleSelection(null);
     }
   }
 
@@ -881,7 +970,7 @@ function PopulatedTreeView({
     setExpandedIds((current) =>
       withAncestorsExpanded(current, ancestorDirectoryIds(rootForAncestors, id)),
     );
-    setSelectedId(id);
+    applySingleSelection(id);
     pendingRevealRef.current = id;
   }
 
@@ -922,7 +1011,7 @@ function PopulatedTreeView({
       return;
     }
     setExpandedIds((current) => withAncestorsExpanded(current, jump.ancestorIds));
-    setSelectedId(jump.targetId);
+    applySingleSelection(jump.targetId);
     pendingRevealRef.current = jump.targetId;
   }
 
@@ -1060,7 +1149,7 @@ function PopulatedTreeView({
       event.preventDefault();
       const nextIndex = Math.min(rows.length - 1, Math.max(0, currentIndex + 1));
       const nextId = rows[nextIndex].id;
-      setSelectedId(nextId);
+      applySingleSelection(nextId);
       scrollRowIntoView(nextId);
       return;
     }
@@ -1068,7 +1157,7 @@ function PopulatedTreeView({
       event.preventDefault();
       const nextIndex = Math.max(0, currentIndex <= 0 ? 0 : currentIndex - 1);
       const nextId = rows[nextIndex].id;
-      setSelectedId(nextId);
+      applySingleSelection(nextId);
       scrollRowIntoView(nextId);
       return;
     }
@@ -1082,7 +1171,7 @@ function PopulatedTreeView({
       if (row.expandable && expandedIds.has(row.id) && currentIndex + 1 < rows.length) {
         event.preventDefault();
         const child = rows[currentIndex + 1];
-        setSelectedId(child.id);
+        applySingleSelection(child.id);
         scrollRowIntoView(child.id);
       }
       return;
@@ -1098,7 +1187,7 @@ function PopulatedTreeView({
         event.preventDefault();
         for (let index = currentIndex - 1; index >= 0; index -= 1) {
           if (rows[index].depth === row.depth - 1) {
-            setSelectedId(rows[index].id);
+            applySingleSelection(rows[index].id);
             scrollRowIntoView(rows[index].id);
             break;
           }
@@ -1475,7 +1564,7 @@ function PopulatedTreeView({
                   columns={columns}
                   gridTemplate={gridTemplate}
                   expanded={row.directory && expandedIds.has(row.id)}
-                  selected={selectedId === row.id}
+                  selected={selection.selectedIds.includes(row.id) || selectedId === row.id}
                   match={matchIdSet.has(row.id)}
                   currentMatch={row.id === currentMatchId}
                   insightCount={insightCount}
@@ -1484,13 +1573,14 @@ function PopulatedTreeView({
                   dropTarget={dropTargetId === row.id}
                   renaming={renameId === row.id}
                   renameValue={renameId === row.id ? renameDraft : row.node.name}
-                  onSelect={() => {
+                  onSelect={(event) => {
                     if (suppressClickRef.current) {
                       suppressClickRef.current = false;
                       return;
                     }
-                    handleRowClick(row);
+                    handleRowClick(row, event);
                   }}
+                  onContextMenu={(event) => handleRowContextMenu(row, event)}
                   onDoubleClick={() => handleRowDoubleClick(row)}
                   onTwist={(event) => handleTwistClick(event, row.id)}
                   onPointerDown={(event) => handleFilePointerDown(event, row)}
@@ -1578,6 +1668,33 @@ function PopulatedTreeView({
           }
         }}
       />
+      {contextMenu !== null && onBatchAnalyze !== undefined ? (
+        <div className="tree-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} role="menu">
+          <button
+            type="button"
+            role="menuitem"
+            disabled={
+              !occupancyIdle ||
+              resultScanId === null ||
+              selectedNodesForBatch().every((node) => !isFile(node) || !isSupportedBatchFileName(node.name))
+            }
+            title={
+              !occupancyIdle
+                ? "Die Arbeitsfläche ist gerade beschäftigt."
+                : selectedNodesForBatch().every((node) => !isFile(node) || !isSupportedBatchFileName(node.name))
+                  ? "Bitte unterstützte Dateien auswählen. Ordner werden nicht analysiert."
+                  : BATCH_ACTION_LABEL
+            }
+            onClick={() => {
+              const nodes = selectedNodesForBatch();
+              setContextMenu(null);
+              onBatchAnalyze(nodes);
+            }}
+          >
+            {BATCH_ACTION_LABEL}
+          </button>
+        </div>
+      ) : null}
       <NameSuggestDialog
         open={nameSuggestOpen}
         scanId={resultScanId}
@@ -1666,7 +1783,8 @@ interface VirtualTreeRowProps {
   dropTarget: boolean;
   renaming: boolean;
   renameValue: string;
-  onSelect: () => void;
+  onSelect: (event: MouseEvent<HTMLDivElement>) => void;
+  onContextMenu: (event: MouseEvent<HTMLDivElement>) => void;
   onDoubleClick: () => void;
   onTwist: (event: MouseEvent<HTMLButtonElement>) => void;
   onPointerDown: (event: PointerEvent<HTMLDivElement>) => void;
@@ -1691,6 +1809,7 @@ function VirtualTreeRow({
   renaming,
   renameValue,
   onSelect,
+  onContextMenu,
   onDoubleClick,
   onTwist,
   onPointerDown,
@@ -1754,6 +1873,7 @@ function VirtualTreeRow({
       style={{ gridTemplateColumns: gridTemplate, height: ROW_HEIGHT }}
       {...{ [WORKBENCH_TREE_ROW_ID_ATTR]: row.id }}
       onClick={onSelect}
+      onContextMenu={onContextMenu}
       onDoubleClick={onDoubleClick}
       onPointerDown={onPointerDown}
     >
